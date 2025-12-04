@@ -6,3 +6,4 @@ images.db
 dist/
 .DS_Store
 thumbs.db
+public/thumbnails/
