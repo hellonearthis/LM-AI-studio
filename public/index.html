@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Analysis Studio</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <nav class="sidebar">
+        <div class="sidebar-header">
+            <h1>Lumina</h1>
+            <div class="sidebar-subtitle">AI Image Analysis</div>
+        </div>
+        <div class="sidebar-nav">
+            <a href="index.html" class="nav-item active">
+                <span class="nav-icon">✨</span> Analysis
+            </a>
+            <a href="database.html" class="nav-item">
+                <span class="nav-icon">🗄️</span> Database
+            </a>
+            <a href="search.html" class="nav-item">
+                <span class="nav-icon">🔍</span> Search
+            </a>
+        </div>
+
+        <!-- Status Section -->
+        <div id="sidebarStatus" class="sidebar-status" style="display: none;">
+            <div class="status-label">Status:</div>
+            <div class="status-item status-processed">processed <span id="statProcessed">0</span> files</div>
+            <div class="status-item status-added">added: <span id="statAdded">0</span></div>
+            <div class="status-item status-updated">updated: <span id="statUpdated">0</span></div>
+            <div class="status-item status-existing">existing: <span id="statExisting">0</span></div>
+            <div class="status-item status-errors">errors: <span id="statErrors">0</span></div>
+        </div>
+    </nav>
+
+    <div class="main-wrapper">
+        <div class="container">
+            <header>
+                <h1>New Analysis</h1>
+                <p>Upload an image to extract metadata and generate AI insights.</p>
+            </header>
+
+            <div class="upload-section">
+                <div style="display: flex; gap: 1rem; width: 100%;">
+                    <div class="file-select-btn" id="selectFileBtn" style="flex: 1; margin-bottom: 0;">
+                        <div class="fake-btn">Choose Image</div>
+                        <span class="file-msg" id="fileMsg">No file selected</span>
+                    </div>
+                    <div class="file-select-btn" id="selectFolderBtn" style="flex: 1; margin-bottom: 0;">
+                        <div class="fake-btn">Load Folder</div>
+                        <span class="file-msg">Batch Process</span>
+                    </div>
+                </div>
+
+                <!-- Progress Bar (Hidden by default) -->
+                <div id="progressContainer" class="progress-container" style="display: none;">
+                    <div class="progress-header">
+                        <span id="progressText">Processing...</span>
+                        <span id="progressPercent">0%</span>
+                    </div>
+                    <div class="progress-bar-bg">
+                        <div id="progressBar" class="progress-bar-fill" style="width: 0%"></div>
+                    </div>
+                    <div id="currentFile" class="current-file"></div>
+                </div>
+
+                <div id="statusArea" class="status-area"></div>
+            </div>
+
+            <div class="results-container" id="resultsContainer" style="display: none;">
+                <div class="preview-container">
+                    <img id="previewImg" src="" alt="Preview">
+                </div>
+
+                <div class="analysis-grid">
+                    <!-- Metadata Card -->
+                    <div class="card">
+                        <h2>Metadata</h2>
+                        <div id="metadataOutput"></div>
+                    </div>
+
+                    <!-- AI Analysis Card -->
+                    <div class="card">
+                        <h2>AI Analysis</h2>
+                        <div id="analysisOutput"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
