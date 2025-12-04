@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Search - Image Analysis Studio</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <nav class="sidebar">
+        <div class="sidebar-header">
+            <h1>Lumina</h1>
+            <div class="sidebar-subtitle">AI Image Analysis</div>
+        </div>
+        <div class="sidebar-nav">
+            <a href="index.html" class="nav-item">
+                <span class="nav-icon">✨</span> Analysis
+            </a>
+            <a href="database.html" class="nav-item">
+                <span class="nav-icon">🗄️</span> Database
+            </a>
+            <a href="search.html" class="nav-item active">
+                <span class="nav-icon">🔍</span> Search
+            </a>
+        </div>
+    </nav>
+
+    <div class="main-wrapper">
+        <div class="container">
+            <header>
+                <h1>Search</h1>
+                <p>Find images by content, tags, or metadata.</p>
+            </header>
+
+            <div class="card" style="margin-bottom: 2rem;">
+                <div class="filters-container" style="display: grid; gap: 1.5rem;">
+                    <!-- Text Search -->
+                    <div class="filter-section">
+                        <label
+                            style="display: block; margin-bottom: 0.5rem; color: var(--text-secondary);">Keywords</label>
+                        <input type="text" id="searchQuery" placeholder="Search descriptions, objects..."
+                            style="width: 100%; padding: 0.75rem; background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);">
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+                        <!-- Scene Type -->
+                        <div class="filter-section">
+                            <label style="display: block; margin-bottom: 0.5rem; color: var(--text-secondary);">Scene
+                                Type</label>
+                            <select id="sceneType"
+                                style="width: 100%; padding: 0.75rem; background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);">
+                                <option value="all">All Types</option>
+                                <option value="portrait">Portrait</option>
+                                <option value="landscape">Landscape</option>
+                                <option value="cityscape">Cityscape</option>
+                                <option value="nature">Nature</option>
+                                <option value="indoor">Indoor</option>
+                                <option value="product">Product</option>
+                                <option value="abstract">Abstract</option>
+                            </select>
+                        </div>
+
+                        <!-- Date Range -->
+                        <div class="filter-section">
+                            <label style="display: block; margin-bottom: 0.5rem; color: var(--text-secondary);">Date
+                                Range</label>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <input type="date" id="startDate"
+                                    style="flex: 1; padding: 0.75rem; background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);">
+                                <input type="date" id="endDate"
+                                    style="flex: 1; padding: 0.75rem; background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);">
+                            </div>
+                        </div>
+                    </div>
+
+                    <button id="searchBtn"
+                        style="background: var(--accent); color: white; border: none; padding: 0.75rem; border-radius: 6px; cursor: pointer; font-weight: 600;">Search
+                        Images</button>
+                </div>
+            </div>
+
+            <div id="resultsCount" style="margin-bottom: 1rem; color: var(--text-secondary);"></div>
+            <div id="searchResults" class="analysis-grid"></div>
+        </div>
+    </div>
+
+    <script src="search.js"></script>
+</body>
+
+</html>

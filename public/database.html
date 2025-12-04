@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Database - Image Analysis Studio</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <nav class="sidebar">
+        <div class="sidebar-header">
+            <h1>Lumina</h1>
+            <div class="sidebar-subtitle">AI Image Analysis</div>
+        </div>
+        <div class="sidebar-nav">
+            <a href="index.html" class="nav-item">
+                <span class="nav-icon">✨</span> Analysis
+            </a>
+            <a href="database.html" class="nav-item active">
+                <span class="nav-icon">🗄️</span> Database
+            </a>
+            <a href="search.html" class="nav-item">
+                <span class="nav-icon">🔍</span> Search
+            </a>
+        </div>
+    </nav>
+
+    <div class="main-wrapper">
+        <div class="container">
+            <header style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h1>Database</h1>
+                    <p>View and manage your analyzed images.</p>
+                </div>
+                <div
+                    style="background: var(--card-bg); padding: 0.5rem 1rem; border-radius: 8px; border: 1px solid var(--border);">
+                    <span style="color: var(--text-secondary);">Total Entries:</span>
+                    <span id="dbCount" style="font-weight: bold; color: var(--accent); margin-left: 0.5rem;">0</span>
+                </div>
+            </header>
+
+            <div id="loadingDb" style="text-align: center; padding: 2rem; color: var(--text-secondary);">
+                Loading database...
+            </div>
+
+            <div id="dbGrid" class="analysis-grid">
+                <!-- Database entries will be injected here -->
+            </div>
+        </div>
+    </div>
+
+    <script src="database.js"></script>
+</body>
+
+</html>
