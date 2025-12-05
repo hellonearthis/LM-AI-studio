@@ -90,13 +90,58 @@ function displayResults(images) {
                 </p>
                 
                 <div class="tags-container">
-                    ${objects.slice(0, 5).map(obj => `<span class="tag" style="font-size: 0.75rem; background-color: rgba(129, 140, 248, 0.2); color: #818cf8;">${obj}</span>`).join('')}
-                    ${tags.slice(0, 5).map(tag => `<span class="tag" style="font-size: 0.75rem;">#${tag}</span>`).join('')}
+                    ${objects.slice(0, 5).map(obj => `<span class="tag" style="font-size: 0.75rem; background-color: rgba(16, 185, 129, 0.2); color: #34d399;">${obj}</span>`).join('')}
+                    ${tags.slice(0, 5).map(tag => `<span class="tag" style="font-size: 0.75rem;">${tag}</span>`).join('')}
                 </div>
             </div>
         `;
     }).join('');
 }
+
+// Load Stats
+async function loadStats() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/stats`);
+        if (!response.ok) throw new Error('Failed to fetch stats');
+
+        const stats = await response.json();
+
+        // Render Tags
+        const topTagsList = document.getElementById('topTagsList');
+        if (stats.tags.length === 0) {
+            topTagsList.innerHTML = '<span style="color: var(--text-secondary); font-size: 0.9rem;">No tags found</span>';
+        } else {
+            topTagsList.innerHTML = stats.tags.slice(0, 20).map(tag => `
+                <span class="tag" style="cursor: pointer;" onclick="setSearchQuery('${tag.name}')">
+                    #${tag.name} <span style="opacity: 0.6; font-size: 0.8em;">(${tag.count})</span>
+                </span>
+            `).join('');
+        }
+
+        // Render Objects
+        const topObjectsList = document.getElementById('topObjectsList');
+        if (stats.objects.length === 0) {
+            topObjectsList.innerHTML = '<span style="color: var(--text-secondary); font-size: 0.9rem;">No objects found</span>';
+        } else {
+            topObjectsList.innerHTML = stats.objects.slice(0, 20).map(obj => `
+                <span class="tag" style="background-color: rgba(16, 185, 129, 0.2); color: #34d399; cursor: pointer;" onclick="setSearchQuery('${obj.name}')">
+                    ${obj.name} <span style="opacity: 0.6; font-size: 0.8em;">(${obj.count})</span>
+                </span>
+            `).join('');
+        }
+
+    } catch (error) {
+        console.error('Error loading stats:', error);
+        document.getElementById('topTagsList').innerHTML = '<span style="color: var(--text-secondary);">Error loading tags</span>';
+        document.getElementById('topObjectsList').innerHTML = '<span style="color: var(--text-secondary);">Error loading objects</span>';
+    }
+}
+
+// Helper to set search query from tag click
+window.setSearchQuery = (term) => {
+    searchQuery.value = term;
+    performSearch();
+};
 
 // Event Listeners
 searchBtn.addEventListener('click', performSearch);
@@ -105,3 +150,6 @@ searchBtn.addEventListener('click', performSearch);
 searchQuery.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') performSearch();
 });
+
+// Initialize
+loadStats();

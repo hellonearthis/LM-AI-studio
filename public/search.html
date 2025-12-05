@@ -29,43 +29,46 @@
     </nav>
 
     <div class="main-wrapper">
-        <div class="container">
-            <header>
-                <h1>Search</h1>
-                <p>Find images by content, tags, or metadata.</p>
-            </header>
+        <div class="container" style="display: flex; align-items: flex-start; max-width: 100%; padding: 2rem;">
+            <!-- Main Content -->
+            <div style="flex: 1; min-width: 0;">
+                <div style="margin-bottom: 2rem;">
+                    <h2 style="font-size: 1.5rem; margin-bottom: 0.5rem;">Search Database</h2>
+                    <p>Find images by content, tags, or metadata.</p>
+                </div>
 
-            <div class="card" style="margin-bottom: 2rem;">
-                <div class="filters-container" style="display: grid; gap: 1.5rem;">
-                    <!-- Text Search -->
-                    <div class="filter-section">
-                        <label
-                            style="display: block; margin-bottom: 0.5rem; color: var(--text-secondary);">Keywords</label>
-                        <input type="text" id="searchQuery" placeholder="Search descriptions, objects..."
-                            style="width: 100%; padding: 0.75rem; background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);">
-                    </div>
+                <!-- Search Controls -->
+                <div class="card" style="margin-bottom: 2rem;">
+                    <div class="filters-container" style="display: grid; gap: 1.5rem;">
+                        <!-- Text Search -->
+                        <div class="filter-section">
+                            <label
+                                style="display: block; margin-bottom: 0.5rem; color: var(--text-secondary); font-size: 0.9rem;">Keywords</label>
+                            <input type="text" id="searchQuery" placeholder="Search descriptions, objects..."
+                                style="width: 100%; padding: 0.75rem; background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);">
+                        </div>
 
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
                         <!-- Scene Type -->
                         <div class="filter-section">
-                            <label style="display: block; margin-bottom: 0.5rem; color: var(--text-secondary);">Scene
+                            <label
+                                style="display: block; margin-bottom: 0.5rem; color: var(--text-secondary); font-size: 0.9rem;">Scene
                                 Type</label>
                             <select id="sceneType"
                                 style="width: 100%; padding: 0.75rem; background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);">
                                 <option value="all">All Types</option>
+                                <option value="indoor">Indoor</option>
+                                <option value="outdoor">Outdoor</option>
                                 <option value="portrait">Portrait</option>
                                 <option value="landscape">Landscape</option>
-                                <option value="cityscape">Cityscape</option>
+                                <option value="urban">Urban</option>
                                 <option value="nature">Nature</option>
-                                <option value="indoor">Indoor</option>
-                                <option value="product">Product</option>
-                                <option value="abstract">Abstract</option>
                             </select>
                         </div>
 
                         <!-- Date Range -->
                         <div class="filter-section">
-                            <label style="display: block; margin-bottom: 0.5rem; color: var(--text-secondary);">Date
+                            <label
+                                style="display: block; margin-bottom: 0.5rem; color: var(--text-secondary); font-size: 0.9rem;">Date
                                 Range</label>
                             <div style="display: flex; gap: 0.5rem;">
                                 <input type="date" id="startDate"
@@ -76,14 +79,41 @@
                         </div>
                     </div>
 
-                    <button id="searchBtn"
-                        style="background: var(--accent); color: white; border: none; padding: 0.75rem; border-radius: 6px; cursor: pointer; font-weight: 600;">Search
-                        Images</button>
+                    <div style="margin-top: 1.5rem; display: flex; justify-content: flex-end;">
+                        <button id="searchBtn"
+                            style="background-color: var(--accent); color: white; border: none; padding: 0.75rem 2rem; border-radius: 6px; cursor: pointer; font-weight: 600;">Search
+                            Images</button>
+                    </div>
+                </div>
+
+                <!-- Results Area -->
+                <div style="margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center;">
+                    <h3 style="font-size: 1.2rem;">Results</h3>
+                    <span id="resultsCount" style="color: var(--text-secondary); font-size: 0.9rem;">0 results</span>
+                </div>
+
+                <div id="searchResults"
+                    style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.5rem;">
+                    <!-- Results will be injected here -->
                 </div>
             </div>
 
-            <div id="resultsCount" style="margin-bottom: 1rem; color: var(--text-secondary);"></div>
-            <div id="searchResults" class="analysis-grid"></div>
+            <!-- Stats Sidebar -->
+            <div style="width: 300px; margin-left: 2rem; flex-shrink: 0;">
+                <div class="card" style="position: sticky; top: 2rem;">
+                    <h3 style="margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;">Top
+                        Tags</h3>
+                    <div id="topTagsList" style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 2rem;">
+                        <span style="color: var(--text-secondary); font-size: 0.9rem;">Loading...</span>
+                    </div>
+
+                    <h3 style="margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;">Top
+                        Objects</h3>
+                    <div id="topObjectsList" style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                        <span style="color: var(--text-secondary); font-size: 0.9rem;">Loading...</span>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
