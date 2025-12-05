@@ -3,8 +3,8 @@
 An Electron-based desktop application that uses local AI (via LM Studio) to analyze images, extract metadata, and build a searchable database of your visual content.
 
 > **Dad Joke Corner** 🤖  
-> Why did the AI artist get kicked out of the gallery?  
-> Because every time someone asked about the artwork, it just kept saying "I made this up!"
+> Why did the neural network become an artist?  
+> Because it had so many *layers* to express!
 
 ---
 
