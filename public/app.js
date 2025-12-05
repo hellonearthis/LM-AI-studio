@@ -396,6 +396,7 @@ async function autoSaveToDatabase(data) {
 // ============================================================================
 
 function displayMetadata(metadata) {
+    console.log('[APP] Displaying metadata:', metadata); // Debug log
     metadataOutput.innerHTML = '';
 
     const fields = [
@@ -417,6 +418,29 @@ function displayMetadata(metadata) {
             metadataOutput.appendChild(item);
         }
     });
+
+    // Display ComfyUI Metadata (Prompt/Workflow)
+    if (metadata.prompt || metadata.workflow) {
+        const comfyDiv = document.createElement('div');
+        comfyDiv.style.marginTop = '1rem';
+        comfyDiv.style.borderTop = '1px solid var(--border)';
+        comfyDiv.style.paddingTop = '0.5rem';
+
+        if (metadata.prompt) {
+            const details = document.createElement('details');
+            details.innerHTML = '<summary style="cursor:pointer; color:var(--accent);">ComfyUI Prompt</summary><pre style="font-size:0.7rem; overflow:auto; max-height:200px; background:rgba(0,0,0,0.2); padding:0.5rem; border-radius:4px;">' + JSON.stringify(metadata.prompt, null, 2) + '</pre>';
+            comfyDiv.appendChild(details);
+        }
+
+        if (metadata.workflow) {
+            const details = document.createElement('details');
+            details.style.marginTop = '0.5rem';
+            details.innerHTML = '<summary style="cursor:pointer; color:var(--accent);">ComfyUI Workflow</summary><pre style="font-size:0.7rem; overflow:auto; max-height:200px; background:rgba(0,0,0,0.2); padding:0.5rem; border-radius:4px;">' + JSON.stringify(metadata.workflow, null, 2) + '</pre>';
+            comfyDiv.appendChild(details);
+        }
+
+        metadataOutput.appendChild(comfyDiv);
+    }
 }
 
 function displayAnalysis(description) {
@@ -428,6 +452,24 @@ function displayAnalysis(description) {
         summaryDiv.className = 'analysis-section';
         summaryDiv.innerHTML = `<h3>Summary</h3><p>${description.summary}</p>`;
         analysisOutput.appendChild(summaryDiv);
+    }
+
+    // Objects
+    if (description.objects && description.objects.length > 0) {
+        const objectsDiv = document.createElement('div');
+        objectsDiv.className = 'analysis-section';
+        objectsDiv.innerHTML = '<h3>Detected Objects</h3><div class="tags-container"></div>';
+        const objectsContainer = objectsDiv.querySelector('.tags-container');
+
+        description.objects.forEach(obj => {
+            const objSpan = document.createElement('span');
+            objSpan.className = 'tag';
+            objSpan.style.backgroundColor = 'rgba(16, 185, 129, 0.2)'; // Green tint for objects
+            objSpan.style.color = '#34d399';
+            objSpan.textContent = obj;
+            objectsContainer.appendChild(objSpan);
+        });
+        analysisOutput.appendChild(objectsDiv);
     }
 
     // Tags
