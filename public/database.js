@@ -49,6 +49,12 @@ async function loadDatabase() {
             const width = metadata.ImageWidth || metadata.ExifImageWidth || metadata.PixelXDimension || 'N/A';
             const height = metadata.ImageHeight || metadata.ExifImageHeight || metadata.PixelYDimension || 'N/A';
 
+            // Format full metadata for tooltip or expanded view
+            const metadataStr = Object.entries(metadata)
+                .filter(([key]) => !['ImageWidth', 'ImageHeight', 'ExifImageWidth', 'ExifImageHeight'].includes(key))
+                .map(([key, val]) => `${key}: ${val}`)
+                .join('\n');
+
             // ----------------------------------------------------------------
             // DETERMINE THUMBNAIL PATH
             // ----------------------------------------------------------------
@@ -86,7 +92,7 @@ async function loadDatabase() {
                         <div style="flex: 1;">
                             <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                                 <div style="flex: 1; min-width: 0;">
-                                    <h2 class="file-link" data-path="${img.path}" style="margin: 0; border: none; font-size: 1.1rem; cursor: pointer; color: var(--accent); text-decoration: none;" title="Click to show in folder">${img.filename}</h2>
+                                    <h2 class="file-link" data-path="${img.path}" style="margin: 0; border: none; font-size: 1.1rem; cursor: pointer; color: var(--accent); text-decoration: none;" title="${metadataStr || 'No extra metadata'}">${img.filename}</h2>
                                     <small style="color: var(--text-secondary);">${date} • ${width}w ${height}h</small>
                                 </div>
                                 <div style="display: flex; gap: 0.5rem; align-items: flex-start;">

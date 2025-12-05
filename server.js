@@ -36,9 +36,20 @@ db.exec(`
         file_hash TEXT,
         metadata TEXT,
         analysis TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT
     )
 `);
+
+// Auto-migration: Add updated_at column if it doesn't exist
+try {
+    db.prepare('SELECT updated_at FROM images LIMIT 1').get();
+} catch (err) {
+    if (err.message.includes('no such column')) {
+        console.log('[DB] Adding missing column: updated_at');
+        db.exec('ALTER TABLE images ADD COLUMN updated_at TEXT');
+    }
+}
 
 console.log('[DB] Database initialized');
 
@@ -62,10 +73,32 @@ app.post('/analyze', async (req, res) => {
         // Parse EXIF data using exifr (more robust than exif-parser)
         let metadata = {};
         try {
-            metadata = await exifr.parse(buffer) || {};
+            // Enable all metadata segments
+            metadata = await exifr.parse(buffer, {
+                tiff: true,
+                xmp: true,
+                icc: true,
+                iptc: true,
+                jfif: true,
+                ihdr: true, // For PNG dimensions
+                mergeOutput: true
+            }) || {};
             console.log('[ANALYZE] EXIF extracted:', Object.keys(metadata).length, 'fields');
+            console.log('[ANALYZE] Metadata keys:', Object.keys(metadata)); // Debug log
         } catch (exifError) {
             console.log('[ANALYZE] No EXIF data or error parsing:', exifError.message);
+        }
+
+        // Special handling for ComfyUI metadata (prompt/workflow are JSON strings)
+        if (metadata.prompt) {
+            try {
+                metadata.prompt = JSON.parse(metadata.prompt);
+            } catch (e) { /* keep as string */ }
+        }
+        if (metadata.workflow) {
+            try {
+                metadata.workflow = JSON.parse(metadata.workflow);
+            } catch (e) { /* keep as string */ }
         }
 
         // Prepare for LM Studio
@@ -162,38 +195,57 @@ app.post('/save', (req, res) => {
     try {
         console.log(`[SAVE] File hash: ${file_hash.substring(0, 16)}...`);
 
-        // Check if file already exists in DB by content hash first, then by path
-        const checkSql = `SELECT id, file_hash, path FROM images WHERE file_hash = ?`;
-        const existing = db.prepare(checkSql).get(file_hash);
+        // 1. Check for EXACT duplicate by hash
+        const hashCheckSql = `SELECT * FROM images WHERE file_hash = ?`;
+        const existingByHash = db.prepare(hashCheckSql).get(file_hash);
 
-        if (existing) {
-            // Exact content match - this is a duplicate
-            console.log(`[SAVE] Skipping - exact duplicate found (ID: ${existing.id}, Path: ${existing.path})`);
+        if (existingByHash) {
+            // Found exact file content match
+
+            // Check if we need to update metadata (e.g. if it was missing before)
+            const hasNewMetadata = metadata && Object.keys(metadata).length > 0;
+            const missingOldMetadata = !existingByHash.metadata || existingByHash.metadata === '{}';
+
+            if (missingOldMetadata && hasNewMetadata) {
+                console.log(`[SAVE] Updating metadata for existing file ID: ${existingByHash.id}`);
+                const updateMetaSql = `UPDATE images SET metadata = ?, analysis = ?, updated_at = ? WHERE id = ?`;
+                db.prepare(updateMetaSql).run(JSON.stringify(metadata), JSON.stringify(analysis), new Date().toISOString(), existingByHash.id);
+
+                return res.json({
+                    success: true,
+                    id: existingByHash.id,
+                    updated: true,
+                    message: 'Record updated with new metadata'
+                });
+            }
+
+            // Truly a duplicate - skip
+            console.log(`[SAVE] Skipping - exact duplicate found (ID: ${existingByHash.id}, Path: ${existingByHash.path})`);
             return res.json({
-                message: 'Skipped - file already exists (same content)',
-                id: existing.id,
-                existingPath: existing.path,
-                duplicate: true
+                success: true,
+                id: existingByHash.id,
+                duplicate: true,
+                existingPath: existingByHash.path
             });
         }
 
-        // Check if same path exists with different content
-        const pathCheckSql = `SELECT id, file_hash FROM images WHERE path = ?`;
-        const pathMatch = db.prepare(pathCheckSql).get(path);
+        // 2. Check if same PATH exists (but hash was different, since we passed step 1)
+        const pathCheckSql = `SELECT id FROM images WHERE path = ?`;
+        const existingByPath = db.prepare(pathCheckSql).get(path);
 
-        if (pathMatch) {
+        if (existingByPath) {
             // Same path but different content - file was modified, update it
-            console.log(`[SAVE] Updating existing record ID: ${pathMatch.id} (file content changed)`);
+            console.log(`[SAVE] Updating existing record ID: ${existingByPath.id} (file content changed)`);
             const updateSql = `
                 UPDATE images 
                 SET filename = ?, file_hash = ?, metadata = ?, analysis = ?, created_at = ?
                 WHERE id = ?
             `;
-            db.prepare(updateSql).run(filename, file_hash, JSON.stringify(metadata), JSON.stringify(analysis), created_at, pathMatch.id);
-            return res.json({ message: 'Updated successfully', id: pathMatch.id, updated: true });
+            db.prepare(updateSql).run(filename, file_hash, JSON.stringify(metadata), JSON.stringify(analysis), created_at, existingByPath.id);
+            return res.json({ message: 'Updated successfully', id: existingByPath.id, updated: true });
         }
 
-        // Insert new record
+        // 3. Insert new record
         const insertSql = `INSERT INTO images (filename, path, file_hash, metadata, analysis, created_at) VALUES (?, ?, ?, ?, ?, ?)`;
         const info = db.prepare(insertSql).run(filename, path, file_hash, JSON.stringify(metadata), JSON.stringify(analysis), created_at);
         console.log(`[SAVE] Success. New ID: ${info.lastInsertRowid}`);
