@@ -161,9 +161,19 @@ Do not include markdown formatting or explanations.`;
         } catch (jsonError) {
             console.error('[ANALYZE] JSON parse error:', jsonError);
             console.error('[ANALYZE] Response text:', text);
-            // Attempt to recover partial JSON or return raw text if needed, 
-            // but for now fail gracefully
+            // Attempt to recover partial JSON or return raw text if needed, but for now fail gracefully
             return res.status(500).json({ error: 'Failed to parse AI response as JSON' });
+        }
+
+        // Deduplicate tags and objects: if a tag matches an object, keep only the object
+        if (analysis.objects && analysis.tags && Array.isArray(analysis.objects) && Array.isArray(analysis.tags)) {
+            const objectsLowerCase = analysis.objects.map(obj => obj.toLowerCase());
+            const uniqueTags = analysis.tags.filter(tag => !objectsLowerCase.includes(tag.toLowerCase()));
+
+            if (uniqueTags.length !== analysis.tags.length) {
+                console.log(`[ANALYZE] Removed ${analysis.tags.length - uniqueTags.length} duplicate tags that matched objects`);
+                analysis.tags = uniqueTags;
+            }
         }
 
         console.log('[ANALYZE] Success');
@@ -425,6 +435,65 @@ app.post('/search', (req, res) => {
     } catch (err) {
         console.error('[SEARCH] Error:', err);
         res.status(500).json({ error: 'Search failed' });
+    }
+});
+
+// Get stats endpoint
+app.get('/stats', (req, res) => {
+    console.log('[STATS] Request received');
+    try {
+        const sql = `SELECT analysis FROM images`;
+        const rows = db.prepare(sql).all();
+
+        const stats = {
+            tags: {},
+            objects: {}
+        };
+
+        rows.forEach(row => {
+            try {
+                const analysis = JSON.parse(row.analysis || '{}');
+
+                // Count tags
+                if (Array.isArray(analysis.tags)) {
+                    analysis.tags.forEach(tag => {
+                        // Normalize tag (lowercase for counting, but keep original case for display if needed? 
+                        // Let's just use lowercase for aggregation to avoid duplicates like "Tree" vs "tree")
+                        const normalizedTag = tag.toLowerCase();
+                        stats.tags[normalizedTag] = (stats.tags[normalizedTag] || 0) + 1;
+                    });
+                }
+
+                // Count objects
+                if (Array.isArray(analysis.objects)) {
+                    analysis.objects.forEach(obj => {
+                        const normalizedObj = obj.toLowerCase();
+                        stats.objects[normalizedObj] = (stats.objects[normalizedObj] || 0) + 1;
+                    });
+                }
+            } catch (e) {
+                // Ignore parse errors for individual rows
+            }
+        });
+
+        // Convert to sorted arrays
+        const sortedTags = Object.entries(stats.tags)
+            .map(([name, count]) => ({ name, count }))
+            .sort((a, b) => b.count - a.count);
+
+        const sortedObjects = Object.entries(stats.objects)
+            .map(([name, count]) => ({ name, count }))
+            .sort((a, b) => b.count - a.count);
+
+        console.log(`[STATS] Returning ${sortedTags.length} tags and ${sortedObjects.length} objects`);
+        res.json({
+            tags: sortedTags,
+            objects: sortedObjects
+        });
+
+    } catch (err) {
+        console.error('[STATS] Error:', err);
+        res.status(500).json({ error: 'Failed to fetch stats' });
     }
 });
 

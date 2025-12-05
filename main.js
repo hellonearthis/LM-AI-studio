@@ -104,6 +104,21 @@ ipcMain.handle('read-file', async (event, filePath) => {
     }
 });
 
+// Get file stats (creation date, modification date, etc.)
+ipcMain.handle('get-file-stats', async (event, filePath) => {
+    try {
+        const stats = fs.statSync(filePath);
+        return {
+            birthtime: stats.birthtime.toISOString(),
+            mtime: stats.mtime.toISOString(),
+            size: stats.size
+        };
+    } catch (error) {
+        console.error('Error getting file stats:', error);
+        throw error;
+    }
+});
+
 // Show file in folder
 ipcMain.handle('show-in-folder', async (event, filePath) => {
     shell.showItemInFolder(filePath);

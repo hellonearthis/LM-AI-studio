@@ -110,7 +110,8 @@ async function loadDatabase() {
 
                     <!-- Tags Section -->
                     <div class="tags-container">
-                        ${(analysis.tags || []).map(tag => `<span class="tag">#${tag}</span>`).join('')}
+                        ${(analysis.objects || []).map(obj => `<span class="tag" style="background-color: rgba(16, 185, 129, 0.2); color: #34d399;">${obj}</span>`).join('')}
+                        ${(analysis.tags || []).map(tag => `<span class="tag">${tag}</span>`).join('')}
                         ${analysis.scene_type ? `<span class="tag" style="background-color: rgba(129, 140, 248, 0.2); color: #818cf8;">${analysis.scene_type}</span>` : ''}
                     </div>
                 </div>
@@ -138,10 +139,10 @@ async function loadDatabase() {
                     <div style="background: var(--card-bg); padding: 2rem; border-radius: 12px; border: 1px solid var(--border); max-width: 500px; width: 90%;">
                         <h2 style="margin: 0 0 1rem 0; color: var(--text-primary);">Delete Image</h2>
                         <p style="margin: 0 0 1.5rem 0; color: var(--text-secondary);">How would you like to delete this image?</p>
-                        <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                        <div style="display: flex; flex-direction: column; gap: 1rem;">
                             <button id="deleteDbBtn" style="background: transparent; border: 1px solid var(--accent); color: var(--accent); padding: 0.75rem; border-radius: 6px; cursor: pointer; font-weight: 500;">Delete from Database Only</button>
+                            <button id="cancelBtn" style="background: #a1f0f0ff;border:2px solid var(--border);color: #240d00ff; font-size:2rem;font-weight:700;padding:1.75rem 1.75rem;border-radius:6px;cursor:pointer;margin-top:0.5rem;">Cancel</button>
                             <button id="deleteDiskBtn" style="background: #ef4444; border: none; color: white; padding: 0.75rem; border-radius: 6px; cursor: pointer; font-weight: 600;">Delete from Computer & Database</button>
-                            <button id="cancelBtn" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.75rem; border-radius: 6px; cursor: pointer; margin-top: 0.5rem;">Cancel</button>
                         </div>
                     </div>
                 `;

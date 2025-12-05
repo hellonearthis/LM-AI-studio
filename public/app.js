@@ -149,6 +149,10 @@ async function processSingleFile(filePath, fileName, fileBuffer, base64Data) {
         // Calculate file hash
         const fileHash = await calculateFileHash(fileBuffer);
 
+        // Get file creation date from filesystem
+        const fileStats = await window.electronAPI.getFileStats(filePath);
+        const fileCreationDate = fileStats.birthtime;
+
         // Check if file already exists in database
         showStatus('Checking for duplicates...', 'info');
 
@@ -158,7 +162,7 @@ async function processSingleFile(filePath, fileName, fileBuffer, base64Data) {
             file_hash: fileHash,
             metadata: {},
             analysis: {},
-            created_at: new Date().toISOString()
+            created_at: fileCreationDate
         });
 
         if (checkResult.duplicate) {
@@ -191,7 +195,7 @@ async function processSingleFile(filePath, fileName, fileBuffer, base64Data) {
             file_hash: fileHash,
             metadata: result.metadata,
             analysis: result.description,
-            created_at: new Date().toISOString()
+            created_at: fileCreationDate
         });
 
         // Generate Thumbnail
@@ -293,6 +297,10 @@ async function processBatch(files) {
 
             const currentHash = await calculateFileHash(fileBuffer);
 
+            // Get file creation date from filesystem
+            const fileStats = await window.electronAPI.getFileStats(filePath);
+            const fileCreationDate = fileStats.birthtime;
+
             if (existing && existing.file_hash === currentHash) {
                 console.log(`Skipping ${filename} (already analyzed and unchanged)`);
                 existingCount++;
@@ -311,7 +319,7 @@ async function processBatch(files) {
                 file_hash: currentHash,
                 metadata: analysisResult.metadata,
                 analysis: analysisResult.description,
-                created_at: new Date().toISOString()
+                created_at: fileCreationDate
             });
 
             if (saveResult.new) {
@@ -482,7 +490,7 @@ function displayAnalysis(description) {
         description.tags.forEach(tag => {
             const tagSpan = document.createElement('span');
             tagSpan.className = 'tag';
-            tagSpan.textContent = `#${tag}`;
+            tagSpan.textContent = `${tag}`;
             tagsContainer.appendChild(tagSpan);
         });
 
