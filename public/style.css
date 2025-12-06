@@ -283,7 +283,8 @@ button#analyzeBtn:disabled {
 
 .analysis-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    /* 👇 Auto-fit makes as many columns as will fit */
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
     gap: 2rem;
 }
 
@@ -298,6 +299,16 @@ button#analyzeBtn:disabled {
     border-radius: 12px;
     padding: 1.5rem;
     border: 1px solid var(--border);
+
+    /* NEW — FIXES OVERFLOW */
+    min-width: 0;
+    width: 100%;
+    overflow-wrap: break-word;
+}
+
+.card>div:first-child {
+    /* This is the flex row with the image + text */
+    min-width: 0;
 }
 
 .card h2 {
@@ -307,6 +318,8 @@ button#analyzeBtn:disabled {
     margin-bottom: 1rem;
     border-bottom: 1px solid var(--border);
     padding-bottom: 0.5rem;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .analysis-section {
