@@ -289,6 +289,16 @@ async function processBatch(files) {
         try {
             const existing = existingRecords[filePath];
 
+            // OPTIMIZATION: Skip if file path already exists in database
+            // This avoids reading the file and calculating hash if we already have it
+            if (existing) {
+                console.log(`Skipping ${filename} (already in DB)`);
+                existingCount++;
+                statExisting.textContent = existingCount;
+                processedCount++;
+                continue;
+            }
+
             // Read file using Electron API
             const fileBuffer = await window.electronAPI.readFile(filePath);
             const base64Data = `data:image/jpeg;base64,${btoa(
@@ -301,13 +311,8 @@ async function processBatch(files) {
             const fileStats = await window.electronAPI.getFileStats(filePath);
             const fileCreationDate = fileStats.birthtime;
 
-            if (existing && existing.file_hash === currentHash) {
-                console.log(`Skipping ${filename} (already analyzed and unchanged)`);
-                existingCount++;
-                statExisting.textContent = existingCount;
-                processedCount++;
-                continue;
-            }
+            // Secondary check: if for some reason we want to check hash (optional, but we skipped above)
+            // if (existing && existing.file_hash === currentHash) { ... }
 
             // Perform Analysis
             const analysisResult = await performAnalysis(base64Data);

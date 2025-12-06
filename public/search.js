@@ -74,8 +74,11 @@ function displayResults(images) {
             <div class="card">
                 <div style="display: flex; gap: 1rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;">
                     <img src="${displayPath}" 
+                         data-fullpath="${img.path}"
+                         class="thumbnail-preview"
                          onerror="this.style.display='none'"
-                         style="width: 80px; height: 80px; object-fit: cover; border-radius: 6px;">
+                         style="width: 80px; height: 80px; object-fit: cover; border-radius: 6px; cursor: pointer;"
+                         title="Click to view full size">
                     <div>
                         <h3 style="margin: 0; color: var(--accent); font-size: 1rem;">${img.filename}</h3>
                         <small style="color: var(--text-secondary);">${date}</small>
@@ -96,6 +99,100 @@ function displayResults(images) {
             </div>
         `;
     }).join('');
+
+    // Attach click handlers for image preview
+    document.querySelectorAll('.thumbnail-preview').forEach(thumbnail => {
+        thumbnail.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const fullPath = e.target.dataset.fullpath;
+            if (fullPath) {
+                showImagePreview(fullPath);
+            }
+        });
+    });
+}
+
+// ============================================================================
+// IMAGE PREVIEW POPUP
+// ============================================================================
+// Shows full-size image in a modal overlay
+async function showImagePreview(imagePath) {
+    try {
+        console.log('[IMAGE PREVIEW] Path from search:', imagePath);
+
+        // Read the file using Electron API
+        const fileBuffer = await window.electronAPI.readFile(imagePath);
+        const blob = new Blob([fileBuffer]);
+        const url = URL.createObjectURL(blob);
+
+        // Create modal overlay
+        const modal = document.createElement('div');
+        modal.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0,0,0,0.95);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            cursor: pointer;
+            overflow: hidden;
+        `;
+
+        // Create image element
+        const img = document.createElement('img');
+        img.src = url;
+        img.style.cssText = `
+            max-width: 95vw;
+            max-height: 95vh;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+            border-radius: 8px;
+            cursor: default;
+            box-shadow: 0 0 50px rgba(0,0,0,0.5);
+        `;
+
+        // Error handling
+        img.onerror = () => {
+            console.error('Failed to load image:', imagePath);
+            modal.remove();
+            URL.revokeObjectURL(url);
+            alert('Failed to load image');
+        };
+
+        // Prevent clicks on image from closing modal (optional, but user asked for click to close)
+        // User request: "clicking it should close it"
+        // So we REMOVE the stopPropagation on the image click
+        // img.addEventListener('click', (e) => {
+        //     e.stopPropagation();
+        // });
+
+        modal.appendChild(img);
+        document.body.appendChild(modal);
+
+        // Close on background click (and image click since we removed stopPropagation)
+        modal.addEventListener('click', () => {
+            modal.remove();
+            URL.revokeObjectURL(url);
+            document.removeEventListener('keydown', keyHandler);
+        });
+
+        // Close on any key press
+        const keyHandler = (e) => {
+            modal.remove();
+            URL.revokeObjectURL(url);
+            document.removeEventListener('keydown', keyHandler);
+        };
+        document.addEventListener('keydown', keyHandler);
+
+    } catch (error) {
+        console.error('[IMAGE PREVIEW] Error loading image:', error);
+        alert(`Image File Not Found!\n\nPath: ${imagePath}\n\nThe file may have been moved or the path may be incorrect.`);
+    }
 }
 
 // Load Stats

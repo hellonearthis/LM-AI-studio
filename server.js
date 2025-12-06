@@ -549,11 +549,11 @@ app.post('/create-thumbnail', async (req, res) => {
         const thumbnailPath = path.join(thumbnailsDir, `${filenameBase}.avif`);
 
         await sharp(buffer)
-            .resize(80, 80, {
+            .resize(100, 100, {
                 fit: 'contain',
-                background: { r: 0, g: 0, b: 0, alpha: 0 }
-            })
-            .avif({ quality: 40 })
+            background: { r: 0, g: 0, b: 0, alpha: 0 }
+        })
+            .avif({ quality: 50 })
             .toFile(thumbnailPath);
 
         console.log('[THUMBNAIL] Created successfully');

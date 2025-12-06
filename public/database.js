@@ -261,9 +261,9 @@ async function showImagePreview(imagePath) {
         };
 
         // Prevent clicks on image from closing modal
-        img.addEventListener('click', (e) => {
-            e.stopPropagation();
-        });
+        // img.addEventListener('click', (e) => {
+        //     e.stopPropagation();
+        // });
 
         modal.appendChild(img);
         document.body.appendChild(modal);
