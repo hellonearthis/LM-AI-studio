@@ -7,3 +7,7 @@ dist/
 .DS_Store
 thumbs.db
 public/thumbnails/
+venv/
+__pycache__/
+ls-data/
+!ls-data/custom_models.json

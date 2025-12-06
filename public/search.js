@@ -80,7 +80,7 @@ function displayResults(images) {
                          style="width: 80px; height: 80px; object-fit: cover; border-radius: 6px; cursor: pointer;"
                          title="Click to view full size">
                     <div>
-                        <h3 style="margin: 0; color: var(--accent); font-size: 1rem;">${img.filename}</h3>
+                        <h3 class="file-link" data-path="${img.path}" style="margin: 0; color: var(--accent); font-size: 1rem; cursor: pointer;" title="Show in folder">${img.filename}</h3>
                         <small style="color: var(--text-secondary);">${date}</small>
                         <div style="margin-top: 0.25rem;">
                             <span class="badge" style="font-size: 0.7rem;">${analysis.scene_type || 'Unknown'}</span>
@@ -259,3 +259,18 @@ if (tagParam) {
     searchQuery.value = tagParam;
     performSearch();
 }
+
+// File Link Handler (Show in Folder)
+document.addEventListener("click", (e) => {
+    const el = e.target.closest(".file-link");
+    if (!el) return;
+
+    const fullPath = el.dataset.path;
+
+    if (window.electronAPI && window.electronAPI.showInFolder) {
+        window.electronAPI.showInFolder(fullPath);
+    } else {
+        console.warn('Electron API not available. File path:', fullPath);
+        alert('This feature requires Electron. File path: ' + fullPath);
+    }
+});
