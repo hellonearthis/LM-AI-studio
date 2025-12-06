@@ -250,3 +250,12 @@ searchQuery.addEventListener('keypress', (e) => {
 
 // Initialize
 loadStats();
+
+// Check for URL parameters (e.g. from Tags page)
+const urlParams = new URLSearchParams(window.location.search);
+const tagParam = urlParams.get('tag');
+
+if (tagParam) {
+    searchQuery.value = tagParam;
+    performSearch();
+}

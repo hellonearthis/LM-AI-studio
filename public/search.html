@@ -25,13 +25,15 @@
             <a href="search.html" class="nav-item active">
                 <span class="nav-icon">🔍</span> Search
             </a>
+            <a href="tags.html" class="nav-item">
+                <span class="nav-icon">🏷️</span> Tags
+            </a>
         </div>
     </nav>
 
     <div class="main-wrapper">
         <div class="container" style="display: flex; align-items: flex-start; max-width: 100%; padding: 2rem;">
             <!-- Main Content -->
-            <!-- todo: add show all tags button.  so the user can jump back and forth between tags and this search page. -->
             <div style="flex: 1; min-width: 0;">
                 <div style="margin-bottom: 2rem;">
                     <h2 style="font-size: 1.5rem; margin-bottom: 0.5rem;">Search Database</h2>
@@ -102,8 +104,12 @@
             <!-- Stats Sidebar -->
             <div style="width: 300px; margin-left: 2rem; flex-shrink: 0;">
                 <div class="card" style="position: sticky; top: 2rem;">
-                    <h3 style="margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;">Top
-                        Tags</h3>
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;">
+                        <h3 style="margin: 0;">Top Tags</h3>
+                        <a href="tags.html" style="font-size: 0.8rem; color: var(--accent); text-decoration: none;">Show
+                            All</a>
+                    </div>
                     <div id="topTagsList" style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 2rem;">
                         <span style="color: var(--text-secondary); font-size: 0.9rem;">Loading...</span>
                     </div>

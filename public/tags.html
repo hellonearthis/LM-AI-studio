@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tags - Image Analysis Studio</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <nav class="sidebar">
+        <div class="sidebar-header">
+            <h1>Lumina</h1>
+            <div class="sidebar-subtitle">AI Image Analysis</div>
+        </div>
+        <div class="sidebar-nav">
+            <a href="index.html" class="nav-item">
+                <span class="nav-icon">✨</span> Analysis
+            </a>
+            <a href="database.html" class="nav-item">
+                <span class="nav-icon">🗄️</span> Database
+            </a>
+            <a href="search.html" class="nav-item">
+                <span class="nav-icon">🔍</span> Search
+            </a>
+            <a href="tags.html" class="nav-item active">
+                <span class="nav-icon">🏷️</span> Tags
+            </a>
+        </div>
+    </nav>
+
+    <div class="main-wrapper">
+        <div class="container" style="max-width: 100%; padding: 2rem;">
+            <!-- Header & Controls -->
+            <div style="margin-bottom: 2rem;">
+                <h2 style="font-size: 1.5rem; margin-bottom: 0.5rem;">Tags & Objects</h2>
+                <p>Explore your image collection through extracted metadata.</p>
+
+                <div class="card" style="margin-top: 1.5rem; padding: 1rem;">
+                    <div
+                        style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; justify-content: space-between;">
+
+                        <!-- Tabs -->
+                        <div class="tabs-container"
+                            style="background: var(--bg-secondary); padding: 0.25rem; border-radius: 8px; display: inline-flex;">
+                            <button id="tabTags" class="tab-btn active" onclick="switchTab('tags')">Tags (<span
+                                    id="tagsCount">0</span>)</button>
+                            <button id="tabObjects" class="tab-btn" onclick="switchTab('objects')">Objects (<span
+                                    id="objectsCount">0</span>)</button>
+                        </div>
+
+                        <!-- Search & Sort -->
+                        <div style="display: flex; gap: 1rem; flex: 1; justify-content: flex-end; align-items: center;">
+                            <input type="text" id="tagSearch" placeholder="Filter tags..."
+                                style="padding: 0.5rem 1rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); width: 200px;">
+
+                            <select id="sortMethod" onchange="renderCurrentView()"
+                                style="padding: 0.5rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary);">
+                                <option value="count">Most Frequent</option>
+                                <option value="name">Alphabetical</option>
+                            </select>
+
+                            <div class="view-toggles">
+                                <button class="view-btn active" id="viewCloud" onclick="switchView('cloud')"
+                                    title="Cloud View">☁️</button>
+                                <button class="view-btn" id="viewList" onclick="switchView('list')"
+                                    title="List View">≣</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Content Area -->
+            <div id="contentArea" class="cloud-view">
+                <!-- Content will be injected here -->
+                <div style="text-align: center; padding: 3rem; color: var(--text-secondary);">Loading...</div>
+            </div>
+
+        </div>
+    </div>
+
+    <script src="tags.js"></script>
+</body>
+
+</html>
