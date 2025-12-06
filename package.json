@@ -6,7 +6,9 @@
     "type": "module",
     "scripts": {
         "start": "electron .",
-        "dev": "electron . --dev"
+        "dev": "electron . --dev",
+        "ls:sync": ".\\venv\\Scripts\\python scripts/sync_ls.py",
+        "ls:serve": "scripts\\serve_ls.bat"
     },
     "keywords": [],
     "author": "",
