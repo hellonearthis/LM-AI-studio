@@ -25,6 +25,7 @@ An Electron-based desktop application that uses local AI (via LM Studio) to anal
 
 1. **Node.js** (v18 or higher)
 2. **LM Studio** running locally with a vision-capable model (e.g., LLaVA, Qwen-VL)
+3. **Python 3.12+** (for Latent Scope integration)
 
 ### Installation
 
@@ -33,8 +34,11 @@ An Electron-based desktop application that uses local AI (via LM Studio) to anal
 git clone https://github.com/hellonearthis/LM-AI-studio.git
 cd LM-AI-studio
 
-# Install dependencies
+# Install Node dependencies
 npm install
+
+# Setup Latent Scope (Python venv)
+npm run ls:setup
 
 # Create a .env file (optional)
 echo "LM_STUDIO_URL=http://localhost:1234/v1/chat/completions" > .env
@@ -46,8 +50,11 @@ echo "LM_STUDIO_URL=http://localhost:1234/v1/chat/completions" > .env
 # Start the Electron app
 npm start
 
-# Or for development mode
+# OR for development mode
 npm run dev
+
+# Start Latent Scope Server (Required for Map Page)
+npm run ls:serve
 ```
 
 > **Note**: Make sure LM Studio is running on port 1234 with a vision model loaded before starting the app.
@@ -82,6 +89,22 @@ npm run dev
 2. Enter keywords to search descriptions
 3. Filter by tags or scene type
 4. Set date ranges to narrow results
+5. **Click any filename** to open it in your file explorer
+
+### Tags & Objects
+
+1. Click **Tags** to explore your metadata
+2. Toggle between **Tags** and **Objects** tabs
+3. Switch between **Cloud View** (visual) and **List View** (detailed)
+4. Sort by frequency or alphabetical order to find top concepts
+
+### Data Map (Latent Scope)
+
+1. Ensure the visualization server is running: `npm run ls:serve`
+2. Go to the **Map (β)** page
+3. Click **Sync Data** to export your latest database to the map
+4. Interact with the embedded map or click **Open in Browser** for a full-screen experience
+5. Discover semantic clusters and relationships in your image library
 
 ---
 
@@ -128,3 +151,4 @@ ISC
 - [Electron](https://www.electronjs.org/) for cross-platform desktop apps
 - [Sharp](https://sharp.pixelplumbing.com/) for image processing
 - [exifr](https://github.com/MikeKovarik/exifr) for metadata extraction
+- [Latent Scope](https://github.com/enjalot/latent-scope) by enjalot for semantic visualization
