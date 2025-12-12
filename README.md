@@ -2,7 +2,7 @@
 
 An Electron-based desktop application that uses local AI (via LM Studio) to analyze images, extract metadata, and build a searchable database of your visual content.
 
-> **Dad Joke** 🤖  
+> **Ai Joke** 🤖  
 > Why did the neural network become an artist?  
 > Because it had so many *layers* to express!
 
@@ -43,7 +43,7 @@ cd LM-AI-studio
 # Install Node dependencies
 npm install
 
-# Setup Latent Scope (Python venv)
+# Setup Latent Scope (Python venv)   <<<<<<<   Optional  for latent Scope  >>>>>>>
 npm run ls:setup
 
 # Create a .env file (optional)
@@ -59,7 +59,7 @@ npm start
 # OR for development mode
 npm run dev
 
-# Start Latent Scope Server (Required for Map Page)
+# Start Latent Scope Server (Required for Map Page)  <<<<<<<   Optional    >>>>>>>
 npm run ls:serve
 ```
 
