@@ -28,7 +28,7 @@
             <a href="tags.html" class="nav-item active">
                 <span class="nav-icon">🏷️</span> Tags
             </a>
-            <a href="http://localhost:5001" target="_blank" class="nav-item">
+            <a href="scope.html" class="nav-item">
                 <span class="nav-icon">🗺️</span> Map <span
                     style="font-size: 0.7em; opacity: 0.7; margin-left: 5px;">(β)</span>
             </a>
@@ -61,9 +61,15 @@
                                 style="padding: 0.5rem 1rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); width: 200px;">
 
                             <select id="sortMethod" onchange="renderCurrentView()"
-                                style="padding: 0.5rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary);">
-                                <option value="count">Most Frequent</option>
-                                <option value="name">Alphabetical</option>
+                                style="padding: 0.5rem 1rem; border-radius: 6px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text-primary); cursor: pointer; appearance: none; -webkit-appearance: none; background-image: url('data:image/svg+xml;utf8,<svg fill=\"
+                                %23a0aec0\" height=\"20\" viewBox=\"0 0 24 24\" width=\"20\"
+                                xmlns=\"http://www.w3.org/2000/svg\">
+                                <path d=\"M7 10l5 5 5-5z\" /></svg>'); background-repeat: no-repeat;
+                                background-position: right 0.5rem center; padding-right: 2rem;">
+                                <option value="count" style="background: var(--card-bg); color: var(--text-primary);">
+                                    Most Frequent</option>
+                                <option value="name" style="background: var(--card-bg); color: var(--text-primary);">
+                                    Alphabetical</option>
                             </select>
 
                             <div class="view-toggles">
@@ -75,6 +81,12 @@
                         </div>
                     </div>
                 </div>
+            </div>
+
+            <!-- Alphabet Navigation (shown only in alphabetical list view) -->
+            <div id="alphabetNav"
+                style="display: none; margin-bottom: 1rem; padding: 0.5rem; background: var(--card-bg); border-radius: 8px; border: 1px solid var(--border); text-align: center;">
+                <!-- Populated by JS -->
             </div>
 
             <!-- Content Area -->

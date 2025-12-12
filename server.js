@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import exifr from 'exifr';
 import sharp from 'sharp';
 import crypto from 'crypto';
+import { exec } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -21,6 +22,7 @@ const LM_STUDIO_URL = 'http://localhost:1234/v1/chat/completions';
 // Middleware
 app.use(express.json({ limit: '50mb' }));
 app.use(express.static('public'));
+app.use('/ls-data', express.static('ls-data'));
 
 // ============================================================================
 // DATABASE SETUP
@@ -388,16 +390,27 @@ app.get('/images', (req, res) => {
 // Search images endpoint
 app.post('/search', (req, res) => {
     console.log('[SEARCH] Request received');
-    const { query, tags, sceneType, startDate, endDate } = req.body;
+    const { query, tags, searchLogic, sceneType, startDate, endDate } = req.body;
 
     try {
         let sql = `SELECT * FROM images WHERE 1=1`;
         const params = [];
 
-        // Text search in analysis
+        // Determine logic operator for multiple keywords
+        // Default to AND if not specified
+        const logicOp = (searchLogic === 'OR') ? ' OR ' : ' AND ';
+
+        // Text search in analysis (comma-separated support)
         if (query && query.trim()) {
-            sql += ` AND analysis LIKE ?`;
-            params.push(`%${query}%`);
+            const terms = query.split(',').map(t => t.trim()).filter(t => t);
+
+            if (terms.length > 0) {
+                // Group the keyword conditions manually to ensure logic priority
+                // e.g. AND (analysis LIKE %t1% OR analysis LIKE %t2%)
+                const termConditions = terms.map(() => `analysis LIKE ?`).join(logicOp);
+                sql += ` AND (${termConditions})`;
+                terms.forEach(term => params.push(`%${term}%`));
+            }
         }
 
         // Filter by tags
@@ -551,8 +564,8 @@ app.post('/create-thumbnail', async (req, res) => {
         await sharp(buffer)
             .resize(100, 100, {
                 fit: 'contain',
-            background: { r: 0, g: 0, b: 0, alpha: 0 }
-        })
+                background: { r: 0, g: 0, b: 0, alpha: 0 }
+            })
             .avif({ quality: 50 })
             .toFile(thumbnailPath);
 
@@ -563,6 +576,55 @@ app.post('/create-thumbnail', async (req, res) => {
         console.error('[THUMBNAIL] Error:', error);
         res.status(500).json({ error: 'Failed to create thumbnail' });
     }
+});
+
+// Update tags endpoint
+app.post('/update-tags', (req, res) => {
+    console.log('[UPDATE-TAGS] Request received');
+    const { id, analysis } = req.body;
+
+    if (!id || !analysis) {
+        return res.status(400).json({ error: 'Missing id or analysis data' });
+    }
+
+    try {
+        // Fetch current record to ensure it exists and get other fields if needed
+        const current = db.prepare('SELECT * FROM images WHERE id = ?').get(id);
+        if (!current) {
+            return res.status(404).json({ error: 'Image not found' });
+        }
+
+        // We only update the analysis field and updated_at
+        const sql = `UPDATE images SET analysis = ?, updated_at = ? WHERE id = ?`;
+        const updatedTime = new Date().toISOString();
+
+        db.prepare(sql).run(JSON.stringify(analysis), updatedTime, id);
+
+        console.log(`[UPDATE-TAGS] Updated tags for ID: ${id}`);
+        res.json({ success: true, analysis, updated_at: updatedTime });
+
+    } catch (err) {
+        console.error('[UPDATE-TAGS] Error:', err);
+        res.status(500).json({ error: 'Failed to update tags' });
+    }
+});
+
+// ============================================================================
+// LATENT SCOPE INTEGRATION
+// ============================================================================
+app.post('/api/sync-ls', (req, res) => {
+    console.log('[LS-SYNC] Triggering sync...');
+
+    // Execute the npm script
+    exec('npm run ls:sync', (error, stdout, stderr) => {
+        if (error) {
+            console.error(`[LS-SYNC] Error: ${error.message}`);
+            return res.status(500).json({ success: false, error: error.message, details: stderr });
+        }
+
+        console.log(`[LS-SYNC] Success: ${stdout}`);
+        res.json({ success: true, output: stdout });
+    });
 });
 
 // ============================================================================

@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LM Studio - Data Map</title>
+    <link rel="stylesheet" href="style.css">
+    <script type="importmap">
+        {
+            "imports": {
+                "d3": "./libs/d3/d3.min.js",
+                "@duckdb/duckdb-wasm": "./libs/duckdb/index.js",
+                "apache-arrow": "./libs/arrow/Arrow.dom.mjs",
+                "tslib": "./libs/tslib/index.js",
+                "flatbuffers": "./libs/flatbuffers/flatbuffers.js"
+            }
+        }
+    </script>
+</head>
+
+<body>
+    <!-- SIDEBAR -->
+    <nav class="sidebar">
+        <div class="logo">
+            <span class="logo-icon">🧠</span>
+            <span class="logo-text">LM Studio</span>
+        </div>
+
+        <div class="nav-links">
+            <a href="index.html" class="nav-item">
+                <span class="nav-icon">📊</span> Analysis
+            </a>
+            <a href="database.html" class="nav-item">
+                <span class="nav-icon">🗄️</span> Database
+            </a>
+            <a href="search.html" class="nav-item">
+                <span class="nav-icon">🔍</span> Search
+            </a>
+            <a href="tags.html" class="nav-item">
+                <span class="nav-icon">🏷️</span> Tags
+            </a>
+            <a href="scope.html" class="nav-item active">
+                <span class="nav-icon">🗺️</span> Map <span
+                    style="font-size: 0.7em; opacity: 0.7; margin-left: 5px;">(β)</span>
+            </a>
+        </div>
+
+        <div class="status-section">
+            <div id="statusDot" class="status-dot"></div>
+            <span id="statusText">Ready</span>
+        </div>
+    </nav>
+
+    <div class="main-wrapper">
+        <div class="container scope-container" style="max-width: 100%; padding: 0 2rem 2rem 2rem;">
+            <!-- Header & Controls -->
+            <div
+                style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; margin-top: 2rem;">
+                <div>
+                    <h2 style="font-size: 1.5rem; margin-bottom: 0.5rem;">Data Map</h2>
+                    <p style="color: var(--text-secondary); margin: 0;">Visualize your image database as a semantic
+                        universe.</p>
+                </div>
+
+                <div class="scope-header-controls">
+                    <button id="syncBtn" class="primary-btn"
+                        style="display: flex; align-items: center; gap: 0.5rem; background: var(--secondary-btn);">
+                        <span id="syncIcon">🔄</span> Sync Data
+                    </button>
+                    <button id="openExtBtn" class="primary-btn"
+                        style="display: flex; align-items: center; gap: 0.5rem;">
+                        <span>🌐</span> Open in Browser
+                    </button>
+                </div>
+            </div>
+
+            <!-- Main Content Area -->
+            <div class="scope-frame-wrapper" id="vizContainer">
+                <canvas id="vizCanvas"></canvas>
+
+                <!-- Zoom Controls -->
+                <div class="viz-controls">
+                    <button id="zoomInBtn" class="viz-btn" title="Zoom In">➕</button>
+                    <button id="zoomOutBtn" class="viz-btn" title="Zoom Out">➖</button>
+                    <button id="resetBtn" class="viz-btn" title="Reset View">⟲</button>
+                </div>
+
+                <!-- Hover Tooltip -->
+                <div id="vizTooltip" class="viz-tooltip" style="display: none;">
+                    <img id="tooltipImg" src="" alt="">
+                    <div id="tooltipText" class="tooltip-label"></div>
+                </div>
+
+                <!-- Loading Overlay -->
+                <div id="scopeOverlay" class="scope-overlay">
+                    <h3 style="font-size: 1.5rem; margin-bottom: 1rem;">Loading Visualization...</h3>
+                    <div class="loading-spinner"></div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script type="module" src="scope.js"></script>
+</body>
+
+</html>

@@ -2,7 +2,7 @@
 
 An Electron-based desktop application that uses local AI (via LM Studio) to analyze images, extract metadata, and build a searchable database of your visual content.
 
-> **Dad Joke Corner** 🤖  
+> **Dad Joke** 🤖  
 > Why did the neural network become an artist?  
 > Because it had so many *layers* to express!
 
@@ -14,8 +14,11 @@ An Electron-based desktop application that uses local AI (via LM Studio) to anal
 - **ComfyUI Integration**: Automatically extracts and displays ComfyUI workflow and prompt data from PNG metadata
 - **Smart Duplicate Detection**: Content-based hashing prevents duplicates while allowing metadata updates
 - **Batch Processing**: Process entire folders of images at once
+- **Advanced Search**: Comma-separated queries with AND/OR logic toggle
+- **Inline Tag Management**: Edit, delete, and add tags directly from search results via right-click
 - **Searchable Database**: Find images by tags, scene type, date, or text search
-- **AVIF Thumbnails**: Efficient 80x80 thumbnail generation for fast browsing
+- **AVIF Thumbnails**: Efficient 100x100 thumbnail generation with automatic regeneration for missing files
+- **Alphabetical Tag Navigation**: Jump to any letter in alphabetical tag view
 
 ---
 
@@ -26,6 +29,9 @@ An Electron-based desktop application that uses local AI (via LM Studio) to anal
 1. **Node.js** (v18 or higher)
 2. **LM Studio** running locally with a vision-capable model (e.g., LLaVA, Qwen-VL)
 3. **Python 3.12+** (for Latent Scope integration)
+
+> **Why LM Studio?**  
+> LM Studio makes it easy to run the latest AI vision-to-text models locally. New models can be downloaded and swapped in without changing any code—just load a compatible vision model and start analyzing!
 
 ### Installation
 
@@ -86,17 +92,21 @@ npm run ls:serve
 ### Searching
 
 1. Navigate to the **Search** page
-2. Enter keywords to search descriptions
-3. Filter by tags or scene type
-4. Set date ranges to narrow results
-5. **Click any filename** to open it in your file explorer
+2. Enter keywords to search descriptions (comma-separated for multiple terms)
+3. **Toggle AND/OR mode**: Use the switch to match ALL terms or ANY term
+4. Filter by tags or scene type
+5. Set date ranges to narrow results
+6. **Right-click tags** to edit or delete them inline
+7. Click the **+** button to add new tags to any image
+8. **Click any filename** to open it in your file explorer
 
 ### Tags & Objects
 
 1. Click **Tags** to explore your metadata
 2. Toggle between **Tags** and **Objects** tabs
 3. Switch between **Cloud View** (visual) and **List View** (detailed)
-4. Sort by frequency or alphabetical order to find top concepts
+4. Sort by frequency or **alphabetical order** with A-Z navigation links
+5. Click any letter to jump directly to that section
 
 ### Data Map (Latent Scope)
 
