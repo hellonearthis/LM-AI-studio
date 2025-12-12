@@ -21,7 +21,10 @@ function createWindow() {
         }
     });
 
-    mainWindow.loadFile('public/index.html');
+    // Switch to local server to support workers/WASM properly
+    // Wait a brief moment for server to start or assume it's ready (server.js starts fast)
+    // In production, we should wait for a 'ready' signal, but for this dev setup, it's fine.
+    mainWindow.loadURL('http://localhost:3000/index.html');
 }
 
 app.whenReady().then(createWindow);
@@ -133,4 +136,9 @@ ipcMain.handle('trash-file', async (event, filePath) => {
         console.error('Error moving file to trash:', error);
         throw error;
     }
+});
+
+// Open external URL
+ipcMain.handle('open-external', async (event, url) => {
+    await shell.openExternal(url);
 });

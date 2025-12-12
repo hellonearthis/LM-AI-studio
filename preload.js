@@ -8,5 +8,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getImagesFromFolder: (folderPath) => ipcRenderer.invoke('get-images-from-folder', folderPath),
     readFile: (filePath) => ipcRenderer.invoke('read-file', filePath),
     showInFolder: (filePath) => ipcRenderer.invoke('show-in-folder', filePath),
-    trashFile: (filePath) => ipcRenderer.invoke('trash-file', filePath)
+    trashFile: (filePath) => ipcRenderer.invoke('trash-file', filePath),
+    openExternal: (url) => ipcRenderer.invoke('open-external', url)
 });

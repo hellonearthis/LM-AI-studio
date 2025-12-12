@@ -14,8 +14,10 @@
     "author": "",
     "license": "ISC",
     "dependencies": {
+        "@duckdb/duckdb-wasm": "^1.30.0",
         "@google/generative-ai": "^0.21.0",
         "better-sqlite3": "^11.7.0",
+        "d3": "^7.9.0",
         "dotenv": "^16.4.7",
         "electron": "^33.2.1",
         "exif-parser": "^0.1.12",

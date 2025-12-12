@@ -89,7 +89,18 @@ selectFileBtn.addEventListener('click', async () => {
 
             // Read file using Electron API
             const fileBuffer = await window.electronAPI.readFile(filePath);
-            const base64Data = `data:image/jpeg;base64,${btoa(
+
+            // Detect MIME type from file extension
+            const ext = fileName.split('.').pop().toLowerCase();
+            const mimeTypes = {
+                'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+                'png': 'image/png', 'gif': 'image/gif',
+                'webp': 'image/webp', 'avif': 'image/avif',
+                'bmp': 'image/bmp', 'tiff': 'image/tiff', 'tif': 'image/tiff'
+            };
+            const mimeType = mimeTypes[ext] || 'image/jpeg';
+
+            const base64Data = `data:${mimeType};base64,${btoa(
                 new Uint8Array(fileBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
             )}`;
 
@@ -166,7 +177,43 @@ async function processSingleFile(filePath, fileName, fileBuffer, base64Data) {
         });
 
         if (checkResult.duplicate) {
-            showStatus(`File already in database (found at: ${checkResult.existingPath || filePath})`, 'info');
+            showStatus(`File already in database. Checking thumbnail...`, 'info');
+
+            // Check if thumbnail exists, generate if missing
+            const filenameBase = fileName.substring(0, fileName.lastIndexOf('.')) || fileName;
+            const thumbnailPath = `thumbnails/${filenameBase}.avif`;
+
+            try {
+                // Try to fetch the thumbnail to check existence
+                const thumbCheck = await fetch(`${API_BASE_URL}/${thumbnailPath}`, { method: 'HEAD' });
+
+                if (!thumbCheck.ok) {
+                    // Thumbnail missing - generate it
+                    showStatus('Thumbnail missing, generating...', 'info');
+                    await fetch(`${API_BASE_URL}/create-thumbnail`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            imageData: base64Data,
+                            filename: fileName
+                        })
+                    });
+                    showStatus('Thumbnail generated for existing record.', 'success');
+                } else {
+                    showStatus(`File already in database (found at: ${checkResult.existingPath || filePath})`, 'info');
+                }
+            } catch (e) {
+                console.warn('Thumbnail check failed, attempting to generate:', e);
+                // Attempt to generate anyway
+                await fetch(`${API_BASE_URL}/create-thumbnail`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        imageData: base64Data,
+                        filename: fileName
+                    })
+                });
+            }
 
             sidebarStatus.style.display = 'block';
             statProcessed.textContent = '1';
@@ -301,7 +348,18 @@ async function processBatch(files) {
 
             // Read file using Electron API
             const fileBuffer = await window.electronAPI.readFile(filePath);
-            const base64Data = `data:image/jpeg;base64,${btoa(
+
+            // Detect MIME type from file extension
+            const ext = filename.split('.').pop().toLowerCase();
+            const mimeTypes = {
+                'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+                'png': 'image/png', 'gif': 'image/gif',
+                'webp': 'image/webp', 'avif': 'image/avif',
+                'bmp': 'image/bmp', 'tiff': 'image/tiff', 'tif': 'image/tiff'
+            };
+            const mimeType = mimeTypes[ext] || 'image/jpeg';
+
+            const base64Data = `data:${mimeType};base64,${btoa(
                 new Uint8Array(fileBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
             )}`;
 

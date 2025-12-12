@@ -131,19 +131,79 @@ function renderCloud(data) {
 }
 
 function renderList(data) {
-    const html = data.map(item => `
-        <div class="tag-list-item">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span style="font-weight: 500; font-size: 1.1rem;">${item.name}</span>
-                <span class="badge">${item.count} images</span>
-            </div>
-            <div style="margin-top: 0.5rem; display: flex; justify-content: flex-end;">
-                <a href="search.html?tag=${encodeURIComponent(item.name)}" class="btn-sm">View Images →</a>
-            </div>
-        </div>
-    `).join('');
+    const sortMethod = document.getElementById('sortMethod').value;
+    const alphabetNav = document.getElementById('alphabetNav');
 
-    contentArea.innerHTML = `<div class="tag-list-container">${html}</div>`;
+    // Group by first letter if alphabetical sort
+    if (sortMethod === 'name') {
+        const grouped = {};
+        const letters = [];
+
+        data.forEach(item => {
+            const firstLetter = item.name.charAt(0).toUpperCase();
+            if (!grouped[firstLetter]) {
+                grouped[firstLetter] = [];
+                letters.push(firstLetter);
+            }
+            grouped[firstLetter].push(item);
+        });
+
+        // Populate alphabet nav
+        const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+        alphabetNav.innerHTML = alphabet.map(letter => {
+            const hasItems = letters.includes(letter);
+            return `<a href="#letter-${letter}" 
+                       style="display: inline-block; padding: 0.25rem 0.5rem; margin: 0.15rem; 
+                              text-decoration: none; border-radius: 4px; font-weight: 500;
+                              ${hasItems
+                    ? 'color: var(--accent); cursor: pointer;'
+                    : 'color: var(--text-secondary); opacity: 0.4; pointer-events: none;'
+                }"
+                       ${hasItems ? '' : 'tabindex="-1"'}>${letter}</a>`;
+        }).join('');
+        alphabetNav.style.display = 'block';
+
+        // Build grouped HTML
+        let html = '';
+        letters.sort().forEach(letter => {
+            html += `<div id="letter-${letter}" style="margin-bottom: 1.5rem;">
+                <h3 style="color: var(--accent); margin-bottom: 0.5rem; padding-bottom: 0.25rem; border-bottom: 1px solid var(--border);">${letter}</h3>
+                <div class="tag-list-container">
+                    ${grouped[letter].map(item => `
+                        <div class="tag-list-item">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <span style="font-weight: 500; font-size: 1.1rem;">${item.name}</span>
+                                <span class="badge">${item.count} images</span>
+                            </div>
+                            <div style="margin-top: 0.5rem; display: flex; justify-content: flex-end;">
+                                <a href="search.html?tag=${encodeURIComponent(item.name)}" class="btn-sm">View Images →</a>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>`;
+        });
+
+        contentArea.innerHTML = html;
+    } else {
+        // Hide alphabet nav for non-alphabetical sort
+        alphabetNav.style.display = 'none';
+
+        // Standard list render
+        const html = data.map(item => `
+            <div class="tag-list-item">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-weight: 500; font-size: 1.1rem;">${item.name}</span>
+                    <span class="badge">${item.count} images</span>
+                </div>
+                <div style="margin-top: 0.5rem; display: flex; justify-content: flex-end;">
+                    <a href="search.html?tag=${encodeURIComponent(item.name)}" class="btn-sm">View Images →</a>
+                </div>
+            </div>
+        `).join('');
+
+        contentArea.innerHTML = `<div class="tag-list-container">${html}</div>`;
+    }
 }
 
 // Start
