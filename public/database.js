@@ -34,6 +34,9 @@ async function initDatabase() {
 
         // Fetch all images from the server
         loadingDb.style.display = 'block';
+        const response = await fetch(`${API_BASE_URL}/images`);
+        if (!response.ok) throw new Error('Failed to load images');
+
         allImages = (await response.json()).map(img => {
             if (typeof img.analysis === 'string') {
                 try { img.analysis = JSON.parse(img.analysis || '{}'); } catch (e) { img.analysis = {}; }
@@ -52,12 +55,15 @@ async function initDatabase() {
             return;
         }
 
-        // Create Sentinel for Infinite Scroll
-        const sentinel = document.createElement('div');
-        sentinel.id = 'scroll-sentinel';
-        sentinel.style.width = '100%';
-        sentinel.style.height = '20px';
-        dbGrid.parentNode.appendChild(sentinel); // Append outside grid or ensure grid handles full width
+        // Create Sentinel for Infinite Scroll (if not already there)
+        let sentinel = document.getElementById('scroll-sentinel');
+        if (!sentinel) {
+            sentinel = document.createElement('div');
+            sentinel.id = 'scroll-sentinel';
+            sentinel.style.width = '100%';
+            sentinel.style.height = '20px';
+            dbGrid.parentNode.appendChild(sentinel);
+        }
 
         // Setup Intersection Observer
         setupIntersectionObserver(sentinel);

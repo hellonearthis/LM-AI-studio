@@ -659,10 +659,11 @@ async function updateTag(id, type, oldTag, newTag, action) {
 
         // Update Fuse index collection to reflect new tags/objects
         if (fuse) {
-            // Re-index with the updated allImages (which already has the parsed analysis)
             fuse.setCollection(allImages);
-            console.log('[SEARCH] Fuse index updated with new tag/object data');
         }
+
+        // Refresh stats list
+        loadStats();
 
         // 4. In-Place UI Update
         const card = document.querySelector(`.card[data-id="${id}"]`);
