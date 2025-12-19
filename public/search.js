@@ -657,6 +657,13 @@ async function updateTag(id, type, oldTag, newTag, action) {
 
         if (!response.ok) throw new Error('Update failed');
 
+        // Update Fuse index collection to reflect new tags/objects
+        if (fuse) {
+            // Re-index with the updated allImages (which already has the parsed analysis)
+            fuse.setCollection(allImages);
+            console.log('[SEARCH] Fuse index updated with new tag/object data');
+        }
+
         // 4. In-Place UI Update
         const card = document.querySelector(`.card[data-id="${id}"]`);
         if (card) {

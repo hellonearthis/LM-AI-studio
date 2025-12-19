@@ -34,10 +34,12 @@ async function initDatabase() {
 
         // Fetch all images from the server
         loadingDb.style.display = 'block';
-        const response = await fetch(`${API_BASE_URL}/images`);
-        if (!response.ok) throw new Error('Failed to fetch images');
-
-        allImages = await response.json();
+        allImages = (await response.json()).map(img => {
+            if (typeof img.analysis === 'string') {
+                try { img.analysis = JSON.parse(img.analysis || '{}'); } catch (e) { img.analysis = {}; }
+            }
+            return img;
+        });
         loadingDb.style.display = 'none';
 
         // Update the entry count in the header
@@ -165,10 +167,18 @@ function createCardHtml(img) {
             </div>
 
             <!-- Tags Section -->
-            <div class="tags-container">
-                ${(analysis.objects || []).map(obj => `<span class="tag" style="background-color: rgba(16, 185, 129, 0.2); color: #34d399;">${obj}</span>`).join('')}
-                ${(analysis.tags || []).map(tag => `<span class="tag">${tag}</span>`).join('')}
-                ${analysis.scene_type ? `<span class="tag" style="background-color: rgba(129, 140, 248, 0.2); color: #818cf8;">${analysis.scene_type}</span>` : ''}
+            <div class="tags-section">
+                <div class="tags-container" style="margin-bottom: 0.5rem;">
+                    <strong style="font-size: 0.75rem; color: var(--text-secondary); margin-right: 0.5rem;">Objects:</strong>
+                    ${(analysis.objects || []).map(obj => `<span class="tag editable" data-id="${img.id}" data-type="objects" data-tag="${obj}" style="background-color: rgba(16, 185, 129, 0.2); color: #34d399; cursor: context-menu;">${obj}</span>`).join('')}
+                    <button class="add-tag-btn" data-id="${img.id}" data-type="objects" title="Add Object">+</button>
+                </div>
+                <div class="tags-container">
+                    <strong style="font-size: 0.75rem; color: var(--text-secondary); margin-right: 0.5rem;">Tags:</strong>
+                    ${(analysis.tags || []).map(tag => `<span class="tag editable" data-id="${img.id}" data-type="tags" data-tag="${tag}" style="cursor: context-menu;">${tag}</span>`).join('')}
+                    ${analysis.scene_type ? `<span class="tag" style="background-color: rgba(129, 140, 248, 0.2); color: #818cf8;">${analysis.scene_type}</span>` : ''}
+                    <button class="add-tag-btn" data-id="${img.id}" data-type="tags" title="Add Tag">+</button>
+                </div>
             </div>
         </div>
     `;
@@ -381,27 +391,34 @@ if (closeStatus) {
 }
 
 // ============================================================================
-// CONTEXT MENU & THUMBNAIL REGEN
+// CONTEXT MENU & TAG MANAGEMENT
 // ============================================================================
 const contextMenu = document.getElementById('contextMenu');
-let ctxTarget = null; // { id, type, card }
+let ctxTarget = null; // { id, tag, type, card }
 
-function showContextMenu(e, id, type, card) {
-    ctxTarget = { id, type, card };
+function showContextMenu(e, id, type, tag = null, card = null) {
+    ctxTarget = { id, type, tag, card };
     contextMenu.style.display = 'block';
 
     // Position menu
     const menuWidth = 180;
-    const menuHeight = 50;
+    const menuHeight = type === 'thumbnail' ? 60 : 120;
     let x = e.clientX;
     let y = e.clientY;
 
-    // Boundary checks
     if (x + menuWidth > window.innerWidth) x -= menuWidth;
     if (y + menuHeight > window.innerHeight) y -= menuHeight;
 
     contextMenu.style.left = `${x}px`;
     contextMenu.style.top = `${y}px`;
+
+    // Show/hide relevant items
+    document.getElementById('ctxRegenThumb').style.display = type === 'thumbnail' ? 'block' : 'none';
+    document.getElementById('ctxEdit').style.display = type === 'tag' ? 'block' : 'none';
+    document.getElementById('ctxDelete').style.display = type === 'tag' ? 'block' : 'none';
+
+    const dividers = contextMenu.querySelectorAll('.context-menu-divider');
+    dividers.forEach(d => d.style.display = type === 'tag' ? 'block' : 'none');
 }
 
 function hideContextMenu() {
@@ -412,23 +429,218 @@ function hideContextMenu() {
 document.addEventListener('click', hideContextMenu);
 
 document.addEventListener('contextmenu', (e) => {
+    // Thumbnail Right-Click
     const thumb = e.target.closest('.thumbnail-preview');
     if (thumb) {
         e.preventDefault();
         const card = thumb.closest('.card');
         const id = card.dataset.id;
-        showContextMenu(e, id, 'thumbnail', card);
-    } else {
-        hideContextMenu();
+        showContextMenu(e, id, 'thumbnail', null, card);
+        return;
+    }
+
+    // Tag Right-Click
+    const tagEl = e.target.closest('.tag.editable');
+    if (tagEl) {
+        e.preventDefault();
+        e.stopPropagation();
+        showContextMenu(e, tagEl.dataset.id, 'tag', tagEl.dataset.tag);
+        return;
+    }
+
+    hideContextMenu();
+});
+
+// Click delegation for Add Tag button
+dbGrid.addEventListener('click', (e) => {
+    if (e.target.closest('.add-tag-btn')) {
+        const btn = e.target.closest('.add-tag-btn');
+        const id = btn.dataset.id;
+        const type = btn.dataset.type;
+        addTag(id, type);
     }
 });
 
+// Context Menu Actions
 document.getElementById('ctxRegenThumb').addEventListener('click', async () => {
     if (!ctxTarget || ctxTarget.type !== 'thumbnail') return;
     const { id, card } = ctxTarget;
     hideContextMenu();
     await regenerateThumbnail(id, card);
 });
+
+document.getElementById('ctxEdit').addEventListener('click', () => {
+    if (!ctxTarget || ctxTarget.type !== 'tag') return;
+    const { id, tag, type } = ctxTarget;
+    // Note: type here is 'tag' but we need 'tags' or 'objects'. 
+    // In search.js we used dataset.type which we've now added to createCardHtml.
+    // Wait, in showContextMenu above I pass 'tag' as the type of context. 
+    // I need to know if it's 'tags' or 'objects'.
+    // Let's refine showContextMenu to accept context_type too.
+    hideContextMenu();
+
+    // Re-finding the element to get the specific type (tags/objects)
+    const tagEl = document.querySelector(`.tag.editable[data-id="${id}"][data-tag="${tag}"]`);
+    const realType = tagEl ? tagEl.dataset.type : 'tags';
+
+    showTagInputModal(`Edit ${realType.slice(0, -1)}`, tag, (newTag) => {
+        if (newTag && newTag.trim() && newTag.trim() !== tag) {
+            updateTag(id, realType, tag, newTag.trim(), 'edit');
+        }
+    });
+});
+
+document.getElementById('ctxDelete').addEventListener('click', () => {
+    if (!ctxTarget || ctxTarget.type !== 'tag') return;
+    const { id, tag } = ctxTarget;
+    hideContextMenu();
+
+    const tagEl = document.querySelector(`.tag.editable[data-id="${id}"][data-tag="${tag}"]`);
+    const realType = tagEl ? tagEl.dataset.type : 'tags';
+
+    showConfirmModal(`Delete "${tag}"?`, () => {
+        updateTag(id, realType, tag, null, 'delete');
+    });
+});
+
+async function addTag(id, type) {
+    showTagInputModal(`Add new ${type.slice(0, -1)}`, '', (newTag) => {
+        if (newTag && newTag.trim()) {
+            updateTag(id, type, null, newTag.trim(), 'add');
+        }
+    });
+}
+
+// Update Tag Backend Call
+async function updateTag(id, type, oldTag, newTag, action) {
+    try {
+        const image = allImages.find(img => img.id == id);
+        if (!image) throw new Error('Image not found in local cache');
+
+        let analysis = image.analysis || {};
+        let list = analysis[type] || [];
+
+        if (action === 'edit') {
+            const idx = list.indexOf(oldTag);
+            if (idx !== -1) list[idx] = newTag;
+        } else if (action === 'delete') {
+            list = list.filter(t => t !== oldTag);
+        } else if (action === 'add') {
+            if (!list.includes(newTag)) list.push(newTag);
+        }
+
+        analysis[type] = list;
+        image.analysis = analysis; // Keep local cache in sync
+
+        const response = await fetch(`${API_BASE_URL}/update-tags`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, analysis })
+        });
+
+        if (!response.ok) throw new Error('Update failed');
+
+        // In-Place UI Update
+        const card = document.querySelector(`.card[data-id="${id}"]`);
+        if (card) {
+            const newHtml = createCardHtml(image);
+            card.outerHTML = newHtml;
+        }
+
+    } catch (error) {
+        console.error('Tag update error:', error);
+        alert('Failed to update tags: ' + error.message);
+    }
+}
+
+// Custom Input Modal (Replaces prompt)
+function showTagInputModal(title, initialValue, callback) {
+    const modal = document.createElement('div');
+    modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 9999;';
+
+    modal.innerHTML = `
+        <div style="background: var(--card-bg); padding: 2rem; border-radius: 12px; border: 1px solid var(--border); max-width: 400px; width: 90%;">
+            <h3 style="margin: 0 0 1rem 0; color: var(--text-primary);">${title}</h3>
+            <input type="text" id="modalInput" value="${initialValue}" style="width: 100%; padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border); background: #1f2937; color: white; margin-bottom: 1.5rem;" autofocus>
+            <div style="display: flex; gap: 1rem; justify-content: flex-end;">
+                <button id="cancelModalBtn" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer;">Cancel</button>
+                <button id="saveModalBtn" style="background: var(--accent); border: none; color: white; padding: 0.5rem 1.5rem; border-radius: 6px; cursor: pointer; font-weight: 500;">Save</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const input = modal.querySelector('#modalInput');
+    const saveBtn = modal.querySelector('#saveModalBtn');
+    const cancelBtn = modal.querySelector('#cancelModalBtn');
+
+    input.select();
+
+    const cleanup = () => {
+        modal.remove();
+        document.removeEventListener('keydown', keyHandler);
+    };
+
+    const keyHandler = (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const val = input.value;
+            cleanup();
+            callback(val);
+        } else if (e.key === 'Escape') {
+            cleanup();
+        }
+    };
+
+    document.addEventListener('keydown', keyHandler);
+    saveBtn.onclick = () => { const val = input.value; cleanup(); callback(val); };
+    cancelBtn.onclick = cleanup;
+    modal.onclick = (e) => { if (e.target === modal) cleanup(); };
+}
+
+// Custom Confirmation Modal
+function showConfirmModal(message, onConfirm) {
+    const modal = document.createElement('div');
+    modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;';
+
+    modal.innerHTML = `
+        <div style="background: var(--card-bg); padding: 2rem; border-radius: 12px; border: 1px solid var(--border); max-width: 400px; width: 90%; text-align: center;">
+            <p style="margin: 0 0 1.5rem 0; color: var(--text-primary); font-size: 1.1rem;">${message}</p>
+            <div style="display: flex; gap: 1rem; justify-content: center;">
+                <button id="cancelConfirmBtn" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.5rem 1.5rem; border-radius: 6px; cursor: pointer;">Cancel</button>
+                <button id="okConfirmBtn" style="background: #ef4444; border: none; color: white; padding: 0.5rem 1.5rem; border-radius: 6px; cursor: pointer; font-weight: 500;">Delete</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const okBtn = modal.querySelector('#okConfirmBtn');
+    const cancelBtn = modal.querySelector('#cancelConfirmBtn');
+
+    setTimeout(() => okBtn.focus(), 10);
+
+    const cleanup = () => {
+        document.removeEventListener('keydown', keyHandler);
+        modal.remove();
+    };
+
+    const keyHandler = (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            cleanup();
+            onConfirm();
+        } else if (e.key === 'Escape') {
+            cleanup();
+        }
+    };
+
+    document.addEventListener('keydown', keyHandler);
+    okBtn.onclick = () => { cleanup(); onConfirm(); };
+    cancelBtn.onclick = cleanup;
+    modal.onclick = (e) => { if (e.target === modal) cleanup(); };
+}
 
 async function regenerateThumbnail(id, cardElement) {
     try {
@@ -445,7 +657,6 @@ async function regenerateThumbnail(id, cardElement) {
 
         const data = await response.json();
 
-        // Refresh the image by appending a timestamp to bypass cache
         if (data.thumbPath) {
             thumbImg.src = `${data.thumbPath}?t=${Date.now()}`;
         }
