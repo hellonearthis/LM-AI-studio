@@ -73,7 +73,8 @@ async function initDatabase() {
 
     } catch (error) {
         console.error('Error:', error);
-        loadingDb.textContent = 'Error loading database.';
+        loadingDb.style.display = 'block';
+        loadingDb.textContent = 'Error loading database. Please check console.';
     }
 }
 
@@ -112,9 +113,20 @@ function renderBatch() {
 }
 
 function createCardHtml(img) {
-    // Parse stored JSON data
-    const analysis = JSON.parse(img.analysis || '{}');
-    const metadata = JSON.parse(img.metadata || '{}');
+    // Parse stored JSON data (handle if already parsed or string)
+    let analysis = img.analysis;
+    if (typeof analysis === 'string') {
+        try { analysis = JSON.parse(analysis || '{}'); } catch (e) { analysis = {}; }
+    } else {
+        analysis = analysis || {};
+    }
+
+    let metadata = img.metadata;
+    if (typeof metadata === 'string') {
+        try { metadata = JSON.parse(metadata || '{}'); } catch (e) { metadata = {}; }
+    } else {
+        metadata = metadata || {};
+    }
     const date = new Date(img.created_at).toLocaleDateString();
 
     // Extract key metadata fields for display
