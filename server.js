@@ -514,6 +514,42 @@ app.post('/validate-database', async (req, res) => {
     }
 });
 
+// Regenerate specific thumbnail
+app.post('/regenerate-thumbnail', async (req, res) => {
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ error: 'Image ID required' });
+
+    try {
+        const img = db.prepare(`SELECT * FROM images WHERE id = ?`).get(id);
+        if (!img) return res.status(404).json({ error: 'Image not found' });
+
+        const filePath = img.path;
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).json({ error: 'Source file no longer exists' });
+        }
+
+        const filenameBase = img.filename.substring(0, img.filename.lastIndexOf('.')) || img.filename;
+        const thumbPath = path.join(__dirname, 'public', 'thumbnails', `${filenameBase}.avif`);
+
+        console.log(`[THUMB] Manual regeneration: ${filePath}`);
+
+        const buffer = fs.readFileSync(filePath);
+        await sharp(buffer)
+            .resize(100, 100, {
+                fit: 'contain',
+                background: { r: 0, g: 0, b: 0, alpha: 0 }
+            })
+            .avif({ quality: 50 })
+            .toFile(thumbPath);
+
+        res.json({ success: true, thumbPath: `thumbnails/${filenameBase}.avif` });
+
+    } catch (err) {
+        console.error('[THUMB] Regeneration Error:', err);
+        res.status(500).json({ error: 'Failed to regenerate thumbnail', details: err.message });
+    }
+});
+
 // Start Server...
 app.listen(PORT, () => {
     console.log(`[SERVER] Running on http://localhost:${PORT}`);

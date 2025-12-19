@@ -304,12 +304,28 @@ searchResults.addEventListener('click', (e) => {
 
 // Context Menu Delegation
 searchResults.addEventListener('contextmenu', (e) => {
+    // Check if right-clicking a thumbnail
+    const thumb = e.target.closest('.thumbnail-preview');
+    if (thumb) {
+        e.preventDefault();
+        e.stopPropagation();
+        const card = thumb.closest('.card');
+        const id = card.dataset.id;
+        showContextMenu(e, id, 'thumbnail', null, card);
+        return;
+    }
+
+    // Check if right-clicking a tag
     const tagEl = e.target.closest('.tag.editable');
     if (tagEl) {
         e.preventDefault();
+        e.stopPropagation();
         console.log('Right-click detected on tag:', tagEl.dataset.tag);
-        showContextMenu(e, tagEl.dataset.id, tagEl.dataset.tag, tagEl.dataset.type);
+        showContextMenu(e, tagEl.dataset.id, 'tag', tagEl.dataset.tag);
+        return;
     }
+
+    hideContextMenu();
 });
 
 // Show Delete Modal (matches database.js)
@@ -391,11 +407,27 @@ async function deleteFromDatabase(id, cardElement) {
 // ============================================================================
 
 const contextMenu = document.getElementById('contextMenu');
-let ctxTarget = null; // { id, tag, type }
+let ctxTarget = null; // { id, tag, type, card }
 
-function showContextMenu(e, id, tag, type) {
-    ctxTarget = { id, tag, type };
+function showContextMenu(e, id, type, tag = null, card = null) {
+    ctxTarget = { id, type, tag, card };
     contextMenu.style.display = 'block';
+
+    // Show/Hide relevant items
+    const regenItem = document.getElementById('ctxRegenThumb');
+    const editItem = document.getElementById('ctxEdit');
+    const deleteItem = document.getElementById('ctxDelete');
+
+    if (type === 'thumbnail') {
+        regenItem.style.display = 'block';
+        editItem.style.display = 'none';
+        deleteItem.style.display = 'none';
+    } else {
+        regenItem.style.display = 'none';
+        editItem.style.display = 'block';
+        deleteItem.style.display = 'block';
+    }
+
     contextMenu.style.left = `${e.clientX}px`;
     contextMenu.style.top = `${e.clientY}px`;
 }
@@ -407,6 +439,14 @@ function hideContextMenu() {
 
 // Global click to hide context menu
 document.addEventListener('click', hideContextMenu);
+
+// Thumbnail Regen Action
+document.getElementById('ctxRegenThumb').addEventListener('click', async () => {
+    if (!ctxTarget || ctxTarget.type !== 'thumbnail') return;
+    const { id, card } = ctxTarget;
+    hideContextMenu();
+    await regenerateThumbnail(id, card);
+});
 
 // Context Menu Actions
 document.getElementById('ctxEdit').addEventListener('click', () => {
@@ -741,6 +781,36 @@ async function loadStats() {
         console.error('Error loading stats:', error);
         document.getElementById('topTagsList').innerHTML = '<span style="color: var(--text-secondary);">Error loading tags</span>';
         document.getElementById('topObjectsList').innerHTML = '<span style="color: var(--text-secondary);">Error loading objects</span>';
+    }
+}
+
+// Regenerate Thumbnail Logic
+async function regenerateThumbnail(id, cardElement) {
+    try {
+        const thumbImg = cardElement.querySelector('.thumbnail-preview');
+        thumbImg.style.opacity = '0.5';
+
+        const response = await fetch(`${API_BASE_URL}/regenerate-thumbnail`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id })
+        });
+
+        if (!response.ok) throw new Error('Regeneration failed');
+
+        const data = await response.json();
+
+        // Refresh the image by appending a timestamp to bypass cache
+        if (data.thumbPath) {
+            thumbImg.src = `${data.thumbPath}?t=${Date.now()}`;
+        }
+
+    } catch (error) {
+        console.error('Thumbnail regeneration error:', error);
+        alert('Failed to regenerate thumbnail: ' + error.message);
+    } finally {
+        const thumbImg = cardElement.querySelector('.thumbnail-preview');
+        if (thumbImg) thumbImg.style.opacity = '1';
     }
 }
 

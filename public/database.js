@@ -381,6 +381,85 @@ if (closeStatus) {
 }
 
 // ============================================================================
+// CONTEXT MENU & THUMBNAIL REGEN
+// ============================================================================
+const contextMenu = document.getElementById('contextMenu');
+let ctxTarget = null; // { id, type, card }
+
+function showContextMenu(e, id, type, card) {
+    ctxTarget = { id, type, card };
+    contextMenu.style.display = 'block';
+
+    // Position menu
+    const menuWidth = 180;
+    const menuHeight = 50;
+    let x = e.clientX;
+    let y = e.clientY;
+
+    // Boundary checks
+    if (x + menuWidth > window.innerWidth) x -= menuWidth;
+    if (y + menuHeight > window.innerHeight) y -= menuHeight;
+
+    contextMenu.style.left = `${x}px`;
+    contextMenu.style.top = `${y}px`;
+}
+
+function hideContextMenu() {
+    contextMenu.style.display = 'none';
+    ctxTarget = null;
+}
+
+document.addEventListener('click', hideContextMenu);
+
+document.addEventListener('contextmenu', (e) => {
+    const thumb = e.target.closest('.thumbnail-preview');
+    if (thumb) {
+        e.preventDefault();
+        const card = thumb.closest('.card');
+        const id = card.dataset.id;
+        showContextMenu(e, id, 'thumbnail', card);
+    } else {
+        hideContextMenu();
+    }
+});
+
+document.getElementById('ctxRegenThumb').addEventListener('click', async () => {
+    if (!ctxTarget || ctxTarget.type !== 'thumbnail') return;
+    const { id, card } = ctxTarget;
+    hideContextMenu();
+    await regenerateThumbnail(id, card);
+});
+
+async function regenerateThumbnail(id, cardElement) {
+    try {
+        const thumbImg = cardElement.querySelector('.thumbnail-preview');
+        thumbImg.style.opacity = '0.5';
+
+        const response = await fetch(`${API_BASE_URL}/regenerate-thumbnail`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id })
+        });
+
+        if (!response.ok) throw new Error('Regeneration failed');
+
+        const data = await response.json();
+
+        // Refresh the image by appending a timestamp to bypass cache
+        if (data.thumbPath) {
+            thumbImg.src = `${data.thumbPath}?t=${Date.now()}`;
+        }
+
+    } catch (error) {
+        console.error('Thumbnail regeneration error:', error);
+        alert('Failed to regenerate thumbnail: ' + error.message);
+    } finally {
+        const thumbImg = cardElement.querySelector('.thumbnail-preview');
+        if (thumbImg) thumbImg.style.opacity = '1';
+    }
+}
+
+// ============================================================================
 // INITIALIZE
 // ============================================================================
 // Load the database when the page loads
