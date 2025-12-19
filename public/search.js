@@ -44,9 +44,12 @@ async function initSearch() {
             fetch('search-index.json')
         ]);
 
-        if (!imagesRes.ok) throw new Error('Failed to load images');
-
-        allImages = await imagesRes.json();
+        allImages = (await imagesRes.json()).map(img => {
+            if (typeof img.analysis === 'string') {
+                try { img.analysis = JSON.parse(img.analysis || '{}'); } catch (e) { img.analysis = {}; }
+            }
+            return img;
+        });
 
         // Attempt to load pre-computed index
         let fuseIndex = null;
@@ -131,12 +134,8 @@ function performSearch() {
         const fuseResults = fuse.search(queryText);
         results = fuseResults.map(res => res.item);
     } else {
-        // If no query, show everything (will be filtered by metadata)
-        results = fuse._docs || allImages.map(img => {
-            let parsed = {};
-            try { parsed = typeof img.analysis === 'string' ? JSON.parse(img.analysis) : (img.analysis || {}); } catch (e) { }
-            return { ...img, analysis: parsed };
-        });
+        // If no query, show everything
+        results = [...allImages];
     }
 
     // 2. Apply Filters (Client-Side)
@@ -622,21 +621,21 @@ function showConfirmModal(message, onConfirm) {
 // Update Tag Backend Call
 async function updateTag(id, type, oldTag, newTag, action) {
     try {
-        const image = window.currentSearchResults.find(img => img.id == id);
-        if (!image) throw new Error('Image not found in local cache');
+        // 1. Update master list (allImages)
+        const masterImage = allImages.find(img => img.id == id);
 
-        // Handle analysis correctly whether it's string or object
-        let analysis = typeof image.analysis === 'string'
-            ? JSON.parse(image.analysis || '{}')
-            : (image.analysis || {});
+        // 2. Update current search results (if exists)
+        const resultImage = window.currentSearchResults ? window.currentSearchResults.find(img => img.id == id) : null;
 
+        const image = masterImage || resultImage;
+        if (!image) throw new Error('Image not found in any local cache');
+
+        let analysis = image.analysis || {};
         let list = analysis[type] || [];
 
         if (action === 'edit') {
             const idx = list.indexOf(oldTag);
-            console.log(`[UPDATE-TAG] Edit action. Type: ${type}, Old: "${oldTag}", New: "${newTag}", Index: ${idx}`, list);
             if (idx !== -1) list[idx] = newTag;
-            else console.warn(`[UPDATE-TAG] Tag "${oldTag}" not found in list!`);
         } else if (action === 'delete') {
             list = list.filter(t => t !== oldTag);
         } else if (action === 'add') {
@@ -645,7 +644,11 @@ async function updateTag(id, type, oldTag, newTag, action) {
 
         analysis[type] = list; // Update the list
 
-        // Send update
+        // Update BOTH references to ensure consistency
+        if (masterImage) masterImage.analysis = analysis;
+        if (resultImage) resultImage.analysis = analysis;
+
+        // 3. Send update to server
         const response = await fetch(`${API_BASE_URL}/update-tags`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -654,17 +657,22 @@ async function updateTag(id, type, oldTag, newTag, action) {
 
         if (!response.ok) throw new Error('Update failed');
 
-        // Update local cache - store as string to match initial load format if that's how it comes
-        image.analysis = JSON.stringify(analysis);
-
-        // Refresh search to show changes
-        await performSearch();
+        // 4. In-Place UI Update
+        const card = document.querySelector(`.card[data-id="${id}"]`);
+        if (card) {
+            // Re-render only the inner content to preserve card structure if needed, 
+            // but createResultHtml returns a full card string.
+            // Let's replace the whole card's content or outer if simpler.
+            const newHtml = createResultHtml(image);
+            card.outerHTML = newHtml;
+        } else {
+            // Fallback for extreme cases (shouldn't happen if card is visible)
+            await performSearch();
+        }
 
     } catch (error) {
         console.error('Tag update error:', error);
         alert('Failed to update tags: ' + error.message);
-        searchBtn.disabled = false;
-        searchBtn.textContent = 'Search Images';
     }
 }
 
