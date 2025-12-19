@@ -42,12 +42,33 @@
                     <h1>Database</h1>
                     <p>View and manage your analyzed images.</p>
                 </div>
-                <div
-                    style="background: var(--card-bg); padding: 0.5rem 1rem; border-radius: 8px; border: 1px solid var(--border);">
-                    <span style="color: var(--text-secondary);">Total Entries:</span>
-                    <span id="dbCount" style="font-weight: bold; color: var(--accent); margin-left: 0.5rem;">0</span>
+                <div style="display: flex; gap: 1rem; align-items: center;">
+                    <button id="validateBtn" class="secondary-btn"
+                        style="background: var(--card-bg); border: 1px solid var(--accent); color: var(--accent); padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 0.5rem;">
+                        <span>🛠️</span> Validate Database
+                    </button>
+                    <div
+                        style="background: var(--card-bg); padding: 0.5rem 1rem; border-radius: 8px; border: 1px solid var(--border);">
+                        <span style="color: var(--text-secondary);">Total Entries:</span>
+                        <span id="dbCount"
+                            style="font-weight: bold; color: var(--accent); margin-left: 0.5rem;">0</span>
+                    </div>
                 </div>
             </header>
+
+            <div id="validationStatus"
+                style="display: none; background: rgba(52, 211, 153, 0.1); border: 1px solid var(--accent); padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; position: relative;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span id="validationText" style="color: var(--text-primary);">Validating database...</span>
+                    <button id="closeStatus"
+                        style="background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 1.2rem;">&times;</button>
+                </div>
+                <div id="validationProgress"
+                    style="height: 4px; background: var(--border); border-radius: 2px; margin-top: 0.5rem; overflow: hidden;">
+                    <div id="validationProgressBar"
+                        style="width: 0%; height: 100%; background: var(--accent); transition: width 0.3s;"></div>
+                </div>
+            </div>
 
             <div id="loadingDb" style="text-align: center; padding: 2rem; color: var(--text-secondary);">
                 Loading database...

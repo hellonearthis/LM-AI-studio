@@ -15,11 +15,12 @@ An Electron-based desktop application that uses local AI (via LM Studio) to anal
 - **Smart Duplicate Detection**: Content-based hashing prevents duplicates while allowing metadata updates
 - **Batch Processing**: Process entire folders of images at once
 - **Advanced Fuzzy Search**: Typos? No problem. Find images instantly with weighted fuzzy matching (Fuse.js)
-- **Instant Search**: Server-side pre-computed indexing ensures lightning-fast search initialization
+- **Instant Search**: Server-side pre-computed indexing and client-side pagination ensure lightning-fast performance even with 6,500+ items
+- **Automated Database Healing**: Maintenance tool to prune missing records and auto-regenerate deleted thumbnails
 - **Inline Tag Management**: Edit, delete, and add tags directly from search results via right-click
 - **Searchable Database**: Find images by tags, scene type, date, or text search
-- **AVIF Thumbnails**: Efficient 100x100 thumbnail generation with automatic regeneration for missing files
-- **Alphabetical Tag Navigation**: Jump to any letter in alphabetical tag view
+- **AVIF Thumbnails**: Efficient 100x100 thumbnail generation with automatic healing for missing files
+- **Alphabetical Tag Navigation**: Jump to any letter in alphabetical tag view with A-Z navigation
 
 ---
 
@@ -89,6 +90,7 @@ npm run ls:serve
 2. Browse all analyzed images with thumbnails
 3. Click on a filename to reveal the file in Explorer
 4. Use the preview button to view the full image
+5. **Validate Database**: Click the 🛠️ button to scan for missing files, prune dead records, and heal broken thumbnails
 
 ### Searching
 
@@ -101,6 +103,7 @@ npm run ls:serve
 7. **Right-click tags** to edit or delete them inline
 8. Click the **+** button to add new tags to any image
 9. **Click any filename** to open it in your file explorer
+10. **Paginated Results**: Large result sets are loaded in batches as you scroll for continuous performance
 
 ### Tags & Objects
 

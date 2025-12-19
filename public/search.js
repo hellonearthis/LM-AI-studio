@@ -23,6 +23,13 @@ let allImages = [];
 let fuse = null;
 let isInitialized = false;
 
+// State for pagination
+let filteredImages = [];
+let currentIndex = 0;
+const BATCH_SIZE = 50;
+let observer = null;
+const sentinel = document.getElementById('scroll-sentinel');
+
 // Initialize Search Page
 async function initSearch() {
     if (isInitialized) return;
@@ -92,8 +99,8 @@ async function initSearch() {
 
         isInitialized = true;
 
-        // Initial search (show all)
-        performSearch();
+        // NO LONGER running initial search automatically.
+        // performSearch();
 
     } catch (error) {
         console.error('Failed to initialize search:', error);
@@ -122,35 +129,23 @@ function performSearch() {
     // 1. Fuse.js Search (if query exists)
     if (queryText) {
         const fuseResults = fuse.search(queryText);
-        // Fuse returns { item, score, ... }
         results = fuseResults.map(res => res.item);
     } else {
-        // If no query, show all (filtered by metadata later)
-        // We need the parsed version we created for Fuse, or just map back to allImages?
-        // Fuse holds the parsed version in valid manner, let's use allImages but we need to ensure analysis is parsed object for display filtering
-        // Actually, our fuse instance was created with `indexedImages`.
-        // Let's use the same list source.
-        results = fuse._docs; // Accessing the docs directly or we can just resort to our parsed list.
-        // Better:
-        results = fuse.getIndex().docs || fuse._docs; // fallback if internals change, just re-map allImages
-        if (!results) {
-            results = allImages.map(img => {
-                let parsed = {};
-                try { parsed = typeof img.analysis === 'string' ? JSON.parse(img.analysis) : (img.analysis || {}); } catch (e) { }
-                return { ...img, analysis: parsed };
-            });
-        }
+        // If no query, show everything (will be filtered by metadata)
+        results = fuse._docs || allImages.map(img => {
+            let parsed = {};
+            try { parsed = typeof img.analysis === 'string' ? JSON.parse(img.analysis) : (img.analysis || {}); } catch (e) { }
+            return { ...img, analysis: parsed };
+        });
     }
 
     // 2. Apply Filters (Client-Side)
     results = results.filter(img => {
-        // Scene Type
         if (typeFilter !== 'all') {
             const scene = img.analysis.scene_type || '';
             if (scene.toLowerCase() !== typeFilter.toLowerCase()) return false;
         }
 
-        // Date Range
         const imgDate = new Date(img.created_at);
         if (startFilter) {
             if (imgDate < new Date(startFilter)) return false;
@@ -164,12 +159,105 @@ function performSearch() {
         return true;
     });
 
-    // Store results globally for local editing access
-    window.currentSearchResults = results;
-    displayResults(results);
+    // 3. Reset Pagination and Display
+    window.currentSearchResults = results; // Store for tag updates
+    filteredImages = results;
+    currentIndex = 0;
+    searchResults.innerHTML = '';
+
+    resultsCount.textContent = `Found ${results.length} results`;
+
+    if (results.length === 0) {
+        searchResults.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 2rem; color: var(--text-secondary);">No images found matching your criteria.</div>';
+    } else {
+        setupIntersectionObserver();
+        renderBatch();
+    }
 
     searchBtn.disabled = false;
     searchBtn.textContent = 'Search Images';
+}
+
+function setupIntersectionObserver() {
+    if (observer) observer.disconnect();
+
+    observer = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting) {
+            renderBatch();
+        }
+    }, { rootMargin: '400px' });
+
+    if (sentinel) observer.observe(sentinel);
+}
+
+function renderBatch() {
+    if (currentIndex >= filteredImages.length) {
+        if (observer) observer.disconnect();
+        return;
+    }
+
+    const batch = filteredImages.slice(currentIndex, currentIndex + BATCH_SIZE);
+    const batchHtml = batch.map(img => createResultHtml(img)).join('');
+
+    searchResults.insertAdjacentHTML('beforeend', batchHtml);
+    currentIndex += batch.length;
+}
+
+// Factor out result HTML generation (similar to card creation in database.js)
+function createResultHtml(img) {
+    const date = new Date(img.created_at).toLocaleDateString();
+
+    let displayPath;
+    if (img.path && img.path.endsWith('.avif')) {
+        displayPath = img.path.includes('thumbnails/') ? img.path : `thumbnails/${img.path}`;
+    } else {
+        const filenameBase = img.filename.substring(0, img.filename.lastIndexOf('.')) || img.filename;
+        displayPath = `thumbnails/${filenameBase}.avif`;
+    }
+
+    const analysis = img.analysis || {};
+    const objects = analysis.objects || [];
+    const tags = analysis.tags || [];
+
+    return `
+        <div class="card" data-id="${img.id}">
+            <div style="display: flex; gap: 1rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;">
+                <img src="${displayPath}" 
+                     data-fullpath="${img.path}"
+                     class="thumbnail-preview"
+                     onerror="this.style.display='none'"
+                     style="width: 80px; height: 80px; object-fit: cover; border-radius: 6px; cursor: pointer;"
+                     title="Click to view full size">
+                <div style="flex: 1; min-width: 0;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                        <h3 class="file-link" data-path="${img.path}" style="margin: 0; color: var(--accent); font-size: 1rem; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Show in folder">${img.filename}</h3>
+                        <button class="delete-btn" data-id="${img.id}" style="background: transparent; border: 1px solid #ef4444; color: #ef4444; padding: 0.25rem 0.75rem; border-radius: 6px; cursor: pointer; font-size: 0.75rem; transition: all 0.2s;">X</button>
+                    </div>
+                    <small style="color: var(--text-secondary);">${date}</small>
+                    <div style="margin-top: 0.25rem;">
+                        <span class="badge" style="font-size: 0.7rem;">${analysis.scene_type || 'Unknown'}</span>
+                    </div>
+                </div>
+            </div>
+            
+            <p style="font-size: 0.9rem; color: var(--text-primary); margin-bottom: 1rem; line-height: 1.4;">
+                ${analysis.summary || 'No summary available'}
+            </p>
+            
+            <div class="tags-section">
+                <div class="tags-container" style="margin-bottom: 0.5rem;">
+                    <strong style="font-size: 0.75rem; color: var(--text-secondary); margin-right: 0.5rem;">Objects:</strong>
+                    ${objects.slice(0, 10).map(obj => `<span class="tag editable" data-id="${img.id}" data-type="objects" data-tag="${obj}" style="cursor: context-menu; font-size: 0.75rem; background-color: rgba(16, 185, 129, 0.2); color: #34d399;">${obj}</span>`).join('')}
+                    <button class="add-tag-btn" data-id="${img.id}" data-type="objects" title="Add Object">+</button>
+                </div>
+                <div class="tags-container">
+                    <strong style="font-size: 0.75rem; color: var(--text-secondary); margin-right: 0.5rem;">Tags:</strong>
+                    ${tags.slice(0, 10).map(tag => `<span class="tag editable" data-id="${img.id}" data-type="tags" data-tag="${tag}" style="cursor: context-menu; font-size: 0.75rem;">${tag}</span>`).join('')}
+                    <button class="add-tag-btn" data-id="${img.id}" data-type="tags" title="Add Tag">+</button>
+                </div>
+            </div>
+        </div>
+    `;
 }
 
 // Override Load Stats to also init search
@@ -180,78 +268,7 @@ loadStats = async function () {
 }
 
 // Display Results
-function displayResults(images) {
-    resultsCount.textContent = `Found ${images.length} results`;
-
-    if (images.length === 0) {
-        searchResults.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 2rem; color: var(--text-secondary);">No images found matching your criteria.</div>';
-        return;
-    }
-
-    searchResults.innerHTML = images.map(img => {
-        let analysis = {};
-        try {
-            analysis = typeof img.analysis === 'string' ? JSON.parse(img.analysis) : (img.analysis || {});
-        } catch (e) {
-            console.error('Failed to parse analysis for image', img.id, e);
-        }
-
-        const date = new Date(img.created_at).toLocaleDateString();
-
-        // Determine thumbnail path
-        let displayPath;
-        if (img.path && img.path.endsWith('.avif')) {
-            displayPath = img.path.includes('thumbnails/') ? img.path : `thumbnails/${img.path}`;
-        } else {
-            const filenameBase = img.filename.substring(0, img.filename.lastIndexOf('.')) || img.filename;
-            displayPath = `thumbnails/${filenameBase}.avif`;
-        }
-
-        // Get objects and tags
-        const objects = analysis.objects || [];
-        const tags = analysis.tags || [];
-
-        return `
-            <div class="card" data-id="${img.id}">
-                <div style="display: flex; gap: 1rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;">
-                    <img src="${displayPath}" 
-                         data-fullpath="${img.path}"
-                         class="thumbnail-preview"
-                         onerror="this.style.display='none'"
-                         style="width: 80px; height: 80px; object-fit: cover; border-radius: 6px; cursor: pointer;"
-                         title="Click to view full size">
-                    <div style="flex: 1; min-width: 0;">
-                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                            <h3 class="file-link" data-path="${img.path}" style="margin: 0; color: var(--accent); font-size: 1rem; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Show in folder">${img.filename}</h3>
-                            <button class="delete-btn" data-id="${img.id}" style="background: transparent; border: 1px solid #ef4444; color: #ef4444; padding: 0.25rem 0.75rem; border-radius: 6px; cursor: pointer; font-size: 0.75rem; transition: all 0.2s;">X</button>
-                        </div>
-                        <small style="color: var(--text-secondary);">${date}</small>
-                        <div style="margin-top: 0.25rem;">
-                            <span class="badge" style="font-size: 0.7rem;">${analysis.scene_type || 'Unknown'}</span>
-                        </div>
-                    </div>
-                </div>
-                
-                <p style="font-size: 0.9rem; color: var(--text-primary); margin-bottom: 1rem; line-height: 1.4;">
-                    ${analysis.summary || 'No summary available'}
-                </p>
-                
-                <div class="tags-section">
-                    <div class="tags-container" style="margin-bottom: 0.5rem;">
-                        <strong style="font-size: 0.75rem; color: var(--text-secondary); margin-right: 0.5rem;">Objects:</strong>
-                        ${objects.slice(0, 10).map(obj => `<span class="tag editable" data-id="${img.id}" data-type="objects" data-tag="${obj}" style="cursor: context-menu; font-size: 0.75rem; background-color: rgba(16, 185, 129, 0.2); color: #34d399;">${obj}</span>`).join('')}
-                        <button class="add-tag-btn" data-id="${img.id}" data-type="objects" title="Add Object">+</button>
-                    </div>
-                    <div class="tags-container">
-                        <strong style="font-size: 0.75rem; color: var(--text-secondary); margin-right: 0.5rem;">Tags:</strong>
-                        ${tags.slice(0, 10).map(tag => `<span class="tag editable" data-id="${img.id}" data-type="tags" data-tag="${tag}" style="cursor: context-menu; font-size: 0.75rem;">${tag}</span>`).join('')}
-                        <button class="add-tag-btn" data-id="${img.id}" data-type="tags" title="Add Tag">+</button>
-                    </div>
-                </div>
-            </div>
-        `;
-    }).join('');
-}
+// Display Results removed, replaced by renderBatch and createResultHtml
 
 // Global Event Listeners for Search Results (Delegation)
 searchResults.addEventListener('click', (e) => {

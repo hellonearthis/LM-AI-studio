@@ -314,6 +314,73 @@ document.addEventListener('click', (e) => {
 });
 
 // ============================================================================
+// DATABASE VALIDATION HANDLER
+// ============================================================================
+const validateBtn = document.getElementById('validateBtn');
+const validationStatus = document.getElementById('validationStatus');
+const validationText = document.getElementById('validationText');
+const validationProgressBar = document.getElementById('validationProgressBar');
+const closeStatus = document.getElementById('closeStatus');
+
+if (validateBtn) {
+    validateBtn.addEventListener('click', async () => {
+        const reanalyze = confirm('Validate Database?\n\nThis will:\n1. Check for missing image files and remove from DB.\n2. Fix missing thumbnails.\n\nWould you also like to identify images with missing AI data? (Note: Bulk AI re-analysis is currently not automated to prevent cost/time issues, but status will be reported.)');
+
+        try {
+            validateBtn.disabled = true;
+            validateBtn.innerHTML = '<span>⏳</span> Validating...';
+
+            validationStatus.style.display = 'block';
+            validationText.textContent = 'Contacting server...';
+            validationProgressBar.style.width = '20%';
+
+            const response = await fetch(`${API_BASE_URL}/validate-database`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reanalyze: false }) // Passing false for now, can be extended
+            });
+
+            if (!response.ok) throw new Error('Validation failed on server');
+
+            validationProgressBar.style.width = '80%';
+            const data = await response.json();
+
+            validationProgressBar.style.width = '100%';
+            const res = data.results;
+
+            validationText.innerHTML = `
+                <strong>Validation Complete!</strong><br>
+                Total processed: ${res.total} | 
+                Missing files removed: ${res.missing} | 
+                Thumbnails fixed: ${res.fixedThumbnails}
+                ${res.errors.length > 0 ? `<br><small style="color: #ef4444;">Errors: ${res.errors.length}</small>` : ''}
+            `;
+
+            // Refresh database if something changed
+            if (res.missing > 0 || res.fixedThumbnails > 0) {
+                setTimeout(() => initDatabase(), 1500);
+            }
+
+        } catch (error) {
+            console.error('Validation error:', error);
+            validationText.textContent = 'Error: ' + error.message;
+            validationProgressBar.style.backgroundColor = '#ef4444';
+        } finally {
+            validateBtn.disabled = false;
+            validateBtn.innerHTML = '<span>🛠️</span> Validate Database';
+        }
+    });
+}
+
+if (closeStatus) {
+    closeStatus.addEventListener('click', () => {
+        validationStatus.style.display = 'none';
+        validationProgressBar.style.width = '0%';
+        validationProgressBar.style.backgroundColor = 'var(--accent)';
+    });
+}
+
+// ============================================================================
 // INITIALIZE
 // ============================================================================
 // Load the database when the page loads

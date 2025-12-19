@@ -439,6 +439,81 @@ app.post('/search', (req, res) => {
     res.json(results);
 });
 
+// ============================================================================
+// DATABASE VALIDATION
+// ============================================================================
+app.post('/validate-database', async (req, res) => {
+    console.log('[VALIDATE] Request received');
+    const { reanalyze } = req.body;
+    const results = {
+        total: 0,
+        missing: 0,
+        fixedThumbnails: 0,
+        reanalyzed: 0,
+        errors: []
+    };
+
+    try {
+        const images = db.prepare(`SELECT * FROM images`).all();
+        results.total = images.length;
+
+        for (const img of images) {
+            const filePath = img.path;
+
+            // 1. Check if file exists on disk
+            if (!fs.existsSync(filePath)) {
+                console.log(`[VALIDATE] File missing, removing from DB: ${filePath}`);
+                db.prepare(`DELETE FROM images WHERE id = ?`).run(img.id);
+                results.missing++;
+
+                // Try to delete thumbnail too
+                const filenameBase = img.filename.substring(0, img.filename.lastIndexOf('.')) || img.filename;
+                const thumbPath = path.join(__dirname, 'public', 'thumbnails', `${filenameBase}.avif`);
+                if (fs.existsSync(thumbPath)) {
+                    try { fs.unlinkSync(thumbPath); } catch (e) { }
+                }
+                continue;
+            }
+
+            // 2. Check for missing thumbnail
+            const filenameBase = img.filename.substring(0, img.filename.lastIndexOf('.')) || img.filename;
+            const thumbPath = path.join(__dirname, 'public', 'thumbnails', `${filenameBase}.avif`);
+
+            if (!fs.existsSync(thumbPath)) {
+                console.log(`[VALIDATE] Thumbnail missing, regenerating: ${filePath}`);
+                try {
+                    const buffer = fs.readFileSync(filePath);
+                    await sharp(buffer)
+                        .resize(100, 100, {
+                            fit: 'contain',
+                            background: { r: 0, g: 0, b: 0, alpha: 0 }
+                        })
+                        .avif({ quality: 50 })
+                        .toFile(thumbPath);
+                    results.fixedThumbnails++;
+                } catch (err) {
+                    console.error(`[VALIDATE] Failed to regenerate thumbnail for ${filePath}:`, err.message);
+                    results.errors.push(`Thumbnail error: ${img.filename}`);
+                }
+            }
+
+            // 3. Optional: Metadata check
+            // Note: Full AI re-analysis is too slow for bulk.
+            // We just report if items are "incomplete" for now, or the user can choose to re-run.
+        }
+
+        if (results.missing > 0 || results.fixedThumbnails > 0) {
+            generateSearchIndex();
+        }
+
+        res.json({ success: true, results });
+
+    } catch (err) {
+        console.error('[VALIDATE] Critical Error:', err);
+        res.status(500).json({ error: 'Validation failed', details: err.message });
+    }
+});
+
 // Start Server...
 app.listen(PORT, () => {
     console.log(`[SERVER] Running on http://localhost:${PORT}`);
