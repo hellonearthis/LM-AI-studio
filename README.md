@@ -14,7 +14,8 @@ An Electron-based desktop application that uses local AI (via LM Studio) to anal
 - **ComfyUI Integration**: Automatically extracts and displays ComfyUI workflow and prompt data from PNG metadata
 - **Smart Duplicate Detection**: Content-based hashing prevents duplicates while allowing metadata updates
 - **Batch Processing**: Process entire folders of images at once
-- **Advanced Search**: Comma-separated queries with AND/OR logic toggle
+- **Advanced Fuzzy Search**: Typos? No problem. Find images instantly with weighted fuzzy matching (Fuse.js)
+- **Instant Search**: Server-side pre-computed indexing ensures lightning-fast search initialization
 - **Inline Tag Management**: Edit, delete, and add tags directly from search results via right-click
 - **Searchable Database**: Find images by tags, scene type, date, or text search
 - **AVIF Thumbnails**: Efficient 100x100 thumbnail generation with automatic regeneration for missing files
@@ -92,13 +93,14 @@ npm run ls:serve
 ### Searching
 
 1. Navigate to the **Search** page
-2. Enter keywords to search descriptions (comma-separated for multiple terms)
-3. **Toggle AND/OR mode**: Use the switch to match ALL terms or ANY term
-4. Filter by tags or scene type
-5. Set date ranges to narrow results
-6. **Right-click tags** to edit or delete them inline
-7. Click the **+** button to add new tags to any image
-8. **Click any filename** to open it in your file explorer
+2. Enter keywords to search descriptions. **Fuzzy search** handles typos (e.g., "ocian" finds "ocean")
+3. **Weighted Results**: Matches in object lists and tags rank higher than general descriptions
+4. **Toggle AND/OR mode**: Use the switch to match ALL terms or ANY term
+5. Filter by tags or scene type
+6. Set date ranges to narrow results
+7. **Right-click tags** to edit or delete them inline
+8. Click the **+** button to add new tags to any image
+9. **Click any filename** to open it in your file explorer
 
 ### Tags & Objects
 
@@ -161,4 +163,5 @@ ISC
 - [Electron](https://www.electronjs.org/) for cross-platform desktop apps
 - [Sharp](https://sharp.pixelplumbing.com/) for image processing
 - [exifr](https://github.com/MikeKovarik/exifr) for metadata extraction
+- [Fuse.js](https://fusejs.io/) for powerful fuzzy search capabilities
 - [Latent Scope](https://github.com/enjalot/latent-scope) by enjalot for semantic visualization

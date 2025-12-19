@@ -18,40 +18,165 @@ searchLogicToggle.addEventListener('change', () => {
     logicLabel.textContent = searchLogicToggle.checked ? 'Match Any (OR)' : 'Match All (AND)';
 });
 
-// Search Function
-async function performSearch() {
-    const query = {
-        query: searchQuery.value,
-        searchLogic: searchLogicToggle.checked ? 'OR' : 'AND',
-        sceneType: sceneType.value,
-        startDate: startDate.value,
-        endDate: endDate.value
-    };
+// State
+let allImages = [];
+let fuse = null;
+let isInitialized = false;
+
+// Initialize Search Page
+async function initSearch() {
+    if (isInitialized) return;
 
     try {
         searchBtn.disabled = true;
-        searchBtn.textContent = 'Searching...';
+        searchBtn.textContent = 'Loading Index...';
 
-        const response = await fetch(`${API_BASE_URL}/search`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(query)
+        // fetch images and pre-computed index in parallel
+        const [imagesRes, indexRes] = await Promise.all([
+            fetch(`${API_BASE_URL}/images`),
+            fetch('search-index.json')
+        ]);
+
+        if (!imagesRes.ok) throw new Error('Failed to load images');
+
+        allImages = await imagesRes.json();
+
+        // Attempt to load pre-computed index
+        let fuseIndex = null;
+        if (indexRes.ok) {
+            try {
+                const indexData = await indexRes.json();
+                fuseIndex = Fuse.parseIndex(indexData);
+                console.log('Loaded pre-computed search index');
+            } catch (e) {
+                console.warn('Failed to parse search index:', e);
+            }
+        } else {
+            console.warn('Pre-computed index not found, falling back to runtime indexing');
+        }
+
+        // Initialize Fuse.js
+        const options = {
+            includeScore: true,
+            threshold: 0.3, // "sweet spot" catching typos
+            ignoreLocation: true, // Search anywhere in the string
+            // Keys must match what was used to generate server-side index
+            keys: [
+                { name: 'filename', weight: 1 },
+                { name: 'analysis.summary', weight: 1 },
+                { name: 'analysis.objects', weight: 2 }, // Higher weight
+                { name: 'analysis.tags', weight: 2 }     // Higher weight
+            ]
+        };
+
+        // Prepare data for Fuse (parsable objects)
+        const indexedImages = allImages.map(img => {
+            let parsedAnalysis = {};
+            try {
+                parsedAnalysis = typeof img.analysis === 'string' ? JSON.parse(img.analysis) : (img.analysis || {});
+            } catch (e) {
+                // ignore
+            }
+            return {
+                ...img,
+                analysis: parsedAnalysis
+            };
         });
 
-        if (!response.ok) throw new Error('Search failed');
+        // Use index if available, otherwise runtime generation
+        if (fuseIndex) {
+            fuse = new Fuse(indexedImages, options, fuseIndex);
+        } else {
+            fuse = new Fuse(indexedImages, options);
+        }
 
-        const results = await response.json();
-        // Store results globally for local editing access
-        window.currentSearchResults = results;
-        displayResults(results);
+        isInitialized = true;
+
+        // Initial search (show all)
+        performSearch();
 
     } catch (error) {
-        console.error('Search error:', error);
-        alert('Search failed: ' + error.message);
+        console.error('Failed to initialize search:', error);
+        searchResults.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: var(--text-secondary);">Failed to load search index.</div>';
     } finally {
         searchBtn.disabled = false;
         searchBtn.textContent = 'Search Images';
     }
+}
+
+
+// Search Function
+function performSearch() {
+    if (!isInitialized) return;
+
+    searchBtn.disabled = true;
+    searchBtn.textContent = 'Searching...';
+
+    const queryText = searchQuery.value.trim();
+    const typeFilter = sceneType.value;
+    const startFilter = startDate.value;
+    const endFilter = endDate.value;
+
+    let results = [];
+
+    // 1. Fuse.js Search (if query exists)
+    if (queryText) {
+        const fuseResults = fuse.search(queryText);
+        // Fuse returns { item, score, ... }
+        results = fuseResults.map(res => res.item);
+    } else {
+        // If no query, show all (filtered by metadata later)
+        // We need the parsed version we created for Fuse, or just map back to allImages?
+        // Fuse holds the parsed version in valid manner, let's use allImages but we need to ensure analysis is parsed object for display filtering
+        // Actually, our fuse instance was created with `indexedImages`.
+        // Let's use the same list source.
+        results = fuse._docs; // Accessing the docs directly or we can just resort to our parsed list.
+        // Better:
+        results = fuse.getIndex().docs || fuse._docs; // fallback if internals change, just re-map allImages
+        if (!results) {
+            results = allImages.map(img => {
+                let parsed = {};
+                try { parsed = typeof img.analysis === 'string' ? JSON.parse(img.analysis) : (img.analysis || {}); } catch (e) { }
+                return { ...img, analysis: parsed };
+            });
+        }
+    }
+
+    // 2. Apply Filters (Client-Side)
+    results = results.filter(img => {
+        // Scene Type
+        if (typeFilter !== 'all') {
+            const scene = img.analysis.scene_type || '';
+            if (scene.toLowerCase() !== typeFilter.toLowerCase()) return false;
+        }
+
+        // Date Range
+        const imgDate = new Date(img.created_at);
+        if (startFilter) {
+            if (imgDate < new Date(startFilter)) return false;
+        }
+        if (endFilter) {
+            const end = new Date(endFilter);
+            end.setHours(23, 59, 59);
+            if (imgDate > end) return false;
+        }
+
+        return true;
+    });
+
+    // Store results globally for local editing access
+    window.currentSearchResults = results;
+    displayResults(results);
+
+    searchBtn.disabled = false;
+    searchBtn.textContent = 'Search Images';
+}
+
+// Override Load Stats to also init search
+const originalLoadStats = loadStats;
+loadStats = async function () {
+    await originalLoadStats();
+    initSearch();
 }
 
 // Display Results
@@ -618,6 +743,7 @@ searchQuery.addEventListener('keypress', (e) => {
 
 // Initialize
 loadStats();
+initSearch();
 
 // Check for URL parameters (e.g. from Tags page)
 const urlParams = new URLSearchParams(window.location.search);

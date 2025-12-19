@@ -11,3 +11,5 @@ venv/
 __pycache__/
 ls-data/
 !ls-data/custom_models.json
+
+public/search-index.json

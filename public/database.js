@@ -302,6 +302,18 @@ document.addEventListener("click", (e) => {
 });
 
 // ============================================================================
+// IMAGE PREVIEW HANDLER
+// ============================================================================
+document.addEventListener('click', (e) => {
+    if (e.target.classList.contains('thumbnail-preview')) {
+        const fullPath = e.target.dataset.fullpath;
+        if (fullPath) {
+            showImagePreview(fullPath);
+        }
+    }
+});
+
+// ============================================================================
 // INITIALIZE
 // ============================================================================
 // Load the database when the page loads
