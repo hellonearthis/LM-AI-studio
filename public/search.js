@@ -439,6 +439,30 @@ function hideContextMenu() {
 // Global click to hide context menu
 document.addEventListener('click', hideContextMenu);
 
+// Context Menu Event Listener (Handles both Thumbnails and Tags)
+document.addEventListener('contextmenu', (e) => {
+    // Thumbnail Right-Click
+    const thumb = e.target.closest('.thumbnail-preview');
+    if (thumb) {
+        e.preventDefault();
+        const card = thumb.closest('.card');
+        const id = card.dataset.id;
+        showContextMenu(e, id, 'thumbnail', null, card);
+        return;
+    }
+
+    // Tag Right-Click
+    const tagEl = e.target.closest('.tag.editable');
+    if (tagEl) {
+        e.preventDefault();
+        e.stopPropagation();
+        showContextMenu(e, tagEl.dataset.id, tagEl.dataset.type, tagEl.dataset.tag);
+        return;
+    }
+
+    hideContextMenu();
+});
+
 // Thumbnail Regen Action
 document.getElementById('ctxRegenThumb').addEventListener('click', async () => {
     if (!ctxTarget || ctxTarget.type !== 'thumbnail') return;
