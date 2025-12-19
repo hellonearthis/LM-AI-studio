@@ -204,6 +204,17 @@ function renderBatch() {
 
 // Factor out result HTML generation (similar to card creation in database.js)
 function createResultHtml(img) {
+    // Helper to escape HTML special characters
+    const escapeHtml = (str) => {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    };
+
     const date = new Date(img.created_at).toLocaleDateString();
 
     let displayPath;
@@ -221,37 +232,37 @@ function createResultHtml(img) {
     return `
         <div class="card" data-id="${img.id}">
             <div style="display: flex; gap: 1rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;">
-                <img src="${displayPath}" 
-                     data-fullpath="${img.path}"
+                <img src="${escapeHtml(displayPath)}" 
+                     data-fullpath="${escapeHtml(img.path)}"
                      class="thumbnail-preview"
                      onerror="this.style.display='none'"
                      style="width: 80px; height: 80px; object-fit: cover; border-radius: 6px; cursor: pointer;"
                      title="Click to view full size">
                 <div style="flex: 1; min-width: 0;">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                        <h3 class="file-link" data-path="${img.path}" style="margin: 0; color: var(--accent); font-size: 1rem; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Show in folder">${img.filename}</h3>
+                        <h3 class="file-link" data-path="${escapeHtml(img.path)}" style="margin: 0; color: var(--accent); font-size: 1rem; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Show in folder">${escapeHtml(img.filename)}</h3>
                         <button class="delete-btn" data-id="${img.id}" style="background: transparent; border: 1px solid #ef4444; color: #ef4444; padding: 0.25rem 0.75rem; border-radius: 6px; cursor: pointer; font-size: 0.75rem; transition: all 0.2s;">X</button>
                     </div>
                     <small style="color: var(--text-secondary);">${date}</small>
                     <div style="margin-top: 0.25rem;">
-                        <span class="badge" style="font-size: 0.7rem;">${analysis.scene_type || 'Unknown'}</span>
+                        <span class="badge" style="font-size: 0.7rem;">${escapeHtml(analysis.scene_type) || 'Unknown'}</span>
                     </div>
                 </div>
             </div>
             
             <p style="font-size: 0.9rem; color: var(--text-primary); margin-bottom: 1rem; line-height: 1.4;">
-                ${analysis.summary || 'No summary available'}
+                ${escapeHtml(analysis.summary) || 'No summary available'}
             </p>
             
             <div class="tags-section">
                 <div class="tags-container" style="margin-bottom: 0.5rem;">
                     <strong style="font-size: 0.75rem; color: var(--text-secondary); margin-right: 0.5rem;">Objects:</strong>
-                    ${objects.map(obj => `<span class="tag editable" data-id="${img.id}" data-type="objects" data-tag="${obj}" style="cursor: context-menu; font-size: 0.75rem; background-color: rgba(16, 185, 129, 0.2); color: #34d399;">${obj}</span>`).join('')}
+                    ${objects.map(obj => `<span class="tag editable" data-id="${img.id}" data-type="objects" data-tag="${escapeHtml(obj)}" style="cursor: context-menu; font-size: 0.75rem; background-color: rgba(16, 185, 129, 0.2); color: #34d399;">${escapeHtml(obj)}</span>`).join('')}
                     <button class="add-tag-btn" data-id="${img.id}" data-type="objects" title="Add Object">+</button>
                 </div>
                 <div class="tags-container">
                     <strong style="font-size: 0.75rem; color: var(--text-secondary); margin-right: 0.5rem;">Tags:</strong>
-                    ${tags.map(tag => `<span class="tag editable" data-id="${img.id}" data-type="tags" data-tag="${tag}" style="cursor: context-menu; font-size: 0.75rem;">${tag}</span>`).join('')}
+                    ${tags.map(tag => `<span class="tag editable" data-id="${img.id}" data-type="tags" data-tag="${escapeHtml(tag)}" style="cursor: context-menu; font-size: 0.75rem;">${escapeHtml(tag)}</span>`).join('')}
                     <button class="add-tag-btn" data-id="${img.id}" data-type="tags" title="Add Tag">+</button>
                 </div>
             </div>
@@ -299,32 +310,6 @@ searchResults.addEventListener('click', (e) => {
         const type = btn.dataset.type; // 'tags' or 'objects'
         addTag(id, type);
     }
-});
-
-// Context Menu Delegation
-searchResults.addEventListener('contextmenu', (e) => {
-    // Check if right-clicking a thumbnail
-    const thumb = e.target.closest('.thumbnail-preview');
-    if (thumb) {
-        e.preventDefault();
-        e.stopPropagation();
-        const card = thumb.closest('.card');
-        const id = card.dataset.id;
-        showContextMenu(e, id, 'thumbnail', null, card);
-        return;
-    }
-
-    // Check if right-clicking a tag
-    const tagEl = e.target.closest('.tag.editable');
-    if (tagEl) {
-        e.preventDefault();
-        e.stopPropagation();
-        console.log('Right-click detected on tag:', tagEl.dataset.tag);
-        showContextMenu(e, tagEl.dataset.id, 'tag', tagEl.dataset.tag);
-        return;
-    }
-
-    hideContextMenu();
 });
 
 // Show Delete Modal (matches database.js)
@@ -409,6 +394,7 @@ const contextMenu = document.getElementById('contextMenu');
 let ctxTarget = null; // { id, tag, type, card }
 
 function showContextMenu(e, id, type, tag = null, card = null) {
+    console.log('[DEBUG] showContextMenu called:', { id, type, tag });
     ctxTarget = { id, type, tag, card };
     contextMenu.style.display = 'block';
 
@@ -429,6 +415,7 @@ function showContextMenu(e, id, type, tag = null, card = null) {
 
     contextMenu.style.left = `${e.clientX}px`;
     contextMenu.style.top = `${e.clientY}px`;
+    console.log('[DEBUG] Context menu displayed, ctxTarget set to:', ctxTarget);
 }
 
 function hideContextMenu() {
@@ -437,7 +424,9 @@ function hideContextMenu() {
 }
 
 // Global click to hide context menu
-document.addEventListener('click', hideContextMenu);
+document.addEventListener('click', (e) => {
+    hideContextMenu();
+});
 
 // Context Menu Event Listener (Handles both Thumbnails and Tags)
 document.addEventListener('contextmenu', (e) => {
@@ -472,7 +461,8 @@ document.getElementById('ctxRegenThumb').addEventListener('click', async () => {
 });
 
 // Context Menu Actions
-document.getElementById('ctxEdit').addEventListener('click', () => {
+document.getElementById('ctxEdit').addEventListener('click', (e) => {
+    e.stopPropagation(); // Prevent document click from hiding menu before we read ctxTarget
     if (!ctxTarget) return;
     const { id, tag, type } = ctxTarget;
     hideContextMenu();
@@ -484,14 +474,12 @@ document.getElementById('ctxEdit').addEventListener('click', () => {
     });
 });
 
-document.getElementById('ctxDelete').addEventListener('click', () => {
+document.getElementById('ctxDelete').addEventListener('click', (e) => {
+    e.stopPropagation(); // Prevent document click from hiding menu before we read ctxTarget
     if (!ctxTarget) return;
     const { id, tag, type } = ctxTarget;
     hideContextMenu();
 
-    // We already have a delete modal for images, maybe we should use a custom one here too for consistency?
-    // User said deleting tags worked (using confirm), so let's stick to confirm for now unless requested.
-    // Actually, let's allow the native confirm for now as they said "can delete tags".
     showConfirmModal(`Delete "${tag}"?`, () => {
         updateTag(id, type, tag, null, 'delete');
     });
@@ -528,15 +516,17 @@ function showTagInputModal(title, initialValue, callback) {
     const saveBtn = modal.querySelector('#saveTagBtn');
     const cancelBtn = modal.querySelector('#cancelTagBtn');
 
-    // Use setTimeout to ensure focus applies after render cycle
-    setTimeout(() => {
-        input.focus();
-        input.select();
-    }, 10);
+    // Global keyboard handler
+    const keyHandler = (e) => {
+        if (e.key === 'Escape') {
+            cleanup();
+        }
+    };
+    document.addEventListener('keydown', keyHandler);
 
     const cleanup = () => {
-        modal.remove();
         document.removeEventListener('keydown', keyHandler);
+        modal.remove();
     };
 
     const save = () => {
@@ -545,43 +535,27 @@ function showTagInputModal(title, initialValue, callback) {
         callback(val);
     };
 
+    // Use setTimeout to ensure focus applies after render cycle
+    setTimeout(() => {
+        input.focus();
+        input.select();
+    }, 10);
+
     saveBtn.onclick = save;
     cancelBtn.onclick = cleanup;
 
-    // Handle Enter and Escape on the input
+    // Handle Enter on the input
     input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
             e.preventDefault();
             e.stopPropagation();
             save();
-        } else if (e.key === 'Escape') {
-            e.preventDefault();
-            cleanup();
         }
     });
 
-    // Global Escape handler (for closing modal without focusing input)
-    const escHandler = (e) => {
-        if (e.key === 'Escape') {
-            cleanup();
-        }
-    };
-    document.addEventListener('keydown', escHandler);
-
-    // Ensure cleanup removes the escape handler
-    const originalCleanup = cleanup;
-    const enhancedCleanup = () => {
-        document.removeEventListener('keydown', escHandler);
-        modal.remove();
-    };
-
-    // Re-assign cleanup
-    saveBtn.onclick = () => { const val = input.value; enhancedCleanup(); callback(val); };
-    cancelBtn.onclick = enhancedCleanup;
-
     // Click outside to close
     modal.onclick = (e) => {
-        if (e.target === modal) enhancedCleanup();
+        if (e.target === modal) cleanup();
     };
 }
 
@@ -671,6 +645,10 @@ async function updateTag(id, type, oldTag, newTag, action) {
         // Update BOTH references to ensure consistency
         if (masterImage) masterImage.analysis = analysis;
         if (resultImage) resultImage.analysis = analysis;
+
+        // Also update filteredImages if it exists (for pagination consistency)
+        const filteredImage = filteredImages ? filteredImages.find(img => img.id == id) : null;
+        if (filteredImage) filteredImage.analysis = analysis;
 
         // 3. Send update to server
         const response = await fetch(`${API_BASE_URL}/update-tags`, {

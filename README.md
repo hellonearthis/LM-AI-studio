@@ -17,7 +17,7 @@ An Electron-based desktop application that uses local AI (via LM Studio) to anal
 - **Advanced Fuzzy Search**: Typos? No problem. Find images instantly with weighted fuzzy matching (Fuse.js)
 - **Instant Search**: Server-side pre-computed indexing and client-side pagination ensure lightning-fast performance even with 6,500+ items
 - **Automated Database Healing**: Maintenance tool to prune missing records and auto-regenerate deleted thumbnails
-- **Inline Tag Management**: Edit, delete, and add tags directly from search results via right-click
+- **Inline Tag Management**: Edit, delete, and add tags directly from search results or the database browser via right-click
 - **Searchable Database**: Find images by tags, scene type, date, or text search
 - **AVIF Thumbnails**: Efficient 100x100 thumbnail generation with automatic healing for missing files
 - **Alphabetical Tag Navigation**: Jump to any letter in alphabetical tag view with A-Z navigation

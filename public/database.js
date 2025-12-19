@@ -579,7 +579,7 @@ function showTagInputModal(title, initialValue, callback) {
     modal.innerHTML = `
         <div style="background: var(--card-bg); padding: 2rem; border-radius: 12px; border: 1px solid var(--border); max-width: 400px; width: 90%;">
             <h3 style="margin: 0 0 1rem 0; color: var(--text-primary);">${title}</h3>
-            <input type="text" id="modalInput" value="${initialValue}" style="width: 100%; padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border); background: #1f2937; color: white; margin-bottom: 1.5rem;" autofocus>
+            <input type="text" id="modalInput" value="${initialValue || ''}" style="width: 100%; padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border); background: #1f2937; color: white; margin-bottom: 1.5rem;">
             <div style="display: flex; gap: 1rem; justify-content: flex-end;">
                 <button id="cancelModalBtn" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer;">Cancel</button>
                 <button id="saveModalBtn" style="background: var(--accent); border: none; color: white; padding: 0.5rem 1.5rem; border-radius: 6px; cursor: pointer; font-weight: 500;">Save</button>
@@ -593,28 +593,47 @@ function showTagInputModal(title, initialValue, callback) {
     const saveBtn = modal.querySelector('#saveModalBtn');
     const cancelBtn = modal.querySelector('#cancelModalBtn');
 
-    input.select();
-
-    const cleanup = () => {
-        modal.remove();
-        document.removeEventListener('keydown', keyHandler);
-    };
-
+    // Define keyHandler FIRST (only handles Escape at document level)
     const keyHandler = (e) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            const val = input.value;
-            cleanup();
-            callback(val);
-        } else if (e.key === 'Escape') {
+        if (e.key === 'Escape') {
             cleanup();
         }
     };
-
     document.addEventListener('keydown', keyHandler);
-    saveBtn.onclick = () => { const val = input.value; cleanup(); callback(val); };
+
+    // Define cleanup AFTER keyHandler
+    const cleanup = () => {
+        document.removeEventListener('keydown', keyHandler);
+        modal.remove();
+    };
+
+    const save = () => {
+        const val = input.value;
+        cleanup();
+        callback(val);
+    };
+
+    // Focus input after render
+    setTimeout(() => {
+        input.focus();
+        input.select();
+    }, 10);
+
+    saveBtn.onclick = save;
     cancelBtn.onclick = cleanup;
-    modal.onclick = (e) => { if (e.target === modal) cleanup(); };
+
+    // Handle Enter on the input specifically (not document-wide)
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            save();
+        }
+    });
+
+    // Click outside to close
+    modal.onclick = (e) => {
+        if (e.target === modal) cleanup();
+    };
 }
 
 // Custom Confirmation Modal
