@@ -246,12 +246,12 @@ function createResultHtml(img) {
             <div class="tags-section">
                 <div class="tags-container" style="margin-bottom: 0.5rem;">
                     <strong style="font-size: 0.75rem; color: var(--text-secondary); margin-right: 0.5rem;">Objects:</strong>
-                    ${objects.slice(0, 10).map(obj => `<span class="tag editable" data-id="${img.id}" data-type="objects" data-tag="${obj}" style="cursor: context-menu; font-size: 0.75rem; background-color: rgba(16, 185, 129, 0.2); color: #34d399;">${obj}</span>`).join('')}
+                    ${objects.map(obj => `<span class="tag editable" data-id="${img.id}" data-type="objects" data-tag="${obj}" style="cursor: context-menu; font-size: 0.75rem; background-color: rgba(16, 185, 129, 0.2); color: #34d399;">${obj}</span>`).join('')}
                     <button class="add-tag-btn" data-id="${img.id}" data-type="objects" title="Add Object">+</button>
                 </div>
                 <div class="tags-container">
                     <strong style="font-size: 0.75rem; color: var(--text-secondary); margin-right: 0.5rem;">Tags:</strong>
-                    ${tags.slice(0, 10).map(tag => `<span class="tag editable" data-id="${img.id}" data-type="tags" data-tag="${tag}" style="cursor: context-menu; font-size: 0.75rem;">${tag}</span>`).join('')}
+                    ${tags.map(tag => `<span class="tag editable" data-id="${img.id}" data-type="tags" data-tag="${tag}" style="cursor: context-menu; font-size: 0.75rem;">${tag}</span>`).join('')}
                     <button class="add-tag-btn" data-id="${img.id}" data-type="tags" title="Add Tag">+</button>
                 </div>
             </div>
