@@ -43,6 +43,14 @@
                     <p>View and manage your analyzed images.</p>
                 </div>
                 <div style="display: flex; gap: 1rem; align-items: center;">
+                    <div
+                        style="display: flex; align-items: center; gap: 0.5rem; background: var(--card-bg); padding: 0.5rem 1rem; border-radius: 8px; border: 1px solid var(--border);">
+                        <input type="checkbox" id="reanalyzeToggle"
+                            style="width: 1.2rem; height: 1.2rem; cursor: pointer;">
+                        <label for="reanalyzeToggle"
+                            style="font-size: 0.85rem; color: var(--text-secondary); cursor: pointer; white-space: nowrap;">Regenerate
+                            Missing AI Data</label>
+                    </div>
                     <button id="validateBtn" class="secondary-btn"
                         style="background: var(--card-bg); border: 1px solid var(--accent); color: var(--accent); padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 0.5rem;">
                         <span>🛠️</span> Validate Database

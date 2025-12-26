@@ -44,7 +44,11 @@ async function initSearch() {
             fetch('search-index.json')
         ]);
 
-        allImages = (await imagesRes.json()).map(img => {
+        const imagesData = await imagesRes.json();
+        // Handle both old array format and new object format { images: [], ... }
+        const imagesList = Array.isArray(imagesData) ? imagesData : imagesData.images;
+
+        allImages = imagesList.map(img => {
             if (typeof img.analysis === 'string') {
                 try { img.analysis = JSON.parse(img.analysis || '{}'); } catch (e) { img.analysis = {}; }
             }

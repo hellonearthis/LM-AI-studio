@@ -108,8 +108,8 @@ function generateSearchIndex() {
     }
 }
 
-// Generate initial index on startup
-generateSearchIndex();
+// Initial index removed from here to prevent blocking startup
+// generateSearchIndex();
 
 // Analyze image endpoint
 app.post('/analyze', async (req, res) => {
@@ -165,6 +165,12 @@ app.post('/analyze', async (req, res) => {
         }
 
         // --- LM Studio Analysis ---
+        // Standardize to JPEG for vision model compatibility (avoids errors with AVIF/WebP)
+        const standardizedBuffer = await sharp(buffer)
+            .jpeg({ quality: 80 })
+            .toBuffer();
+        const standardizedImageData = `data:image/jpeg;base64,${standardizedBuffer.toString('base64')}`;
+
         const payload = {
             model: "qwen2.5-vl-7b-instruct",
             messages: [
@@ -176,7 +182,7 @@ app.post('/analyze', async (req, res) => {
                     role: "user",
                     content: [
                         { type: "text", text: "Analyze this image." },
-                        { type: "image_url", image_url: { url: imageData } }
+                        { type: "image_url", image_url: { url: standardizedImageData } }
                     ]
                 }
             ],
@@ -212,7 +218,11 @@ app.post('/analyze', async (req, res) => {
         }
 
         const lmData = await lmResponse.json();
-        const analysisContent = lmData.choices[0].message.content;
+        let analysisContent = lmData.choices[0].message.content;
+
+        // Sanitize markdown fences if present
+        analysisContent = analysisContent.replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
+
         const analysis = JSON.parse(analysisContent);
 
         res.json({ analysis, metadata });
@@ -223,18 +233,48 @@ app.post('/analyze', async (req, res) => {
     }
 });
 
+// Create Thumbnail Endpoint
+app.post('/create-thumbnail', async (req, res) => {
+    console.log('[THUMB] Create request received');
+    try {
+        const { imageData, filename } = req.body;
+        if (!imageData || !filename) {
+            return res.status(400).json({ error: 'Missing image data or filename' });
+        }
+
+        const base64Data = imageData.replace(/^data:image\/\w+;base64,/, '');
+        const buffer = Buffer.from(base64Data, 'base64');
+
+        const filenameBase = filename.substring(0, filename.lastIndexOf('.')) || filename;
+        const thumbPath = path.join(__dirname, 'public', 'thumbnails', `${filenameBase}.avif`);
+
+        await sharp(buffer)
+            .resize(100, 100, {
+                fit: 'contain',
+                background: { r: 0, g: 0, b: 0, alpha: 0 }
+            })
+            .avif({ quality: 50 })
+            .toFile(thumbPath);
+
+        console.log(`[THUMB] Created: ${thumbPath}`);
+        res.json({ success: true, path: `thumbnails/${filenameBase}.avif` });
+
+    } catch (err) {
+        console.error('[THUMB] Creation Error:', err);
+        res.status(500).json({ error: 'Thumbnail creation failed' });
+    }
+});
+
 // Save to Database
 app.post('/save', async (req, res) => {
     console.log('[SAVE] Request received');
     try {
-        const { filename, path, metadata, analysis } = req.body;
+        const { filename, path, metadata, analysis, file_hash } = req.body;
 
         // Auto-generate created_at if not provided (should be standard ISO)
-        // If file exists (by hash or path), update it?
-        // User wants duplicate checking? 
-        // For now, simple insert. Unique constraint on path might throw.
-
         let created_at = new Date().toISOString();
+        if (req.body.created_at) created_at = req.body.created_at;
+
         // Try to get original creation date from metadata
         if (metadata.DateTimeOriginal) {
             created_at = new Date(metadata.DateTimeOriginal).toISOString();
@@ -242,12 +282,41 @@ app.post('/save', async (req, res) => {
             created_at = new Date(metadata.CreateDate).toISOString();
         }
 
-        // Generate a simple hash (fake for now, or use path)
-        const file_hash = crypto.createHash('md5').update(path + filename).digest('hex');
+        // Deduplication based on Hash AND Path
+        // 1. Check by Hash first (Content Match)
+        if (file_hash) {
+            const checkHashSql = `SELECT * FROM images WHERE file_hash = ?`;
+            const existingByHash = db.prepare(checkHashSql).get(file_hash);
 
-        // Check for existing path
-        const checkSql = `SELECT id FROM images WHERE path = ?`;
-        const existingByPath = db.prepare(checkSql).get(path);
+            if (existingByHash) {
+                console.log(`[SAVE] Duplicate found by hash: ${existingByHash.filename}`);
+                // If it's literally the same file (same path), we treat it as an update/skip
+                if (existingByHash.path === path) {
+                    // It's the same file. Update metadata/analysis if provided?
+                    // For now, let's treat it as "Duplicate - Already Exists"
+                    return res.json({
+                        duplicate: true,
+                        existingPath: existingByHash.path,
+                        id: existingByHash.id,
+                        message: 'File already exists in database (matched content)'
+                    });
+                } else {
+                    // Same content, different path. It is a duplicate file.
+                    // The user requested "detect double ups".
+                    // We return it as a duplicate.
+                    return res.json({
+                        duplicate: true,
+                        existingPath: existingByHash.path,
+                        id: existingByHash.id,
+                        message: 'Duplicate content found in different database entry'
+                    });
+                }
+            }
+        }
+
+        // 2. Check by Path (Location Match - fallback if hash missing or hash changed but path same)
+        const checkPathSql = `SELECT id FROM images WHERE path = ?`;
+        const existingByPath = db.prepare(checkPathSql).get(path);
 
         if (existingByPath) {
             // Update existing
@@ -262,13 +331,7 @@ app.post('/save', async (req, res) => {
             return res.json({ message: 'Updated successfully', id: existingByPath.id, updated: true });
         }
 
-        // Check for existing hash (optional, maybe just path is enough for now)
-        // const checkHashSql = `SELECT id FROM images WHERE file_hash = ?`;
-        // const existingByHash = db.prepare(checkHashSql).get(file_hash);
-
-        // Actually, user mentioned "Deduplicate" logic.
-        // Let's stick to path unique for now.
-
+        // 3. New Insert
         const insertSql = `INSERT INTO images (filename, path, file_hash, metadata, analysis, created_at) VALUES (?, ?, ?, ?, ?, ?)`;
         const info = db.prepare(insertSql).run(filename, path, file_hash, JSON.stringify(metadata), JSON.stringify(analysis), created_at);
         console.log(`[SAVE] Success. New ID: ${info.lastInsertRowid}`);
@@ -311,14 +374,45 @@ app.post('/update-tags', (req, res) => {
     }
 });
 
-// Get Images
+// Get Images (Supports Pagination or All)
 app.get('/images', (req, res) => {
     console.log('[GET-IMAGES] Request received');
     try {
-        const sql = `SELECT * FROM images ORDER BY created_at DESC`;
-        const images = db.prepare(sql).all();
-        console.log(`[GET-IMAGES] Returning ${images.length} images`);
-        res.json(images);
+        const page = parseInt(req.query.page);
+        const limit = parseInt(req.query.limit);
+
+        if (isNaN(page) || isNaN(limit)) {
+            // Return ALL images if no pagination params (needed for search index)
+            const sql = `SELECT * FROM images ORDER BY created_at DESC`;
+            const images = db.prepare(sql).all();
+            console.log(`[GET-IMAGES] Returning ALL ${images.length} images`);
+            return res.json({
+                images,
+                total: images.length,
+                page: 1,
+                limit: images.length,
+                totalPages: 1
+            });
+        }
+
+        const offset = (page - 1) * limit;
+
+        // Get total count
+        const countSql = `SELECT COUNT(*) as total FROM images`;
+        const total = db.prepare(countSql).get().total;
+
+        // Get paginated data
+        const sql = `SELECT * FROM images ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+        const images = db.prepare(sql).all(limit, offset);
+
+        console.log(`[GET-IMAGES] Returning ${images.length} images (Page ${page}, Total ${total})`);
+        res.json({
+            images,
+            total,
+            page,
+            limit,
+            totalPages: Math.ceil(total / limit)
+        });
     } catch (err) {
         console.error('[GET-IMAGES] Error:', err);
         res.status(500).json({ error: 'Failed to fetch images' });
@@ -497,12 +591,95 @@ app.post('/validate-database', async (req, res) => {
                 }
             }
 
-            // 3. Optional: Metadata check
-            // Note: Full AI re-analysis is too slow for bulk.
-            // We just report if items are "incomplete" for now, or the user can choose to re-run.
+            // 3. Check for missing AI analysis data (ONLY if requested)
+            if (reanalyze) {
+                let analysis = {};
+                try {
+                    analysis = typeof img.analysis === 'string' ? JSON.parse(img.analysis || '{}') : (img.analysis || {});
+                } catch (e) { analysis = {}; }
+
+                const isMissingData = !analysis.summary || !analysis.tags || analysis.tags.length === 0 || !analysis.objects || analysis.objects.length === 0;
+
+                if (isMissingData) {
+                    console.log(`[VALIDATE] AI data missing for ${img.filename}, re-analyzing...`);
+                    console.log(`[VALIDATE] Missing fields: summary=${!!analysis.summary}, tags=${analysis.tags?.length || 0}, objects=${analysis.objects?.length || 0}`);
+
+                    try {
+                        // Standardize to JPEG for vision model compatibility
+                        const buffer = fs.readFileSync(filePath);
+                        const standardizedBuffer = await sharp(buffer)
+                            .jpeg({ quality: 80 })
+                            .toBuffer();
+                        const imageData = `data:image/jpeg;base64,${standardizedBuffer.toString('base64')}`;
+
+                        const payload = {
+                            model: "qwen2.5-vl-7b-instruct",
+                            messages: [
+                                {
+                                    role: "system",
+                                    content: "You are an expert image analyst. Analyze the image and extract: 1. A detailed summary. 2. A list of objects. 3. A list of descriptive tags. 4. The scene type. Return JSON."
+                                },
+                                {
+                                    role: "user",
+                                    content: [
+                                        { type: "text", text: "Analyze this image." },
+                                        { type: "image_url", image_url: { url: imageData } }
+                                    ]
+                                }
+                            ],
+                            max_tokens: 500,
+                            response_format: {
+                                type: "json_schema",
+                                json_schema: {
+                                    name: "image_analysis",
+                                    strict: true,
+                                    schema: {
+                                        type: "object",
+                                        properties: {
+                                            summary: { type: "string" },
+                                            objects: { type: "array", items: { type: "string" } },
+                                            tags: { type: "array", items: { type: "string" } },
+                                            scene_type: { type: "string" }
+                                        },
+                                        required: ["summary", "objects", "tags", "scene_type"],
+                                        additionalProperties: false
+                                    }
+                                }
+                            }
+                        };
+
+                        console.log(`[VALIDATE] Sending request to LM Studio for ${img.filename}...`);
+                        const lmResponse = await fetch(LM_STUDIO_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+
+                        if (lmResponse.ok) {
+                            const lmData = await lmResponse.json();
+                            let analysisContent = lmData.choices[0].message.content;
+                            // Sanitize markdown fences
+                            analysisContent = analysisContent.replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
+                            const newAnalysis = JSON.parse(analysisContent);
+
+                            // Update DB
+                            db.prepare(`UPDATE images SET analysis = ? WHERE id = ?`).run(JSON.stringify(newAnalysis), img.id);
+                            results.reanalyzed++;
+                            console.log(`[VALIDATE] Successfully updated AI data for ${img.filename}`);
+                        } else {
+                            const errorText = await lmResponse.text();
+                            console.warn(`[VALIDATE] LM Studio failed for ${img.filename}: ${lmResponse.status} ${lmResponse.statusText}`);
+                            console.warn(`[VALIDATE] Error response: ${errorText}`);
+                        }
+                    } catch (err) {
+                        console.error(`[VALIDATE] Failed to re-analyze ${img.filename}:`, err.message);
+                        results.errors.push(`AI Analysis error: ${img.filename}`);
+                    }
+                }
+            }
         }
 
-        if (results.missing > 0 || results.fixedThumbnails > 0) {
+        if (results.missing > 0 || results.fixedThumbnails > 0 || results.reanalyzed > 0) {
             generateSearchIndex();
         }
 
@@ -553,4 +730,9 @@ app.post('/regenerate-thumbnail', async (req, res) => {
 // Start Server...
 app.listen(PORT, () => {
     console.log(`[SERVER] Running on http://localhost:${PORT}`);
+
+    // Generate initial index after startup so we don't block
+    setTimeout(() => {
+        generateSearchIndex();
+    }, 1000);
 });

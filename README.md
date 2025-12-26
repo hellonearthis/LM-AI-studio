@@ -10,17 +10,13 @@ An Electron-based desktop application that uses local AI (via LM Studio) to anal
 
 ## ✨ Features
 
-- **AI-Powered Analysis**: Uses LM Studio's vision models to generate descriptions, detect objects, and tag images
-- **ComfyUI Integration**: Automatically extracts and displays ComfyUI workflow and prompt data from PNG metadata
-- **Smart Duplicate Detection**: Content-based hashing prevents duplicates while allowing metadata updates
-- **Batch Processing**: Process entire folders of images at once
-- **Advanced Fuzzy Search**: Typos? No problem. Find images instantly with weighted fuzzy matching (Fuse.js)
-- **Instant Search**: Server-side pre-computed indexing and client-side pagination ensure lightning-fast performance even with 6,500+ items
-- **Automated Database Healing**: Maintenance tool to prune missing records and auto-regenerate deleted thumbnails
-- **Inline Tag Management**: Edit, delete, and add tags directly from search results or the database browser via right-click
-- **Searchable Database**: Find images by tags, scene type, date, or text search
-- **AVIF Thumbnails**: Efficient 100x100 thumbnail generation with automatic healing for missing files
-- **Alphabetical Tag Navigation**: Jump to any letter in alphabetical tag view with A-Z navigation
+- **AI-Powered Analysis**: Uses LM Studio's vision models to generate descriptions, detect objects, and tag images. Supports **AVIF, WebP, and PNG** formats via automatic conversion to JPEG.
+- **ComfyUI Integration**: Automatically extracts and displays ComfyUI workflow and prompt data from PNG metadata.
+- **Improved Performance**: Infinite scroll and server-side pagination ensure fluid browsing even with thousands of images.
+- **Advanced Fuzzy Search**: Typos? No problem. Find images instantly with weighted fuzzy matching (Fuse.js).
+- **Automated Database Repair**: Prune missing records, regenerate deleted thumbnails, and **optionally re-analyze images** with missing AI data.
+- **Inline Tag Management**: Edit, delete, and add tags directly from search results or the database browser via right-click.
+- **Robust Thumbnailing**: Efficient AVIF thumbnail generation with automatic background regeneration for existing records.
 
 ---
 

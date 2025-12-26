@@ -19,57 +19,28 @@ const loadingDb = document.getElementById('loadingDb');
 const API_BASE_URL = 'http://localhost:3000';
 
 // State for infinite scroll
-let allImages = [];
-let currentIndex = 0;
-const BATCH_SIZE = 50;
+let imagesData = [];
+let currentPage = 1;
+const PAGE_SIZE = 50;
+let totalImages = 0;
+let isLoading = false;
+let hasMore = true;
 let observer = null;
 
-// Fetches all saved images from the database
+// Fetches images in batches from the server
 async function initDatabase() {
     try {
         // Reset state
-        allImages = [];
-        currentIndex = 0;
-        dbGrid.innerHTML = ''; // Clear grid
+        imagesData = [];
+        currentPage = 1;
+        isLoading = false;
+        hasMore = true;
+        dbGrid.innerHTML = '';
 
-        // Fetch all images from the server
         loadingDb.style.display = 'block';
-        const response = await fetch(`${API_BASE_URL}/images`);
-        if (!response.ok) throw new Error('Failed to load images');
+        loadingDb.textContent = 'Loading database...';
 
-        allImages = (await response.json()).map(img => {
-            if (typeof img.analysis === 'string') {
-                try { img.analysis = JSON.parse(img.analysis || '{}'); } catch (e) { img.analysis = {}; }
-            }
-            return img;
-        });
-        loadingDb.style.display = 'none';
-
-        // Update the entry count in the header
-        const dbCount = document.getElementById('dbCount');
-        if (dbCount) dbCount.textContent = allImages.length;
-
-        // Handle empty database case
-        if (allImages.length === 0) {
-            dbGrid.innerHTML = '<p style="text-align: center; color: var(--text-secondary);">No images saved yet.</p>';
-            return;
-        }
-
-        // Create Sentinel for Infinite Scroll (if not already there)
-        let sentinel = document.getElementById('scroll-sentinel');
-        if (!sentinel) {
-            sentinel = document.createElement('div');
-            sentinel.id = 'scroll-sentinel';
-            sentinel.style.width = '100%';
-            sentinel.style.height = '20px';
-            dbGrid.parentNode.appendChild(sentinel);
-        }
-
-        // Setup Intersection Observer
-        setupIntersectionObserver(sentinel);
-
-        // Initial render
-        renderBatch();
+        await loadNextPage();
 
     } catch (error) {
         console.error('Error:', error);
@@ -78,38 +49,88 @@ async function initDatabase() {
     }
 }
 
+async function loadNextPage() {
+    if (isLoading || !hasMore) return;
+
+    isLoading = true;
+    console.log(`[DB] Fetching page ${currentPage}...`);
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/images?page=${currentPage}&limit=${PAGE_SIZE}`);
+        if (!response.ok) throw new Error('Failed to load images');
+
+        const data = await response.json();
+        const newImages = data.images.map(img => {
+            if (typeof img.analysis === 'string') {
+                try { img.analysis = JSON.parse(img.analysis || '{}'); } catch (e) { img.analysis = {}; }
+            }
+            return img;
+        });
+
+        imagesData.push(...newImages); // Keep local cache in sync for tag updates
+
+        totalImages = data.total;
+        hasMore = currentPage < data.totalPages;
+
+        // Update the entry count in the header
+        const dbCount = document.getElementById('dbCount');
+        if (dbCount) dbCount.textContent = totalImages;
+
+        if (totalImages === 0) {
+            dbGrid.innerHTML = '<p style="text-align: center; color: var(--text-secondary);">No images saved yet.</p>';
+            loadingDb.style.display = 'none';
+            return;
+        }
+
+        renderBatch(newImages);
+
+        currentPage++;
+        loadingDb.style.display = 'none';
+
+        // Setup Sentinel if it's the first page
+        if (currentPage === 2) {
+            setupSentinel();
+        }
+
+    } catch (err) {
+        console.error('[DB] Page Load Error:', err);
+    } finally {
+        isLoading = false;
+    }
+}
+
+function setupSentinel() {
+    let sentinel = document.getElementById('scroll-sentinel');
+    if (!sentinel) {
+        sentinel = document.createElement('div');
+        sentinel.id = 'scroll-sentinel';
+        sentinel.style.width = '100%';
+        sentinel.style.height = '100px'; // Larger sentinel
+        sentinel.style.marginTop = '20px';
+        dbGrid.parentNode.appendChild(sentinel);
+    }
+    setupIntersectionObserver(sentinel);
+}
+
+function renderBatch(newImages) {
+    // Generate HTML for batch
+    const batchHtml = newImages.map(img => createCardHtml(img)).join('');
+    // Append to grid
+    dbGrid.insertAdjacentHTML('beforeend', batchHtml);
+}
+
+
+
 function setupIntersectionObserver(sentinel) {
     if (observer) observer.disconnect();
 
     observer = new IntersectionObserver((entries) => {
-        if (entries[0].isIntersecting) {
-            renderBatch();
+        if (entries[0].isIntersecting && !isLoading && hasMore) {
+            loadNextPage();
         }
-    }, { rootMargin: '200px' }); // Load before reaching bottom
+    }, { rootMargin: '400px' }); // Load early
 
     observer.observe(sentinel);
-}
-
-function renderBatch() {
-    if (currentIndex >= allImages.length) return;
-
-    const batch = allImages.slice(currentIndex, currentIndex + BATCH_SIZE);
-
-    // Generate HTML for batch
-    const batchHtml = batch.map(img => createCardHtml(img)).join('');
-
-    // Append to grid
-    dbGrid.insertAdjacentHTML('beforeend', batchHtml);
-
-    // Update index
-    currentIndex += batch.length;
-
-    // Attach handlers for NEW elements only? 
-    // Actually, simple way is to rely on event delegation or re-attach. 
-    // Re-attaching to all might be heavy, let's use global delegation or careful attachment.
-    // The existing code attaches to all .delete-btn. Let's scope it to the new batch or switch to delegation.
-    // For safety and minimal refactor of handlers, let's just re-run the attachment logic but only for new items?
-    // Optimization: Delegation is better. Let's switch delete buttons to delegation.
 }
 
 function createCardHtml(img) {
@@ -352,7 +373,14 @@ const closeStatus = document.getElementById('closeStatus');
 
 if (validateBtn) {
     validateBtn.addEventListener('click', async () => {
-        const reanalyze = confirm('Validate Database?\n\nThis will:\n1. Check for missing image files and remove from DB.\n2. Fix missing thumbnails.\n\nWould you also like to identify images with missing AI data? (Note: Bulk AI re-analysis is currently not automated to prevent cost/time issues, but status will be reported.)');
+        const reanalyzeToggle = document.getElementById('reanalyzeToggle');
+        const reanalyze = reanalyzeToggle ? reanalyzeToggle.checked : false;
+
+        const confirmMsg = reanalyze
+            ? 'Validate Database?\n\nThis will:\n1. Check for missing image files.\n2. Fix missing thumbnails.\n3. REGENERATE missing AI Summary/Tags (Slow).'
+            : 'Validate Database?\n\nThis will:\n1. Check for missing image files.\n2. Fix missing thumbnails.';
+
+        if (!confirm(confirmMsg)) return;
 
         try {
             validateBtn.disabled = true;
@@ -365,7 +393,7 @@ if (validateBtn) {
             const response = await fetch(`${API_BASE_URL}/validate-database`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ reanalyze: false }) // Passing false for now, can be extended
+                body: JSON.stringify({ reanalyze })
             });
 
             if (!response.ok) throw new Error('Validation failed on server');
@@ -380,7 +408,8 @@ if (validateBtn) {
                 <strong>Validation Complete!</strong><br>
                 Total processed: ${res.total} | 
                 Missing files removed: ${res.missing} | 
-                Thumbnails fixed: ${res.fixedThumbnails}
+                Thumbnails fixed: ${res.fixedThumbnails} |
+                AI Data Regenerated: ${res.reanalyzed}
                 ${res.errors.length > 0 ? `<br><small style="color: #ef4444;">Errors: ${res.errors.length}</small>` : ''}
             `;
 
@@ -532,7 +561,7 @@ async function addTag(id, type) {
 // Update Tag Backend Call
 async function updateTag(id, type, oldTag, newTag, action) {
     try {
-        const image = allImages.find(img => img.id == id);
+        const image = imagesData.find(img => img.id == id);
         if (!image) throw new Error('Image not found in local cache');
 
         let analysis = image.analysis || {};
