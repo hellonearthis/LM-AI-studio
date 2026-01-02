@@ -55,6 +55,23 @@
             </header>
 
             <div class="upload-section">
+                <!-- Analysis Level Selector -->
+                <div style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                    <label for="promptType" style="color: var(--text-secondary); font-size: 0.9rem;">Analysis
+                        Mode:</label>
+                    <select id="promptType"
+                        style="padding: 0.5rem; border-radius: 8px; background: var(--card-bg); color: var(--text-primary); border: 1px solid var(--border); font-family: inherit; font-size: 1rem; outline: none; margin-left: 0.5rem;">
+                        <option value="Detailed Analysis">Detailed Analysis</option>
+                        <option value="Simple Description">Simple Description</option>
+                        <option value="Detailed Description" selected>Detailed Description</option>
+                        <option value="Ultra Detailed Description">Ultra Detailed Description</option>
+                        <option value="Cinematic Description">Cinematic Description</option>
+                        <option value="Video Summary">Video Summary</option>
+                        <option value="Short Story">Short Story</option>
+                        <option value="Prompt Refine & Expand">Prompt Refine & Expand</option>
+                    </select>
+                </div>
+
                 <div style="display: flex; gap: 1rem; width: 100%;">
                     <div class="file-select-btn" id="selectFileBtn" style="flex: 1; margin-bottom: 0;">
                         <div class="fake-btn">Choose Image</div>

@@ -232,7 +232,7 @@ async function processSingleFile(filePath, fileName, fileBuffer, base64Data) {
 
         // Display Results
         displayMetadata(result.metadata);
-        displayAnalysis(result.description);
+        displayAnalysis(result.analysis);
         document.querySelector('.analysis-grid').style.opacity = '1';
 
         // Update database with analysis results
@@ -241,7 +241,7 @@ async function processSingleFile(filePath, fileName, fileBuffer, base64Data) {
             path: filePath,
             file_hash: fileHash,
             metadata: result.metadata,
-            analysis: result.description,
+            analysis: result.analysis,
             created_at: fileCreationDate
         });
 
@@ -381,7 +381,7 @@ async function processBatch(files) {
                 path: filePath,
                 file_hash: currentHash,
                 metadata: analysisResult.metadata,
-                analysis: analysisResult.description,
+                analysis: analysisResult.analysis,
                 created_at: fileCreationDate
             });
 
@@ -433,10 +433,16 @@ async function processBatch(files) {
 // ============================================================================
 
 async function performAnalysis(base64Data) {
+    const promptTypeSelect = document.getElementById('promptType');
+    const promptType = promptTypeSelect ? promptTypeSelect.value : 'Detailed Analysis';
+
     const response = await fetch(`${API_BASE_URL}/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageData: base64Data })
+        body: JSON.stringify({
+            imageData: base64Data,
+            promptType: promptType
+        })
     });
 
     if (!response.ok) {

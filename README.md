@@ -78,7 +78,10 @@ npm run ls:serve
 
 1. Click **"Load Folder"** to select a directory
 2. The app will scan for all images and process them sequentially
-3. Progress is shown in the sidebar with counts for added/updated/existing/errors
+3. Progress is shown in the sidebar with counts for added/updated/existing/errors:
+   - **Added**: New image files not previously in the database.
+   - **Updated**: Files found in the database (by path) but with changed content (hash mismatch) or new metadata.
+   - **Existing**: Identical files (same path and hash) that required no changes.
 
 ### Viewing the Database
 

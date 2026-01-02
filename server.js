@@ -46,10 +46,28 @@ db.exec(`
         file_hash TEXT,
         metadata TEXT,
         analysis TEXT,
+        width INTEGER,
+        height INTEGER,
+        size INTEGER,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT
     )
 `);
+
+// Migration: Add columns if they don't exist (for existing DBs)
+try {
+    const columns = db.pragma('table_info(images)');
+    const hasWidth = columns.some(c => c.name === 'width');
+    if (!hasWidth) {
+        console.log('[DB] Migrating: Adding width, height, size columns...');
+        db.exec('ALTER TABLE images ADD COLUMN width INTEGER');
+        db.exec('ALTER TABLE images ADD COLUMN height INTEGER');
+        db.exec('ALTER TABLE images ADD COLUMN size INTEGER');
+        console.log('[DB] Migration complete.');
+    }
+} catch (err) {
+    console.error('[DB] Migration error:', err);
+}
 
 // Auto-migration: Add updated_at column if it doesn't exist
 try {
@@ -112,11 +130,41 @@ function generateSearchIndex() {
 // generateSearchIndex();
 
 // Analyze image endpoint
+// Load Qwen Prompts
+let qwenPrompts = {};
+const PROMPTS_FILE = path.join(__dirname, 'qwen_vl3_porompts.json');
+
+try {
+    if (fs.existsSync(PROMPTS_FILE)) {
+        console.log('[PROMPTS] Loading Qwen prompts...');
+        const rawData = fs.readFileSync(PROMPTS_FILE, 'utf8');
+        const json = JSON.parse(rawData);
+
+        // Process qwenvl prompts
+        if (json.qwenvl) {
+            Object.entries(json.qwenvl).forEach(([key, value]) => {
+                // User manually cleaned emojis. We just trim to be safe.
+                // If there are still emojis we missed, we might want a safer regex like /[^\x00-\x7F]/g to remove non-ascii if that was the goal, 
+                // but user specifically mentioned removing emojis.
+                // Let's just trim for now to match exact keys like "Prompt Refine & Expand".
+                const cleanKey = key.trim();
+                qwenPrompts[cleanKey] = value;
+            });
+        }
+        console.log('[PROMPTS] Loaded keys:', Object.keys(qwenPrompts));
+    } else {
+        console.warn('[PROMPTS] Warning: prompts file not found:', PROMPTS_FILE);
+    }
+} catch (err) {
+    console.error('[PROMPTS] Error loading prompts:', err);
+}
+
+// Analyze image endpoint
 app.post('/analyze', async (req, res) => {
     console.log('[ANALYZE] Request received');
 
     try {
-        const { imageData } = req.body;
+        const { imageData, promptType } = req.body;
 
         if (!imageData) {
             return res.status(400).json({ error: 'No image data provided' });
@@ -142,7 +190,7 @@ app.post('/analyze', async (req, res) => {
                 mergeOutput: true
             }) || {};
             console.log('[ANALYZE] EXIF extracted:', Object.keys(metadata).length, 'fields');
-            console.log('[ANALYZE] Metadata keys:', Object.keys(metadata)); // Debug log
+            // console.log('[ANALYZE] Metadata keys:', Object.keys(metadata)); // Debug log
         } catch (exifError) {
             console.log('[ANALYZE] No EXIF data or error parsing:', exifError.message);
         }
@@ -171,12 +219,49 @@ app.post('/analyze', async (req, res) => {
             .toBuffer();
         const standardizedImageData = `data:image/jpeg;base64,${standardizedBuffer.toString('base64')}`;
 
+        // Select System Prompt
+        let systemPrompt = "You are an expert image analyst. Analyze the image and extract: 1. A detailed summary. 2. A list of objects. 3. A list of descriptive tags. 4. The scene type. Return JSON.";
+
+        // Use prompt from file if available
+        const selectedKey = promptType || 'Detailed Description'; // Default changed per user request
+        let basePrompt = qwenPrompts[selectedKey] || qwenPrompts['Detailed Description'] || Object.values(qwenPrompts)[0];
+
+        if (basePrompt) {
+            // Combined Strategy: Append metadata extraction instructions to ANY selected prompt
+            // unless it's the "Detailed Analysis" which already has it.
+            if (selectedKey !== 'Detailed Analysis') {
+                systemPrompt = `${basePrompt}\n\nIMPORTANT: regardless of the above, ALSO extract: 1. A list of objects (visible items). 2. A list of descriptive tags (visual style, colors, mood). 3. The scene type. Format the response as valid JSON with keys: 'summary' (containing your main generated text), 'objects', 'tags', 'scene_type'.`;
+            } else {
+                systemPrompt = basePrompt;
+            }
+            console.log(`[ANALYZE] Using prompt: "${selectedKey}"`);
+        } else {
+            console.log(`[ANALYZE] Requested prompt "${promptType}" not found. Using default.`);
+        }
+
+        // Always use Full Schema
+        const jsonSchema = {
+            name: "image_analysis",
+            strict: true,
+            schema: {
+                type: "object",
+                properties: {
+                    summary: { type: "string" },
+                    objects: { type: "array", items: { type: "string" } },
+                    tags: { type: "array", items: { type: "string" } },
+                    scene_type: { type: "string" }
+                },
+                required: ["summary", "objects", "tags", "scene_type"],
+                additionalProperties: false
+            }
+        };
+
         const payload = {
             model: "qwen2.5-vl-7b-instruct",
             messages: [
                 {
                     role: "system",
-                    content: "You are an expert image analyst. Analyze the image and extract: 1. A detailed summary. 2. A list of objects. 3. A list of descriptive tags. 4. The scene type. Return JSON."
+                    content: systemPrompt
                 },
                 {
                     role: "user",
@@ -186,24 +271,10 @@ app.post('/analyze', async (req, res) => {
                     ]
                 }
             ],
-            max_tokens: 500,
+            max_tokens: 1000,
             response_format: {
                 type: "json_schema",
-                json_schema: {
-                    name: "image_analysis",
-                    strict: true,
-                    schema: {
-                        type: "object",
-                        properties: {
-                            summary: { type: "string" },
-                            objects: { type: "array", items: { type: "string" } },
-                            tags: { type: "array", items: { type: "string" } },
-                            scene_type: { type: "string" }
-                        },
-                        required: ["summary", "objects", "tags", "scene_type"],
-                        additionalProperties: false
-                    }
-                }
+                json_schema: jsonSchema
             }
         };
 
@@ -220,10 +291,29 @@ app.post('/analyze', async (req, res) => {
         const lmData = await lmResponse.json();
         let analysisContent = lmData.choices[0].message.content;
 
-        // Sanitize markdown fences if present
+        // Sanitize markdown fences
         analysisContent = analysisContent.replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
 
-        const analysis = JSON.parse(analysisContent);
+        // Robust Parsing: Find outermost braces
+        const firstOpen = analysisContent.indexOf('{');
+        const lastClose = analysisContent.lastIndexOf('}');
+        if (firstOpen !== -1 && lastClose !== -1) {
+            analysisContent = analysisContent.substring(firstOpen, lastClose + 1);
+        }
+
+        let analysis;
+        try {
+            analysis = JSON.parse(analysisContent);
+        } catch (parseError) {
+            console.warn('[ANALYZE] JSON Parsing failed. Raw content:', analysisContent);
+            // Fallback: Use raw content as summary
+            analysis = {
+                summary: analysisContent, // raw string
+                objects: [],
+                tags: [],
+                scene_type: 'unknown'
+            };
+        }
 
         res.json({ analysis, metadata });
 
@@ -232,6 +322,193 @@ app.post('/analyze', async (req, res) => {
         res.status(500).json({ error: 'Image analysis failed' });
     }
 });
+
+// Delete Image Endpoint
+app.post('/delete-image', (req, res) => {
+    const { id, deleteFile } = req.body;
+    try {
+        if (deleteFile) {
+            const img = db.prepare('SELECT path FROM images WHERE id = ?').get(id);
+            if (img && img.path && fs.existsSync(img.path)) {
+                try {
+                    fs.unlinkSync(img.path);
+                    console.log(`[DELETE] File deleted: ${img.path}`);
+                } catch (err) {
+                    console.error(`[DELETE] Failed to delete file: ${err.message}`);
+                    // Continue to delete from DB even if file delete fails (or maybe warn?)
+                }
+            }
+        }
+
+        db.prepare('DELETE FROM images WHERE id = ?').run(id);
+
+        // Also delete from search index if exists (handled by regeneration usually, but good to be clean)
+        // For now, just DB delete is sufficient.
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('[DELETE] Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Batch Analyze Endpoint
+app.post('/batch-analyze', async (req, res) => {
+    console.log('[BATCH] Request received');
+    const { ids, promptType } = req.body;
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ error: 'No IDs provided' });
+    }
+
+    const results = {
+        total: ids.length,
+        processed: 0,
+        success: 0,
+        failed: 0,
+        errors: [],
+        updatedImages: []
+    };
+
+    // We process sequentially to avoid overwhelming LM Studio
+    for (const id of ids) {
+        try {
+            const img = db.prepare('SELECT * FROM images WHERE id = ?').get(id);
+            if (!img || !fs.existsSync(img.path)) {
+                results.failed++;
+                results.errors.push(`Image not found: ${id}`);
+                continue;
+            }
+
+            console.log(`[BATCH] Processing ${img.filename} (${results.processed + 1}/${results.total})`);
+
+            // Read and standarize image
+            const buffer = fs.readFileSync(img.path);
+            const fileStats = fs.statSync(img.path);
+            const metadata = await sharp(buffer).metadata(); // Get correct dimensions
+
+            const standardizedBuffer = await sharp(buffer)
+                .jpeg({ quality: 80 })
+                .toBuffer();
+            const imageData = `data:image/jpeg;base64,${standardizedBuffer.toString('base64')}`;
+
+            // Reuse logic? Ideally refactor into a helper function, but for now duplicate the fetch logic for isolation.
+            // Select System Prompt (Same Logic as /analyze)
+            const selectedKey = promptType || 'Detailed Description'; // Default changed per user request
+            let basePrompt = qwenPrompts[selectedKey] || qwenPrompts['Detailed Description'] || Object.values(qwenPrompts)[0];
+            let systemPrompt = "You are an expert image analyst...";
+
+            if (basePrompt) {
+                if (selectedKey !== 'Detailed Analysis') {
+                    systemPrompt = `${basePrompt}\n\nIMPORTANT: regardless of the above, ALSO extract: 1. A list of objects. 2. A list of descriptive tags. 3. The scene type. Format the response as valid JSON with keys: 'summary', 'objects', 'tags', 'scene_type'.`;
+                } else {
+                    systemPrompt = basePrompt;
+                }
+            }
+
+            const payload = {
+                model: "qwen2.5-vl-7b-instruct",
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    {
+                        role: "user",
+                        content: [
+                            { type: "text", text: "Analyze this image." },
+                            { type: "image_url", image_url: { url: imageData } }
+                        ]
+                    }
+                ],
+                max_tokens: 1800,
+                temperature: 0.7,
+                repetition_penalty: 1.1,
+                response_format: {
+                    type: "json_schema",
+                    json_schema: {
+                        name: "image_analysis",
+                        strict: true,
+                        schema: {
+                            type: "object",
+                            properties: {
+                                summary: { type: "string" },
+                                objects: { type: "array", items: { type: "string" } },
+                                tags: { type: "array", items: { type: "string" } },
+                                scene_type: { type: "string" }
+                            },
+                            required: ["summary", "objects", "tags", "scene_type"],
+                            additionalProperties: false
+                        }
+                    }
+                }
+            };
+
+            const lmResponse = await fetch(LM_STUDIO_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!lmResponse.ok) throw new Error(lmResponse.statusText);
+
+            const lmData = await lmResponse.json();
+            let analysisContent = lmData.choices[0].message.content;
+
+            // Sanitize markdown fences
+            analysisContent = analysisContent.replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
+
+            // Robust Parsing: Find outermost braces
+            const firstOpen = analysisContent.indexOf('{');
+            const lastClose = analysisContent.lastIndexOf('}');
+            if (firstOpen !== -1 && lastClose !== -1) {
+                analysisContent = analysisContent.substring(firstOpen, lastClose + 1);
+            }
+
+            let analysis;
+            try {
+                analysis = JSON.parse(analysisContent);
+            } catch (pErr) {
+                console.warn(`[BATCH] JSON Parsing failed for ${id}. Content:`, analysisContent);
+                analysis = {
+                    summary: analysisContent,
+                    objects: [],
+                    tags: [], // Could try to extract list items if failed?
+                    scene_type: 'unknown'
+                };
+            }
+
+            // Update DB with Analysis AND Metadata
+            // Update DB with Analysis AND Metadata
+            const updatedAt = new Date().toISOString();
+            const newWidth = metadata.width || null;
+            const newHeight = metadata.height || null;
+            const newSize = fileStats.size || null;
+
+            db.prepare(`UPDATE images SET analysis = ?, width = ?, height = ?, size = ?, updated_at = ? WHERE id = ?`)
+                .run(JSON.stringify(analysis), newWidth, newHeight, newSize, updatedAt, id);
+
+            results.success++;
+            results.updatedImages.push({
+                id,
+                analysis,
+                width: newWidth,
+                height: newHeight,
+                size: newSize,
+                updated_at: updatedAt
+            });
+
+        } catch (err) {
+            console.error(`[BATCH] Error on ID ${id}:`, err.message);
+            results.failed++;
+            results.errors.push(`${id}: ${err.message}`);
+        } finally {
+            results.processed++;
+        }
+    }
+
+    if (results.success > 0) generateSearchIndex();
+
+    res.json(results);
+});
+
 
 // Create Thumbnail Endpoint
 app.post('/create-thumbnail', async (req, res) => {

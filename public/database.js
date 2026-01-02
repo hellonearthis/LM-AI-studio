@@ -25,6 +25,8 @@ const PAGE_SIZE = 50;
 let totalImages = 0;
 let isLoading = false;
 let hasMore = true;
+let isSelectionMode = false;
+let selectedIds = new Set();
 let observer = null;
 
 // Fetches images in batches from the server
@@ -151,8 +153,8 @@ function createCardHtml(img) {
     const date = new Date(img.created_at).toLocaleDateString();
 
     // Extract key metadata fields for display
-    const width = metadata.ImageWidth || metadata.ExifImageWidth || metadata.PixelXDimension || 'N/A';
-    const height = metadata.ImageHeight || metadata.ExifImageHeight || metadata.PixelYDimension || 'N/A';
+    const width = img.width || metadata.ImageWidth || metadata.ExifImageWidth || metadata.PixelXDimension || 'N/A';
+    const height = img.height || metadata.ImageHeight || metadata.ExifImageHeight || metadata.PixelYDimension || 'N/A';
 
     // Format full metadata
     const metadataStr = Object.entries(metadata)
@@ -170,9 +172,10 @@ function createCardHtml(img) {
     }
 
     const fullPath = img.path;
+    const isSelected = selectedIds.has(String(img.id));
 
     return `
-        <div class="card" data-id="${img.id}">
+        <div class="card ${isSelected ? 'selected' : ''}" data-id="${img.id}">
             <div style="display: flex; gap: 1rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;">
                 <!--Thumbnail Image -->
                 <img src="${displayPath}" 
@@ -182,18 +185,25 @@ function createCardHtml(img) {
                         style="width: 100px; height: 100px; object-fit: cover; border-radius: 6px; cursor: pointer;"
                         title="Click to view full size">
                 <!-- Fallback -->
-                <div style="display: none; width: 100px; height: 100px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px; align-items: center; justify-content: center; font-size: 0.7rem; color: var(--text-secondary); text-align: center; padding: 0.5rem;">
-                    No Preview
+                <div class="thumb-fallback" style="display: none; width: 100px; height: 100px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px; flex-direction: column; align-items: center; justify-content: center; gap: 0.25rem; font-size: 0.7rem; color: var(--text-secondary); text-align: center; padding: 0.5rem;">
+                    <span>No Preview</span>
+                    <button class="regen-thumb-btn" data-id="${img.id}" style="background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary); cursor: pointer; border-radius: 4px; padding: 2px 6px; font-size: 0.65rem;" title="Regenerate Thumbnail">
+                        🔄 Regen
+                    </button>
                 </div>
                 <!-- Image Info -->
                 <div style="flex: 1;">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                         <div style="flex: 1; min-width: 0;">
-                            <h2 class="file-link" data-path="${img.path}" style="margin: 0; border: none; font-size: 1.1rem; cursor: pointer; color: var(--accent); text-decoration: none;" title="${metadataStr || 'No extra metadata'}">${img.filename}</h2>
+                            <h2 class="card-filename file-link" data-path="${img.path}" style="margin: 0; border: none; font-size: 1.1rem; cursor: pointer; color: var(--accent); text-decoration: none; display: block;" title="${metadataStr || 'No extra metadata'}">${img.filename}</h2>
                             <small style="color: var(--text-secondary);">${date} • ${width}w ${height}h</small>
                         </div>
-                        <div style="display: flex; gap: 0.5rem; align-items: flex-start;">
-                            <button class="delete-btn" data-id="${img.id}" style="background: transparent; border: 1px solid #ef4444; color: #ef4444; padding: 0.25rem 0.75rem; border-radius: 6px; cursor: pointer; font-size: 0.75rem; transition: all 0.2s;">X</button>
+                        <div style="display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-end;">
+                            <button class="delete-btn" data-id="${img.id}" style="background: transparent; border: 1px solid #ef4444; color: #ef4444; padding: 0.25rem 0.5rem; border-radius: 6px; cursor: pointer; font-size: 0.75rem; transition: all 0.2s;" title="Delete Image">X</button>
+                            <!-- Selection Checkbox -->
+                            <div style="display: flex; align-items: center; gap: 0.25rem;">
+                                <input type="checkbox" class="card-select-cb" data-id="${img.id}" ${isSelected ? 'checked' : ''} style="cursor: pointer; transform: scale(1.2);">
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -222,6 +232,47 @@ function createCardHtml(img) {
         </div>
     `;
 }
+
+// Handle Regenerate Thumbnail Click (Delegated)
+dbGrid.addEventListener('click', async (e) => {
+    if (e.target.classList.contains('regen-thumb-btn')) {
+        const btn = e.target;
+        const id = btn.dataset.id;
+
+        btn.disabled = true;
+        btn.textContent = '...';
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/regenerate-thumbnail`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                // Find grid item and update image src to force reload
+                const card = btn.closest('.card');
+                const img = card.querySelector('.thumbnail-preview');
+                const fallback = card.querySelector('.thumb-fallback');
+
+                // Add timestamp to force browser cache bypass
+                img.src = `${data.thumbPath}?t=${Date.now()}`;
+                img.style.display = 'block';
+                fallback.style.display = 'none';
+
+            } else {
+                alert('Failed to regenerate thumbnail');
+            }
+        } catch (err) {
+            console.error('Regen error:', err);
+            alert('Error regenerating thumbnail');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '🔄 Regen';
+        }
+    }
+});
 
 // ============================================================================
 // IMAGE PREVIEW POPUP
@@ -304,32 +355,7 @@ async function showImagePreview(imagePath) {
     }
 }
 
-// Helper to delete from DB and update UI
-async function deleteFromDatabase(id, cardElement) {
-    try {
-        const response = await fetch(`${API_BASE_URL}/images/${id}`, {
-            method: 'DELETE'
-        });
-
-        // If deletion was successful, remove the card from UI
-        if (response.ok || response.status === 404) {
-            cardElement.style.opacity = '0';
-            setTimeout(() => cardElement.remove(), 300);
-
-            // Update count
-            const dbCount = document.getElementById('dbCount');
-            if (dbCount) {
-                const current = parseInt(dbCount.textContent) || 0;
-                dbCount.textContent = Math.max(0, current - 1);
-            }
-        } else {
-            alert('Failed to delete entry from database');
-        }
-    } catch (error) {
-        console.error('Error deleting from DB:', error);
-        alert('Failed to delete entry from database');
-    }
-}
+// [Deleted old deleteFromDatabase - see new implementation below]
 
 // ============================================================================
 // FILE LINK HANDLER
@@ -373,61 +399,281 @@ const closeStatus = document.getElementById('closeStatus');
 
 if (validateBtn) {
     validateBtn.addEventListener('click', async () => {
-        const reanalyzeToggle = document.getElementById('reanalyzeToggle');
-        const reanalyze = reanalyzeToggle ? reanalyzeToggle.checked : false;
+    });
+}
 
-        const confirmMsg = reanalyze
-            ? 'Validate Database?\n\nThis will:\n1. Check for missing image files.\n2. Fix missing thumbnails.\n3. REGENERATE missing AI Summary/Tags (Slow).'
-            : 'Validate Database?\n\nThis will:\n1. Check for missing image files.\n2. Fix missing thumbnails.';
+// ============================================================================
+// SELECTION & BATCH ANALYSIS
+// ============================================================================
+const selectMissingBtn = document.getElementById('selectMissingBtn');
+const unselectAllBtn = document.getElementById('unselectAllBtn');
+const processSelectedBtn = document.getElementById('processSelectedBtn');
+const dbPromptType = document.getElementById('dbPromptType');
 
-        if (!confirm(confirmMsg)) return;
+// Custom Modal Elements
+const customModal = document.getElementById('customModal');
+const modalTitle = document.getElementById('modalTitle');
+const modalMessage = document.getElementById('modalMessage');
+const modalConfirm = document.getElementById('modalConfirm');
+const modalHasCancel = document.getElementById('modalHasCancel');
 
-        try {
-            validateBtn.disabled = true;
-            validateBtn.innerHTML = '<span>⏳</span> Validating...';
+// Helper: Custom Modal
+function showModal(title, message, isConfirm = false) {
+    return new Promise((resolve) => {
+        if (!customModal) {
+            // Fallback if modal elements aren't found (shouldn't happen)
+            if (isConfirm) resolve(confirm(message));
+            else { alert(message); resolve(true); }
+            return;
+        }
 
-            validationStatus.style.display = 'block';
-            validationText.textContent = 'Contacting server...';
-            validationProgressBar.style.width = '20%';
+        modalTitle.textContent = title;
+        modalMessage.innerHTML = message.replace(/\n/g, '<br>'); // Support simple line breaks
 
-            const response = await fetch(`${API_BASE_URL}/validate-database`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ reanalyze })
-            });
+        modalHasCancel.style.display = isConfirm ? 'block' : 'none';
+        modalConfirm.textContent = isConfirm ? 'Confirm' : 'OK';
 
-            if (!response.ok) throw new Error('Validation failed on server');
+        customModal.style.display = 'flex';
 
-            validationProgressBar.style.width = '80%';
-            const data = await response.json();
+        const handleConfirm = () => {
+            cleanup();
+            resolve(true);
+        };
 
-            validationProgressBar.style.width = '100%';
-            const res = data.results;
+        const handleCancel = () => {
+            cleanup();
+            resolve(false);
+        };
 
-            validationText.innerHTML = `
-                <strong>Validation Complete!</strong><br>
-                Total processed: ${res.total} | 
-                Missing files removed: ${res.missing} | 
-                Thumbnails fixed: ${res.fixedThumbnails} |
-                AI Data Regenerated: ${res.reanalyzed}
-                ${res.errors.length > 0 ? `<br><small style="color: #ef4444;">Errors: ${res.errors.length}</small>` : ''}
-            `;
+        const cleanup = () => {
+            modalConfirm.removeEventListener('click', handleConfirm);
+            modalHasCancel.removeEventListener('click', handleCancel);
+            customModal.style.display = 'none';
+        };
 
-            // Refresh database if something changed
-            if (res.missing > 0 || res.fixedThumbnails > 0) {
-                setTimeout(() => initDatabase(), 1500);
+        modalConfirm.addEventListener('click', handleConfirm);
+        modalHasCancel.addEventListener('click', handleCancel);
+    });
+}
+
+// 1. Select Missing
+if (selectMissingBtn) {
+    selectMissingBtn.addEventListener('click', () => {
+        let count = 0;
+        imagesData.forEach(img => {
+            let analysis = {};
+            try {
+                analysis = typeof img.analysis === 'string' ? JSON.parse(img.analysis) : (img.analysis || {});
+            } catch (e) { }
+
+            // Criteria: Missing Summary OR Missing Tags OR Missing Objects OR Missing Resolution
+            if (!analysis.summary || !analysis.tags || analysis.tags.length === 0 || !analysis.objects || analysis.objects.length === 0 || !img.width || !img.height) {
+                selectedIds.add(String(img.id));
+                count++;
+
+                // Updates visual check
+                const checkbox = document.querySelector(`.card-select-cb[data-id="${img.id}"]`);
+                if (checkbox) checkbox.checked = true;
+
+                const card = document.querySelector(`.card[data-id="${img.id}"]`);
+                if (card) card.classList.add('selected');
             }
+        });
 
-        } catch (error) {
-            console.error('Validation error:', error);
-            validationText.textContent = 'Error: ' + error.message;
-            validationProgressBar.style.backgroundColor = '#ef4444';
-        } finally {
-            validateBtn.disabled = false;
-            validateBtn.innerHTML = '<span>🛠️</span> Validate Database';
+        if (count > 0) {
+            updateProcessButton();
+            // Optional: Removed success alert to be less intrusive
+        } else {
+            showModal('Auto-Selection', 'No loaded images found with missing data.');
         }
     });
 }
+
+// 2. Unselect All
+if (unselectAllBtn) {
+    unselectAllBtn.addEventListener('click', () => {
+        selectedIds.clear();
+        document.querySelectorAll('.card-select-cb').forEach(cb => cb.checked = false);
+        document.querySelectorAll('.card.selected').forEach(card => card.classList.remove('selected'));
+        updateProcessButton();
+    });
+}
+
+// 3. Handle Individual Selection (Delegated from Grid)
+dbGrid.addEventListener('change', (e) => {
+    if (e.target.classList.contains('card-select-cb')) {
+        const id = e.target.dataset.id;
+        const card = e.target.closest('.card');
+
+        if (e.target.checked) {
+            selectedIds.add(String(id));
+            if (card) card.classList.add('selected');
+        } else {
+            selectedIds.delete(String(id));
+            if (card) card.classList.remove('selected');
+        }
+        updateProcessButton();
+    }
+});
+
+function updateProcessButton() {
+    const count = selectedIds.size;
+    if (processSelectedBtn) {
+        processSelectedBtn.textContent = `Process (${count})`;
+        processSelectedBtn.disabled = count === 0;
+        processSelectedBtn.style.opacity = count === 0 ? '0.5' : '1';
+    }
+
+    // Show/Hide Unselect All Button
+    if (unselectAllBtn) {
+        unselectAllBtn.style.display = count > 0 ? 'block' : 'none';
+    }
+}
+
+// 4. Process Selected
+if (processSelectedBtn) {
+    processSelectedBtn.addEventListener('click', async () => {
+        if (selectedIds.size === 0) return;
+
+        if (!await showModal('Confirm Processing', `Re-analyze ${selectedIds.size} images with mode: "<strong>${dbPromptType.value}</strong>"?`, true)) {
+            return;
+        }
+
+        processSelectedBtn.disabled = true;
+        processSelectedBtn.textContent = 'Processing...';
+
+        // Cancellation support
+        let isCancelled = false;
+        const closeBtn = document.getElementById('closeStatus');
+        const cancelHandler = () => { isCancelled = true; };
+        if (closeBtn) closeBtn.addEventListener('click', cancelHandler, { once: true });
+
+        try {
+            const ids = Array.from(selectedIds);
+            const promptType = dbPromptType.value;
+            const total = ids.length;
+            let successCount = 0;
+            let failedCount = 0;
+            const errors = [];
+
+            // Show status
+            validationStatus.style.display = 'block';
+            validationText.textContent = `Starting batch processing...`;
+            validationProgressBar.style.width = '0%';
+
+            for (let i = 0; i < total; i++) {
+                if (isCancelled) {
+                    validationText.textContent = 'Processing cancelled.';
+                    break;
+                }
+
+                validationText.textContent = `Processing image ${i + 1} of ${total}...`;
+
+                try {
+                    const id = ids[i];
+                    // Sequential Request
+                    const response = await fetch(`${API_BASE_URL}/batch-analyze`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ids: [id], promptType })
+                    });
+
+                    if (!response.ok) throw new Error('API request failed');
+
+                    const result = await response.json();
+
+                    if (result.success > 0 && result.updatedImages && result.updatedImages.length > 0) {
+                        successCount++;
+                        const updated = result.updatedImages[0];
+
+                        // Update Local Cache
+                        const localImg = imagesData.find(img => img.id == updated.id);
+                        if (localImg) {
+                            localImg.analysis = updated.analysis;
+                            localImg.updated_at = updated.updated_at;
+                            if (updated.width) localImg.width = updated.width;
+                            if (updated.height) localImg.height = updated.height;
+                            if (updated.size) localImg.size = updated.size;
+
+                            // Update DOM
+                            const existingCard = document.querySelector(`.card[data-id="${updated.id}"]`);
+                            if (existingCard) {
+                                const newCardHtml = createCardHtml(localImg);
+                                const temp = document.createElement('div');
+                                temp.innerHTML = newCardHtml;
+                                existingCard.replaceWith(temp.firstElementChild);
+                            }
+                        }
+                    } else {
+                        failedCount++;
+                        if (result.errors) errors.push(...result.errors);
+                    }
+
+                } catch (err) {
+                    console.error(`Error processing ID ${ids[i]}:`, err);
+                    failedCount++;
+                    errors.push(`${ids[i]}: ${err.message}`);
+                }
+
+                // Update Progress Bar
+                const percent = Math.round(((i + 1) / total) * 100);
+                validationProgressBar.style.width = `${percent}%`;
+            }
+
+            validationProgressBar.style.width = '100%';
+            validationText.innerHTML = `
+                <strong>Batch Complete!</strong><br>
+                Success: ${successCount} | Failed: ${failedCount}
+                ${isCancelled ? '<br>(Cancelled)' : ''}
+            `;
+
+            // Auto-close if success
+            if (successCount > 0 && failedCount === 0 && !isCancelled) {
+                setTimeout(() => {
+                    validationStatus.style.display = 'none';
+                    validationProgressBar.style.width = '0%';
+                }, 4000);
+            }
+
+            // Auto-Deselect
+            if (!isCancelled) {
+                if (unselectAllBtn) {
+                    unselectAllBtn.click();
+                } else {
+                    selectedIds.clear();
+                    document.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected'));
+                    document.querySelectorAll('.card-select-cb').forEach(cb => cb.checked = false);
+                    updateProcessButton();
+                }
+            }
+
+        } catch (error) {
+            console.error('Batch Process Error:', error);
+            validationText.textContent = 'Error: ' + error.message;
+            validationProgressBar.style.backgroundColor = '#ef4444';
+        } finally {
+            if (closeBtn) closeBtn.removeEventListener('click', cancelHandler);
+            updateProcessButton();
+            processSelectedBtn.disabled = false;
+            processSelectedBtn.textContent = 'Process';
+        }
+    });
+}
+
+// 5. Delete Button Handler (Delegated)
+document.addEventListener('click', async (e) => {
+    // Check if clicked element is delete button or inside it
+    const deleteBtn = e.target.closest('.delete-btn');
+    if (deleteBtn) {
+        e.preventDefault();
+        e.stopPropagation(); // Essential!
+
+        const id = deleteBtn.dataset.id;
+        if (id) {
+            await deleteFromDatabase(id);
+        }
+    }
+});
 
 if (closeStatus) {
     closeStatus.addEventListener('click', () => {
@@ -598,6 +844,106 @@ async function updateTag(id, type, oldTag, newTag, action) {
         console.error('Tag update error:', error);
         alert('Failed to update tags: ' + error.message);
     }
+}
+
+async function deleteFromDatabase(id) {
+    const card = document.querySelector(`.card[data-id="${id}"]`);
+    if (!card) return;
+
+    // Get filename for context
+    const filenameEl = card.querySelector('.card-filename') || card.querySelector('.text-accent'); // Fallback
+    const filename = filenameEl ? filenameEl.textContent.trim() : 'Image';
+
+    // 3-Option Delete Modal
+    showDeleteOptionsModal(filename, async (action) => {
+        if (action === 'cancel') return;
+
+        try {
+            const deleteFile = (action === 'delete-file');
+
+            const response = await fetch(`${API_BASE_URL}/delete-image`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id, deleteFile })
+            });
+
+            if (!response.ok) throw new Error('Delete failed');
+
+            // Remove from UI
+            card.remove();
+
+            // Remove from selection if present
+            selectedIds.delete(String(id));
+            updateProcessButton();
+
+        } catch (error) {
+            console.error('Delete error:', error);
+            showModal('Error', 'Failed to delete: ' + error.message);
+        }
+    });
+}
+
+function showDeleteOptionsModal(filename, callback) {
+    const modal = document.createElement('div');
+    modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;';
+
+    modal.innerHTML = `
+        <div style="background: var(--card-bg); padding: 1rem; border-radius: 12px; border: 1px solid var(--border); max-width: 500px; width: 90%; text-align: center;">
+            <h3 style="margin-top: 0; color: var(--text-primary);">Delete Image?</h3>
+            <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                Action for: <strong style="color: var(--accent);">${filename}</strong>
+            </p>
+            <div style="display: flex; flex-direction: column; gap: 1rem;">
+                <button id="btnDbOnly" style="padding: 1rem; border-radius: 8px; border: 1px solid var(--border); background: #a05806ff; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
+                    <span>🗑️</span> Remove from Database (Keep File)
+                </button>
+                <button id="btnCancel" style="padding: 1.25rem; border-radius: 8px; border: 1px solid #4fb2a3; background: #4b7e91ff; color: white; cursor: pointer; font-size: 2rem; margin-top: 1rem; margin-bottom: 1rem;">
+                    Cancel
+                </button>
+                <button id="btnDeleteFile" style="padding: 1rem; border-radius: 8px; border: none; background: #991b1b; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 1rem;">
+                    <span>⚠️</span> Delete File & Remove from Database
+                </button>
+
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const cleanup = () => {
+        document.removeEventListener('keydown', keyHandler);
+        modal.remove();
+    };
+
+    const keyHandler = (e) => {
+        if (e.key === 'Escape') {
+            cleanup();
+            callback('cancel');
+        }
+    };
+    document.addEventListener('keydown', keyHandler);
+
+    modal.querySelector('#btnDbOnly').onclick = () => {
+        cleanup();
+        callback('delete-db');
+    };
+
+    modal.querySelector('#btnDeleteFile').onclick = () => {
+        cleanup();
+        callback('delete-file');
+    };
+
+    modal.querySelector('#btnCancel').onclick = () => {
+        cleanup();
+        callback('cancel');
+    };
+
+    modal.onclick = (e) => {
+        if (e.target === modal) {
+            cleanup();
+            callback('cancel');
+        }
+    };
 }
 
 // Custom Input Modal (Replaces prompt)
