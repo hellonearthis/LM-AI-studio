@@ -1,4 +1,5 @@
 {
+  "_credits": "Prompts adapted from ComfyUI-QwenVL (https://github.com/1038lab/ComfyUI-QwenVL.git)",
   "_preset_prompts": [
     "Tags",
     "Simple Description",

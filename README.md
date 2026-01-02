@@ -165,5 +165,6 @@ ISC
 - [Electron](https://www.electronjs.org/) for cross-platform desktop apps
 - [Sharp](https://sharp.pixelplumbing.com/) for image processing
 - [exifr](https://github.com/MikeKovarik/exifr) for metadata extraction
+- [ComfyUI-QwenVL](https://github.com/1038lab/ComfyUI-QwenVL.git) for Qwen VL3 prompt strategies
 - [Fuse.js](https://fusejs.io/) for powerful fuzzy search capabilities
 - [Latent Scope](https://github.com/enjalot/latent-scope) by enjalot for semantic visualization

@@ -132,7 +132,7 @@ function generateSearchIndex() {
 // Analyze image endpoint
 // Load Qwen Prompts
 let qwenPrompts = {};
-const PROMPTS_FILE = path.join(__dirname, 'qwen_vl3_porompts.json');
+const PROMPTS_FILE = path.join(__dirname, 'qwen_vl3_prompts.json');
 
 try {
     if (fs.existsSync(PROMPTS_FILE)) {
