@@ -33,6 +33,66 @@
                     style="font-size: 0.7em; opacity: 0.7; margin-left: 5px;">(β)</span>
             </a>
         </div>
+
+        <!-- Sidebar Controls (Migrated from Database) -->
+        <div class="sidebar-controls"
+            style="padding: 1.5rem; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 0.75rem;">
+
+            <div id="validationStatus"
+                style="display: none; background: rgba(52, 211, 153, 0.1); border: 1px solid var(--accent); padding: 0.75rem; border-radius: 8px; margin-bottom: 1rem; position: relative; font-size: 0.85rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <span id="validationText" style="color: var(--text-primary); word-break: break-word;">Ready</span>
+                    <button id="closeStatus"
+                        style="background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 1.2rem; line-height: 1;">&times;</button>
+                </div>
+                <div id="validationProgress"
+                    style="height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden;">
+                    <div id="validationProgressBar"
+                        style="width: 0%; height: 100%; background: var(--accent); transition: width 0.3s;"></div>
+                </div>
+            </div>
+
+
+
+            <div
+                style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">
+                Batch Actions</div>
+
+            <select id="dbPromptType"
+                style="width: 100%; padding: 0.6rem; border-radius: 8px; background: var(--bg-color); color: var(--text-primary); border: 1px solid var(--border); font-family: inherit; font-size: 0.85rem; outline: none;">
+                <option value="Detailed Analysis">Detailed Analysis</option>
+                <option value="Simple Description">Simple Description</option>
+                <option value="Detailed Description" selected>Detailed Description</option>
+                <option value="Ultra Detailed Description">Ultra Detailed Description</option>
+                <option value="Cinematic Description">Cinematic Description</option>
+                <option value="Video Summary">Video Summary</option>
+                <option value="Short Story">Short Story</option>
+                <option value="Prompt Refine & Expand">Prompt Refine & Expand</option>
+            </select>
+
+            <button id="selectMissingBtn"
+                style="width: 100%; background: rgba(56, 189, 248, 0.1); border: 1px dashed var(--accent); color: var(--accent); padding: 0.6rem; border-radius: 8px; cursor: pointer; font-size: 0.85rem; text-align: center;">
+                Select Missing
+            </button>
+
+            <button id="unselectAllBtn"
+                style="display: none; width: 100%; background: var(--bg-color); border: 1px solid var(--border); color: var(--text-secondary); padding: 0.6rem; border-radius: 8px; cursor: pointer; font-size: 0.85rem; text-align: center;">
+                Unselect All
+            </button>
+
+            <button id="processSelectedBtn"
+                style="width: 100%; background: var(--accent); border: none; color: white; padding: 0.6rem; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.85rem; text-align: center;"
+                disabled>
+                Process (0)
+            </button>
+
+            <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+                <button id="validateBtn" title="Integrity Check"
+                    style="flex: 1; background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.5rem; border-radius: 8px; cursor: pointer;">
+                    🛠️ Check
+                </button>
+            </div>
+        </div>
     </nav>
 
     <div class="main-wrapper">
@@ -61,7 +121,8 @@
                                         style="opacity: 0; width: 0; height: 0;">
                                     <span class="slider round"></span>
                                 </label>
-                                <span id="logicLabel" style="font-size: 0.8rem; color: var(--text-secondary);">Match All
+                                <span id="logicLabel" style="font-size: 0.8rem; color: var(--text-secondary);">Match
+                                    All
                                     (AND)</span>
                             </div>
                         </div>
@@ -107,7 +168,8 @@
                 <!-- Results Area -->
                 <div style="margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center;">
                     <h3 style="font-size: 1.2rem;">Results</h3>
-                    <span id="resultsCount" style="color: var(--text-secondary); font-size: 0.9rem;">0 results</span>
+                    <span id="resultsCount" style="color: var(--text-secondary); font-size: 0.9rem;">0
+                        results</span>
                 </div>
 
                 <div id="searchResults"
@@ -130,7 +192,8 @@
                         <span style="color: var(--text-secondary); font-size: 0.9rem;">Loading...</span>
                     </div>
 
-                    <h3 style="margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;">Top
+                    <h3 style="margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;">
+                        Top
                         Objects</h3>
                     <div id="topObjectsList" style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
                         <span style="color: var(--text-secondary); font-size: 0.9rem;">Loading...</span>

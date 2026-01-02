@@ -54,33 +54,50 @@
                 <p>Upload an image to extract metadata and generate AI insights.</p>
             </header>
 
-            <div class="upload-section">
-                <!-- Analysis Level Selector -->
-                <div style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
-                    <label for="promptType" style="color: var(--text-secondary); font-size: 0.9rem;">Analysis
-                        Mode:</label>
-                    <select id="promptType"
-                        style="padding: 0.5rem; border-radius: 8px; background: var(--card-bg); color: var(--text-primary); border: 1px solid var(--border); font-family: inherit; font-size: 1rem; outline: none; margin-left: 0.5rem;">
-                        <option value="Detailed Analysis">Detailed Analysis</option>
-                        <option value="Simple Description">Simple Description</option>
-                        <option value="Detailed Description" selected>Detailed Description</option>
-                        <option value="Ultra Detailed Description">Ultra Detailed Description</option>
-                        <option value="Cinematic Description">Cinematic Description</option>
-                        <option value="Video Summary">Video Summary</option>
-                        <option value="Short Story">Short Story</option>
-                        <option value="Prompt Refine & Expand">Prompt Refine & Expand</option>
-                    </select>
+            <div class="analysis-controls-card">
+
+                <div class="controls-grid">
+                    <!-- Left: Prompt Type -->
+                    <div class="control-group">
+                        <label for="promptType" class="control-label">Select AI Analysis Mode:</label>
+                        <select id="promptType" class="modern-select">
+                            <option value="Detailed Analysis">Detailed Analysis</option>
+                            <option value="Simple Description">Simple Description</option>
+                            <option value="Detailed Description" selected>Detailed Description</option>
+                            <option value="Ultra Detailed Description">Ultra Detailed Description</option>
+                            <option value="Cinematic Description">Cinematic Description</option>
+                            <option value="Video Summary">Video Summary</option>
+                            <option value="Short Story">Short Story</option>
+                        </select>
+                    </div>
+
+                    <!-- Right: Custom Tags -->
+                    <div class="control-group">
+                        <label for="customTagsInput" class="control-label">Add Custom Tags to all new images:</label>
+                        <input type="text" id="customTagsInput" class="modern-input"
+                            placeholder="e.g. vacation, family, 2024">
+                    </div>
                 </div>
 
-                <div style="display: flex; gap: 1rem; width: 100%;">
-                    <div class="file-select-btn" id="selectFileBtn" style="flex: 1; margin-bottom: 0;">
-                        <div class="fake-btn">Choose Image</div>
-                        <span class="file-msg" id="fileMsg">No file selected</span>
+                <div class="action-buttons-row">
+
+                    <div class="action-column">
+                        <label class="control-label">Select an image or images:</label>
+                        <div id="selectFileBtn" class="action-btn">
+                            📄 Choose Image
+                        </div>
+                        <div id="fileMsg"
+                            style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem; min-height: 1.2em;">
+                        </div>
                     </div>
-                    <div class="file-select-btn" id="selectFolderBtn" style="flex: 1; margin-bottom: 0;">
-                        <div class="fake-btn">Load Folder</div>
-                        <span class="file-msg">Batch Process</span>
+
+                    <div class="action-column">
+                        <label class="control-label">Select a folder of images:</label>
+                        <div id="selectFolderBtn" class="action-btn">
+                            📂 Load Folder
+                        </div>
                     </div>
+
                 </div>
 
                 <!-- Progress Bar (Hidden by default) -->

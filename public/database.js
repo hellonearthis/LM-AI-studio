@@ -58,7 +58,10 @@ async function loadNextPage() {
     console.log(`[DB] Fetching page ${currentPage}...`);
 
     try {
-        const response = await fetch(`${API_BASE_URL}/images?page=${currentPage}&limit=${PAGE_SIZE}`);
+        const sortSelect = document.getElementById('sortSelect');
+        const sort = sortSelect ? sortSelect.value : 'recent_update';
+
+        const response = await fetch(`${API_BASE_URL}/images?page=${currentPage}&limit=${PAGE_SIZE}&sort=${sort}`);
         if (!response.ok) throw new Error('Failed to load images');
 
         const data = await response.json();

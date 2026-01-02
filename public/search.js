@@ -26,6 +26,7 @@ let isInitialized = false;
 // State for pagination
 let filteredImages = [];
 let currentIndex = 0;
+let selectedIds = new Set();
 const BATCH_SIZE = 50;
 let observer = null;
 const sentinel = document.getElementById('scroll-sentinel');
@@ -38,13 +39,10 @@ async function initSearch() {
         searchBtn.disabled = true;
         searchBtn.textContent = 'Loading Index...';
 
-        // fetch images and pre-computed index in parallel
-        const [imagesRes, indexRes] = await Promise.all([
-            fetch(`${API_BASE_URL}/images`),
-            fetch('search-index.json')
-        ]);
-
+        // Fetch images only (Force runtime indexing to avoid stale index issues)
+        const imagesRes = await fetch(`${API_BASE_URL}/images`);
         const imagesData = await imagesRes.json();
+
         // Handle both old array format and new object format { images: [], ... }
         const imagesList = Array.isArray(imagesData) ? imagesData : imagesData.images;
 
@@ -55,59 +53,39 @@ async function initSearch() {
             return img;
         });
 
-        // Attempt to load pre-computed index
-        let fuseIndex = null;
-        if (indexRes.ok) {
-            try {
-                const indexData = await indexRes.json();
-                fuseIndex = Fuse.parseIndex(indexData);
-                console.log('Loaded pre-computed search index');
-            } catch (e) {
-                console.warn('Failed to parse search index:', e);
-            }
-        } else {
-            console.warn('Pre-computed index not found, falling back to runtime indexing');
-        }
-
         // Initialize Fuse.js
         const options = {
             includeScore: true,
-            threshold: 0.3, // "sweet spot" catching typos
-            ignoreLocation: true, // Search anywhere in the string
-            // Keys must match what was used to generate server-side index
+            threshold: 0.2, // Stricter matching (0.0 = perfect, 1.0 = anything)
+            ignoreLocation: true,
+            // useExtendedSearch: true, // Disabled: causing "match all" behavior with some queries
             keys: [
                 { name: 'filename', weight: 1 },
                 { name: 'analysis.summary', weight: 1 },
-                { name: 'analysis.objects', weight: 2 }, // Higher weight
-                { name: 'analysis.tags', weight: 2 }     // Higher weight
+                { name: 'analysis.objects', weight: 2 },
+                { name: 'analysis.tags', weight: 2 }
             ]
         };
 
-        // Prepare data for Fuse (parsable objects)
+        // Prepare data for Fuse
         const indexedImages = allImages.map(img => {
-            let parsedAnalysis = {};
-            try {
-                parsedAnalysis = typeof img.analysis === 'string' ? JSON.parse(img.analysis) : (img.analysis || {});
-            } catch (e) {
-                // ignore
-            }
-            return {
-                ...img,
-                analysis: parsedAnalysis
-            };
+            // Ensure analysis is an object
+            return { ...img, analysis: img.analysis || {} };
         });
 
-        // Use index if available, otherwise runtime generation
-        if (fuseIndex) {
-            fuse = new Fuse(indexedImages, options, fuseIndex);
-        } else {
-            fuse = new Fuse(indexedImages, options);
+        // Debug: Check index data
+        if (indexedImages.length > 0) {
+            console.log('[DEBUG] First indexed item:', JSON.stringify(indexedImages[0].analysis));
         }
+
+        // Runtime Indexing
+        console.log('[DEBUG] Creating Fuse index with', indexedImages.length, 'items');
+        fuse = new Fuse(indexedImages, options);
 
         isInitialized = true;
 
-        // NO LONGER running initial search automatically.
-        // performSearch();
+        // Initial search to populate list
+        performSearch();
 
     } catch (error) {
         console.error('Failed to initialize search:', error);
@@ -118,10 +96,37 @@ async function initSearch() {
     }
 }
 
+async function refreshData() {
+    try {
+        const res = await fetch(`${API_BASE_URL}/images`);
+        const data = await res.json();
+
+        const imagesList = Array.isArray(data) ? data : data.images;
+
+        allImages = imagesList.map(img => {
+            if (typeof img.analysis === 'string') {
+                try { img.analysis = JSON.parse(img.analysis || '{}'); } catch (e) { img.analysis = {}; }
+            }
+            return img;
+        });
+
+        if (fuse) {
+            const indexedImages = allImages.map(img => ({ ...img, analysis: img.analysis || {} }));
+            fuse.setCollection(indexedImages);
+        }
+
+        performSearch();
+    } catch (e) {
+        console.error('Failed to refresh data:', e);
+    }
+}
+
 
 // Search Function
 function performSearch() {
     if (!isInitialized) return;
+
+    console.log('[DEBUG] performSearch called, query:', searchQuery.value);
 
     searchBtn.disabled = true;
     searchBtn.textContent = 'Searching...';
@@ -134,8 +139,10 @@ function performSearch() {
     let results = [];
 
     // 1. Fuse.js Search (if query exists)
-    if (queryText) {
+    if (queryText && fuse) {
+        console.log('[DEBUG] Searching Fuse for:', queryText);
         const fuseResults = fuse.search(queryText);
+        console.log('[DEBUG] Fuse found:', fuseResults.length, 'matches');
         results = fuseResults.map(res => res.item);
     } else {
         // If no query, show everything
@@ -160,6 +167,16 @@ function performSearch() {
         }
 
         return true;
+    });
+
+    // 2.5 Sort Results (Default: Recent Updates)
+    results.sort((a, b) => {
+        const dateA = new Date(a.created_at || 0).getTime();
+        const dateB = new Date(b.created_at || 0).getTime();
+        const updateA = a.updated_at ? new Date(a.updated_at).getTime() : dateA;
+        const updateB = b.updated_at ? new Date(b.updated_at).getTime() : dateB;
+
+        return updateB - updateA;
     });
 
     // 3. Reset Pagination and Display
@@ -232,10 +249,14 @@ function createResultHtml(img) {
     const analysis = img.analysis || {};
     const objects = analysis.objects || [];
     const tags = analysis.tags || [];
+    const isSelected = selectedIds.has(String(img.id));
 
     return `
-        <div class="card" data-id="${img.id}">
-            <div style="display: flex; gap: 1rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;">
+        <div class="card ${isSelected ? 'selected' : ''}" data-id="${img.id}" style="position: relative;">
+            <div style="position: absolute; top: 0.75rem; right: 0.75rem; z-index: 5;">
+                <input type="checkbox" class="card-select-cb" data-id="${img.id}" ${isSelected ? 'checked' : ''} style="transform: scale(1.3); cursor: pointer;">
+            </div>
+            <div style="display: flex; gap: 1rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; padding-right: 1.5rem;">
                 <img src="${escapeHtml(displayPath)}" 
                      data-fullpath="${escapeHtml(img.path)}"
                      class="thumbnail-preview"
@@ -245,7 +266,7 @@ function createResultHtml(img) {
                 <div style="flex: 1; min-width: 0;">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                         <h3 class="file-link" data-path="${escapeHtml(img.path)}" style="margin: 0; color: var(--accent); font-size: 1rem; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Show in folder">${escapeHtml(img.filename)}</h3>
-                        <button class="delete-btn" data-id="${img.id}" style="background: transparent; border: 1px solid #ef4444; color: #ef4444; padding: 0.25rem 0.75rem; border-radius: 6px; cursor: pointer; font-size: 0.75rem; transition: all 0.2s;">X</button>
+                        <button class="delete-btn" data-id="${img.id}" style="background: transparent; border: 1px solid #ef4444; color: #ef4444; padding: 0.25rem 0.5rem; border-radius: 6px; cursor: pointer; font-size: 0.7rem; transition: all 0.2s; margin-left: 0.5rem;">X</button>
                     </div>
                     <small style="color: var(--text-secondary);">${date}</small>
                     <div style="margin-top: 0.25rem;">
@@ -564,7 +585,7 @@ function showTagInputModal(title, initialValue, callback) {
 }
 
 // Custom Confirmation Modal (Replaces native confirm)
-function showConfirmModal(message, onConfirm) {
+function showConfirmModal(message, onConfirm, confirmText = 'Delete', confirmColor = '#ef4444') {
     const modal = document.createElement('div');
     modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;';
 
@@ -573,7 +594,7 @@ function showConfirmModal(message, onConfirm) {
             <p style="margin: 0 0 1.5rem 0; color: var(--text-primary); font-size: 1.1rem;">${message}</p>
             <div style="display: flex; gap: 1rem; justify-content: center;">
                 <button id="cancelConfirmBtn" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.5rem 1.5rem; border-radius: 6px; cursor: pointer;">Cancel</button>
-                <button id="okConfirmBtn" style="background: #ef4444; border: none; color: white; padding: 0.5rem 1.5rem; border-radius: 6px; cursor: pointer; font-weight: 500;">Delete</button>
+                <button id="okConfirmBtn" style="background: ${confirmColor}; border: none; color: white; padding: 0.5rem 1.5rem; border-radius: 6px; cursor: pointer; font-weight: 500;">${confirmText}</button>
             </div>
         </div>
     `;
@@ -877,3 +898,173 @@ document.addEventListener("click", (e) => {
         alert('This feature requires Electron. File path: ' + fullPath);
     }
 });
+
+// ============================================================================
+// BATCH CONTROLS & SELECTION LOGIC
+// ============================================================================
+
+const selectMissingBtn = document.getElementById('selectMissingBtn');
+const unselectAllBtn = document.getElementById('unselectAllBtn');
+const processSelectedBtn = document.getElementById('processSelectedBtn');
+const dbPromptType = document.getElementById('dbPromptType');
+const validateBtn = document.getElementById('validateBtn');
+const validationStatus = document.getElementById('validationStatus');
+const validationText = document.getElementById('validationText');
+const validationProgressBar = document.getElementById('validationProgressBar');
+const closeStatus = document.getElementById('closeStatus');
+
+
+// Checkbox Delegation
+searchResults.addEventListener('change', (e) => {
+    if (e.target.classList.contains('card-select-cb')) {
+        const id = e.target.dataset.id;
+        const card = e.target.closest('.card');
+        if (e.target.checked) {
+            selectedIds.add(String(id));
+            if (card) card.classList.add('selected');
+        } else {
+            selectedIds.delete(String(id));
+            if (card) card.classList.remove('selected');
+        }
+        updateProcessButton();
+    }
+});
+
+function updateProcessButton() {
+    const count = selectedIds.size;
+    if (processSelectedBtn) {
+        processSelectedBtn.textContent = `Process (${count})`;
+        processSelectedBtn.disabled = count === 0;
+        processSelectedBtn.style.opacity = count === 0 ? '0.5' : '1';
+    }
+    if (unselectAllBtn) {
+        unselectAllBtn.style.display = count > 0 ? 'block' : 'none';
+    }
+}
+
+// 1. Select Missing
+if (selectMissingBtn) {
+    selectMissingBtn.addEventListener('click', () => {
+        let count = 0;
+        filteredImages.forEach(img => {
+            const analysis = img.analysis || {};
+            if (!analysis.summary || !analysis.tags || analysis.tags.length === 0 || !analysis.objects || analysis.objects.length === 0) {
+                selectedIds.add(String(img.id));
+                count++;
+
+                const cb = document.querySelector(`.card-select-cb[data-id="${img.id}"]`);
+                if (cb) cb.checked = true;
+                const card = document.querySelector(`.card[data-id="${img.id}"]`);
+                if (card) card.classList.add('selected');
+            }
+        });
+
+        if (count > 0) updateProcessButton();
+        else alert('No visible images found with missing data.');
+    });
+}
+
+// 2. Unselect All
+if (unselectAllBtn) {
+    unselectAllBtn.addEventListener('click', () => {
+        selectedIds.clear();
+        document.querySelectorAll('.card-select-cb').forEach(cb => cb.checked = false);
+        document.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected'));
+        updateProcessButton();
+    });
+}
+
+// 3. Process Selected
+if (processSelectedBtn) {
+    processSelectedBtn.addEventListener('click', () => {
+        if (selectedIds.size === 0) return;
+
+        showConfirmModal(`Re-analyze ${selectedIds.size} images with mode: "${dbPromptType.value}"?`, async () => {
+
+            processSelectedBtn.disabled = true;
+            processSelectedBtn.textContent = 'Processing...';
+
+            const ids = Array.from(selectedIds);
+            const promptType = dbPromptType.value;
+            const total = ids.length;
+            let successCount = 0;
+            let failedCount = 0;
+
+            if (validationStatus) {
+                validationStatus.style.display = 'block';
+                validationText.textContent = 'Starting batch...';
+                validationProgressBar.style.width = '0%';
+            }
+
+            for (let i = 0; i < total; i++) {
+                if (validationText) validationText.textContent = `Processing image ${i + 1} of ${total}...`;
+
+                try {
+                    const response = await fetch(`${API_BASE_URL}/batch-analyze`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ids: [ids[i]], promptType })
+                    });
+
+                    if (response.ok) successCount++;
+                    else failedCount++;
+                } catch (e) {
+                    console.error(e);
+                    failedCount++;
+                }
+                if (validationProgressBar) validationProgressBar.style.width = `${Math.round(((i + 1) / total) * 100)}%`;
+            }
+
+            if (validationText) validationText.textContent = `Batch Complete! Success: ${successCount}`;
+
+            selectedIds.clear();
+            await refreshData();
+            updateProcessButton();
+
+            setTimeout(() => {
+                if (validationStatus) validationStatus.style.display = 'none';
+            }, 2000);
+
+        }, 'Start Batch', 'var(--accent)');
+    });
+}
+
+// 4. Validate (Integrity Check)
+if (validateBtn) {
+    validateBtn.addEventListener('click', () => {
+        showConfirmModal('Run database integrity check? This will verify files and thumbnails.', async () => {
+
+            if (validationStatus) {
+                validationStatus.style.display = 'block';
+                validationText.textContent = 'Running check...';
+                validationProgressBar.style.width = '50%';
+            }
+
+            try {
+                const res = await fetch(`${API_BASE_URL}/validate-database`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reanalyze: false })
+                });
+                const data = await res.json();
+
+                if (validationText) validationText.textContent = `Check Complete. Missing removed: ${data.results.missing}`;
+                if (validationProgressBar) validationProgressBar.style.width = '100%';
+
+                await refreshData();
+
+                setTimeout(() => {
+                    if (validationStatus) validationStatus.style.display = 'none';
+                }, 3000);
+            } catch (e) {
+                alert('Check failed: ' + e.message);
+            }
+        }, 'Run Check', '#3b82f6');
+    });
+}
+
+if (closeStatus) {
+    closeStatus.addEventListener('click', () => {
+        validationStatus.style.display = 'none';
+    });
+}

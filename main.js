@@ -86,7 +86,8 @@ ipcMain.handle('get-images-from-folder', async (event, folderPath) => {
                 const stats = fs.statSync(fullPath);
                 return {
                     path: fullPath,
-                    mtime: stats.mtime.getTime()
+                    mtime: stats.mtime.getTime(),
+                    size: stats.size
                 };
             });
 
@@ -113,7 +114,7 @@ ipcMain.handle('get-file-stats', async (event, filePath) => {
         const stats = fs.statSync(filePath);
         return {
             birthtime: stats.birthtime.toISOString(),
-            mtime: stats.mtime.toISOString(),
+            mtime: stats.mtime.getTime(),
             size: stats.size
         };
     } catch (error) {

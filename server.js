@@ -49,6 +49,7 @@ db.exec(`
         width INTEGER,
         height INTEGER,
         size INTEGER,
+        mtime INTEGER,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT
     )
@@ -63,11 +64,75 @@ try {
         db.exec('ALTER TABLE images ADD COLUMN width INTEGER');
         db.exec('ALTER TABLE images ADD COLUMN height INTEGER');
         db.exec('ALTER TABLE images ADD COLUMN size INTEGER');
-        console.log('[DB] Migration complete.');
+    }
+
+    // Check for mtime
+    const hasMtime = columns.some(c => c.name === 'mtime');
+    if (!hasMtime) {
+        console.log('[DB] Migrating: Adding mtime column...');
+        db.exec('ALTER TABLE images ADD COLUMN mtime INTEGER');
     }
 } catch (err) {
     console.error('[DB] Migration error:', err);
 }
+
+// Fast Check Endpoint
+app.post('/check-fast', (req, res) => {
+    try {
+        const { path, size, mtime } = req.body;
+        const row = db.prepare('SELECT id, size, mtime FROM images WHERE path = ?').get(path);
+
+        if (!row) {
+            return res.json({ exists: false });
+        }
+
+        // Exact match check (mtime tolerance of 100ms just in case)
+        // size must match exactly
+        if (row.size === size && row.mtime === mtime) {
+            return res.json({ exists: true, match: 'exact' });
+        }
+
+        // File exists but different size/time -> likely modified
+        return res.json({ exists: true, match: 'partial' });
+
+    } catch (err) {
+        console.error('[CHECK-FAST] Error:', err);
+        res.status(500).json({ error: 'Check failed' });
+    }
+});
+
+// Bulk Fast Check Endpoint
+app.post('/check-fast-batch', (req, res) => {
+    try {
+        const { files } = req.body; // Array of { path, size, mtime }
+        if (!files || !Array.isArray(files)) {
+            return res.status(400).json({ error: 'Invalid input' });
+        }
+
+        const results = {};
+        const stmt = db.prepare('SELECT size, mtime FROM images WHERE path = ?');
+
+        const transaction = db.transaction((fileList) => {
+            for (const file of fileList) {
+                const row = stmt.get(file.path);
+                if (!row) {
+                    results[file.path] = 'missing';
+                } else if (row.size === file.size && row.mtime === file.mtime) {
+                    results[file.path] = 'exact';
+                } else {
+                    results[file.path] = 'partial'; // Exists but modified
+                }
+            }
+        });
+
+        transaction(files);
+        res.json({ results });
+
+    } catch (err) {
+        console.error('[CHECK-FAST-BATCH] Error:', err);
+        res.status(500).json({ error: 'Batch check failed' });
+    }
+});
 
 // Auto-migration: Add updated_at column if it doesn't exist
 try {
@@ -88,7 +153,7 @@ function generateSearchIndex() {
     console.log('[INDEX] Generating search index...');
     try {
         // Fetch all images for indexing (Must match /images sort order)
-        const sql = `SELECT * FROM images ORDER BY created_at DESC`;
+        const sql = `SELECT * FROM images ORDER BY COALESCE(updated_at, created_at) DESC`;
         const images = db.prepare(sql).all();
 
         // Pre-process data for indexing (parse JSON strings)
@@ -546,7 +611,7 @@ app.post('/create-thumbnail', async (req, res) => {
 app.post('/save', async (req, res) => {
     console.log('[SAVE] Request received');
     try {
-        const { filename, path, metadata, analysis, file_hash } = req.body;
+        const { filename, path, metadata, analysis, file_hash, mtime } = req.body;
 
         // Auto-generate created_at if not provided (should be standard ISO)
         let created_at = new Date().toISOString();
@@ -569,8 +634,27 @@ app.post('/save', async (req, res) => {
                 console.log(`[SAVE] Duplicate found by hash: ${existingByHash.filename}`);
                 // If it's literally the same file (same path), we treat it as an update/skip
                 if (existingByHash.path === path) {
-                    // It's the same file. Update metadata/analysis if provided?
-                    // For now, let's treat it as "Duplicate - Already Exists"
+                    // Same file path and same hash.
+                    // If we have new analysis/metadata, we should UPDATE the record.
+                    const hasNewData = (analysis && Object.keys(analysis).length > 0) || (metadata && Object.keys(metadata).length > 0);
+
+                    if (hasNewData) {
+                        console.log(`[SAVE] Updating existing file (same hash) with new analysis/metadata`);
+                        const updateSql = `
+                            UPDATE images 
+                            SET metadata = ?, analysis = ?, mtime = ?, updated_at = ?
+                            WHERE id = ?
+                        `;
+                        const now = new Date().toISOString();
+                        db.prepare(updateSql).run(JSON.stringify(metadata), JSON.stringify(analysis), mtime || null, now, existingByHash.id);
+                        generateSearchIndex();
+                        return res.json({ message: 'Updated successfully', id: existingByHash.id, updated: true });
+                    }
+
+                    // Just an mtime update (fast scan or touch)
+                    const updateMtimeSql = `UPDATE images SET mtime = ? WHERE id = ?`;
+                    if (mtime) db.prepare(updateMtimeSql).run(mtime, existingByHash.id);
+
                     return res.json({
                         duplicate: true,
                         existingPath: existingByHash.path,
@@ -578,9 +662,7 @@ app.post('/save', async (req, res) => {
                         message: 'File already exists in database (matched content)'
                     });
                 } else {
-                    // Same content, different path. It is a duplicate file.
-                    // The user requested "detect double ups".
-                    // We return it as a duplicate.
+                    // Same content, different path. Duplicate.
                     return res.json({
                         duplicate: true,
                         existingPath: existingByHash.path,
@@ -600,17 +682,17 @@ app.post('/save', async (req, res) => {
             console.log(`[SAVE] Updating existing file by path: ${path}`);
             const updateSql = `
                 UPDATE images 
-                SET filename = ?, file_hash = ?, metadata = ?, analysis = ?, created_at = ?
+                SET filename = ?, file_hash = ?, metadata = ?, analysis = ?, created_at = ?, mtime = ?
                 WHERE id = ?
             `;
-            db.prepare(updateSql).run(filename, file_hash, JSON.stringify(metadata), JSON.stringify(analysis), created_at, existingByPath.id);
+            db.prepare(updateSql).run(filename, file_hash, JSON.stringify(metadata), JSON.stringify(analysis), created_at, mtime || null, existingByPath.id);
             generateSearchIndex(); // Update index
             return res.json({ message: 'Updated successfully', id: existingByPath.id, updated: true });
         }
 
         // 3. New Insert
-        const insertSql = `INSERT INTO images (filename, path, file_hash, metadata, analysis, created_at) VALUES (?, ?, ?, ?, ?, ?)`;
-        const info = db.prepare(insertSql).run(filename, path, file_hash, JSON.stringify(metadata), JSON.stringify(analysis), created_at);
+        const insertSql = `INSERT INTO images (filename, path, file_hash, metadata, analysis, created_at, mtime) VALUES (?, ?, ?, ?, ?, ?, ?)`;
+        const info = db.prepare(insertSql).run(filename, path, file_hash, JSON.stringify(metadata), JSON.stringify(analysis), created_at, mtime || null);
         console.log(`[SAVE] Success. New ID: ${info.lastInsertRowid}`);
         generateSearchIndex(); // Update index
         res.json({ message: 'Saved successfully', id: info.lastInsertRowid, new: true });
@@ -652,17 +734,29 @@ app.post('/update-tags', (req, res) => {
 });
 
 // Get Images (Supports Pagination or All)
+// Get Images (Supports Pagination or All)
 app.get('/images', (req, res) => {
     console.log('[GET-IMAGES] Request received');
     try {
         const page = parseInt(req.query.page);
         const limit = parseInt(req.query.limit);
+        const sort = req.query.sort || 'recent_update';
+
+        let orderBy = 'ORDER BY COALESCE(updated_at, created_at) DESC';
+        switch (sort) {
+            case 'newest': orderBy = 'ORDER BY created_at DESC'; break;
+            case 'oldest': orderBy = 'ORDER BY created_at ASC'; break;
+            case 'name_asc': orderBy = 'ORDER BY filename ASC'; break;
+            case 'name_desc': orderBy = 'ORDER BY filename DESC'; break;
+            case 'recent_update':
+            default: orderBy = 'ORDER BY COALESCE(updated_at, created_at) DESC'; break;
+        }
 
         if (isNaN(page) || isNaN(limit)) {
-            // Return ALL images if no pagination params (needed for search index)
-            const sql = `SELECT * FROM images ORDER BY created_at DESC`;
+            // Return ALL images if no pagination params
+            const sql = `SELECT * FROM images ${orderBy}`;
             const images = db.prepare(sql).all();
-            console.log(`[GET-IMAGES] Returning ALL ${images.length} images`);
+            console.log(`[GET-IMAGES] Returning ALL ${images.length} images (Sort: ${sort})`);
             return res.json({
                 images,
                 total: images.length,
@@ -679,10 +773,10 @@ app.get('/images', (req, res) => {
         const total = db.prepare(countSql).get().total;
 
         // Get paginated data
-        const sql = `SELECT * FROM images ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+        const sql = `SELECT * FROM images ${orderBy} LIMIT ? OFFSET ?`;
         const images = db.prepare(sql).all(limit, offset);
 
-        console.log(`[GET-IMAGES] Returning ${images.length} images (Page ${page}, Total ${total})`);
+        console.log(`[GET-IMAGES] Returning ${images.length} images (Page ${page}, Sort: ${sort})`);
         res.json({
             images,
             total,

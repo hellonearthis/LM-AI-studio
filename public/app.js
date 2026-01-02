@@ -230,40 +230,52 @@ async function processSingleFile(filePath, fileName, fileBuffer, base64Data) {
         showStatus('Analyzing image with LM Studio...', 'info');
         const result = await performAnalysis(base64Data);
 
+        // MERGE CUSTOM TAGS with Analysis Tags
+        const customTagsInput = document.getElementById('customTagsInput');
+        if (customTagsInput && customTagsInput.value.trim()) {
+            const customTags = customTagsInput.value.split(',').map(t => t.trim()).filter(t => t);
+            if (!result.analysis.tags) result.analysis.tags = [];
+
+            // Add custom tags if they don't exist
+            customTags.forEach(tag => {
+                if (!result.analysis.tags.includes(tag)) {
+                    result.analysis.tags.push(tag);
+                }
+            });
+            console.log('[APP] Added custom tags:', customTags);
+        }
+
         // Display Results
         displayMetadata(result.metadata);
         displayAnalysis(result.analysis);
         document.querySelector('.analysis-grid').style.opacity = '1';
 
         // Update database with analysis results
-        await autoSaveToDatabase({
+        // Update database with analysis results
+        console.log('[APP] Saving analysis results to database...');
+        const finalSaveResult = await autoSaveToDatabase({
             filename: fileName,
             path: filePath,
             file_hash: fileHash,
             metadata: result.metadata,
             analysis: result.analysis,
-            created_at: fileCreationDate
+            created_at: fileCreationDate,
+            mtime: fileStats.mtime
         });
-
-        // Generate Thumbnail
-        await fetch(`${API_BASE_URL}/create-thumbnail`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                imageData: base64Data,
-                filename: fileName
-            })
-        });
+        console.log('[APP] Final Save Result:', finalSaveResult);
 
         // Show status in sidebar
         sidebarStatus.style.display = 'block';
         statProcessed.textContent = '1';
+        // Logic fix: if checkResult was "new: true", then finalSaveResult "updated: true" is expected.
+        // If checkResult was not duplicate, it means it was INSERTED.
+        // So finalSaveResult should be UPDATED.
         statAdded.textContent = checkResult.new ? '1' : '0';
-        statUpdated.textContent = checkResult.updated ? '1' : '0';
+        statUpdated.textContent = (checkResult.updated || finalSaveResult.updated) ? '1' : '0';
         statExisting.textContent = '0';
         statErrors.textContent = '0';
 
-        const statusMsg = checkResult.updated ? 'Analysis complete - record updated!' : 'Analysis complete and saved to database!';
+        const statusMsg = 'Analysis complete and saved!';
         showStatus(statusMsg, 'success');
 
     } catch (error) {
@@ -302,19 +314,28 @@ async function processBatch(files) {
     statExisting.textContent = '0';
     statErrors.textContent = '0';
 
-    // 1. Bulk check existing files
+    // 1. Bulk Check (Fast Scan)
     progressText.textContent = 'Checking existing files...';
-    const filePaths = files.map(f => f.path);
     let existingRecords = {};
 
     try {
-        const response = await fetch(`${API_BASE_URL}/check-files`, {
+        // Send ALL file stats to server for batch checking
+        // This is much faster than checking one by one
+        const batchPayload = files.map(f => ({
+            path: f.path,
+            size: f.size,
+            mtime: f.mtime
+        }));
+
+        const response = await fetch(`${API_BASE_URL}/check-fast-batch`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ filePaths })
+            body: JSON.stringify({ files: batchPayload })
         });
+
         if (response.ok) {
-            existingRecords = await response.json();
+            const data = await response.json();
+            existingRecords = data.results || {};
         }
     } catch (err) {
         console.error('Failed to check existing files:', err);
@@ -333,18 +354,18 @@ async function processBatch(files) {
         currentFileEl.textContent = `Processing: ${filename}`;
         statProcessed.textContent = `${i + 1}/${totalFiles}`;
 
-        try {
-            const existing = existingRecords[filePath];
+        // CHECK BATCH RESULTS
+        if (existingRecords[filePath] === 'exact') {
+            console.log(`[FAST SCAN] Skipping ${filename} (unchanged)`);
+            existingCount++;
+            statExisting.textContent = existingCount;
+            processedCount++;
+            continue;
+        }
 
-            // OPTIMIZATION: Skip if file path already exists in database
-            // This avoids reading the file and calculating hash if we already have it
-            if (existing) {
-                console.log(`Skipping ${filename} (already in DB)`);
-                existingCount++;
-                statExisting.textContent = existingCount;
-                processedCount++;
-                continue;
-            }
+        try {
+            // FAST SCAN CHECK REMOVED - using Batch Check above
+            // if (existingRecords[filePath] === 'exact') ... handled above
 
             // Read file using Electron API
             const fileBuffer = await window.electronAPI.readFile(filePath);
@@ -375,6 +396,19 @@ async function processBatch(files) {
             // Perform Analysis
             const analysisResult = await performAnalysis(base64Data);
 
+            // MERGE CUSTOM TAGS for Batch
+            const customTagsInput = document.getElementById('customTagsInput');
+            if (customTagsInput && customTagsInput.value.trim()) {
+                const customTags = customTagsInput.value.split(',').map(t => t.trim()).filter(t => t);
+                if (!analysisResult.analysis.tags) analysisResult.analysis.tags = [];
+
+                customTags.forEach(tag => {
+                    if (!analysisResult.analysis.tags.includes(tag)) {
+                        analysisResult.analysis.tags.push(tag);
+                    }
+                });
+            }
+
             // Save to DB
             const saveResult = await autoSaveToDatabase({
                 filename,
@@ -382,7 +416,8 @@ async function processBatch(files) {
                 file_hash: currentHash,
                 metadata: analysisResult.metadata,
                 analysis: analysisResult.analysis,
-                created_at: fileCreationDate
+                created_at: fileCreationDate,
+                mtime: fileData.mtime
             });
 
             if (saveResult.new) {
