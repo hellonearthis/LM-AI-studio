@@ -282,10 +282,42 @@ button#analyzeBtn:disabled {
 }
 
 .analysis-grid {
-    display: grid;
-    /* 👇 Auto-fit makes as many columns as will fit */
-    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-    gap: 2rem;
+    /* Fallback: CSS Columns (Masonry effect) */
+    column-width: 320px;
+    column-gap: 16px;
+    display: block;
+    /* Ensure it's not grid for columns to work */
+}
+
+/* Ensure cards don't split across columns and have spacing */
+.analysis-grid>.card,
+.analysis-grid>div {
+    /* targeting direct children if cards are wrapped */
+    break-inside: avoid;
+    margin-bottom: 16px;
+    display: inline-block;
+    /* Helps with break-inside in some browsers */
+    width: 100%;
+    /* Ensures they fill the column width */
+}
+
+/* Progressive Enhancement for CSS Grid Lanes */
+@supports (display: grid-lanes) {
+    .analysis-grid {
+        display: grid-lanes;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        gap: 16px;
+        /* Reset column properties if grid-lanes is active */
+        column-width: auto;
+        column-count: auto;
+        display: grid-lanes;
+    }
+
+    .analysis-grid>.card {
+        margin-bottom: 0;
+        /* Let grid handle gaps */
+        width: auto;
+    }
 }
 
 @media (max-width: 1200px) {

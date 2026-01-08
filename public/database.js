@@ -214,7 +214,10 @@ function createCardHtml(img) {
             
             <!-- AI Summary Section -->
             <div class="analysis-section">
-                <h3 style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.5rem;">AI Summary</h3>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <h3 style="font-size: 0.9rem; color: var(--text-secondary); margin: 0;">AI Summary</h3>
+                    <button class="copy-btn" data-text="${(analysis.summary || '').replace(/"/g, '&quot;')}" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.15rem 0.4rem; border-radius: 4px; cursor: pointer; font-size: 0.65rem; white-space: nowrap;" title="Copy to clipboard">Copy</button>
+                </div>
                 <p style="margin: 0;">${analysis.summary || 'No summary'}</p>
             </div>
 
@@ -236,8 +239,31 @@ function createCardHtml(img) {
     `;
 }
 
-// Handle Regenerate Thumbnail Click (Delegated)
+// Handle Regenerate Thumbnail and Copy Click (Delegated)
 dbGrid.addEventListener('click', async (e) => {
+    // Copy Button Click
+    const copyBtn = e.target.closest('.copy-btn');
+    if (copyBtn) {
+        e.stopPropagation();
+        const text = copyBtn.dataset.text;
+        if (text) {
+            navigator.clipboard.writeText(text).then(() => {
+                const originalText = copyBtn.textContent;
+                copyBtn.textContent = 'Copied!';
+                copyBtn.style.borderColor = 'var(--accent)';
+                copyBtn.style.color = 'var(--accent)';
+                setTimeout(() => {
+                    copyBtn.textContent = originalText;
+                    copyBtn.style.borderColor = 'var(--border)';
+                    copyBtn.style.color = 'var(--text-secondary)';
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy to clipboard', err);
+            });
+        }
+        return;
+    }
+
     if (e.target.classList.contains('regen-thumb-btn')) {
         const btn = e.target;
         const id = btn.dataset.id;

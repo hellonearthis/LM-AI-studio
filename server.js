@@ -369,6 +369,7 @@ app.post('/analyze', async (req, res) => {
         let analysis;
         try {
             analysis = JSON.parse(analysisContent);
+            deduplicateTags(analysis); // <--- Deduplicate
         } catch (parseError) {
             console.warn('[ANALYZE] JSON Parsing failed. Raw content:', analysisContent);
             // Fallback: Use raw content as summary
@@ -530,6 +531,7 @@ app.post('/batch-analyze', async (req, res) => {
             let analysis;
             try {
                 analysis = JSON.parse(analysisContent);
+                deduplicateTags(analysis); // <--- Deduplicate
             } catch (pErr) {
                 console.warn(`[BATCH] JSON Parsing failed for ${id}. Content:`, analysisContent);
                 analysis = {
@@ -612,6 +614,9 @@ app.post('/save', async (req, res) => {
     console.log('[SAVE] Request received');
     try {
         const { filename, path, metadata, analysis, file_hash, mtime } = req.body;
+
+        // Ensure analysis is clean before any save operation
+        if (analysis) deduplicateTags(analysis);
 
         // Auto-generate created_at if not provided (should be standard ISO)
         let created_at = new Date().toISOString();
@@ -713,6 +718,8 @@ app.post('/update-tags', (req, res) => {
     console.log('[UPDATE-TAGS] Request received');
     try {
         const { id, analysis } = req.body;
+
+        if (analysis) deduplicateTags(analysis);
 
         if (!id || !analysis) {
             return res.status(400).json({ error: 'Missing id or analysis data' });
@@ -1095,6 +1102,69 @@ app.post('/regenerate-thumbnail', async (req, res) => {
     } catch (err) {
         console.error('[THUMB] Regeneration Error:', err);
         res.status(500).json({ error: 'Failed to regenerate thumbnail', details: err.message });
+    }
+});
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+function deduplicateTags(analysis) {
+    if (analysis && analysis.tags && analysis.objects && Array.isArray(analysis.tags) && Array.isArray(analysis.objects)) {
+        const objectSet = new Set(analysis.objects.map(o => o.toLowerCase()));
+        const originalCount = analysis.tags.length;
+        // Filter out tags that are present in objects (case-insensitive)
+        analysis.tags = analysis.tags.filter(tag => !objectSet.has(tag.toLowerCase()));
+
+        if (analysis.tags.length < originalCount) {
+            // console.log(`[DEDUPE] Removed ${originalCount - analysis.tags.length} duplicate tags`);
+        }
+    }
+    return analysis;
+}
+
+// ============================================================================
+// MAINTENANCE ENDPOINTS
+// ============================================================================
+app.post('/maintenance/deduplicate-tags', (req, res) => {
+    console.log('[MAINTENANCE] Starting tag deduplication...');
+    try {
+        const images = db.prepare('SELECT id, analysis FROM images').all();
+        let updatedCount = 0;
+
+        const updateStmt = db.prepare('UPDATE images SET analysis = ?, updated_at = ? WHERE id = ?');
+
+        db.transaction(() => {
+            const now = new Date().toISOString();
+
+            for (const img of images) {
+                let analysis = {};
+                try {
+                    analysis = typeof img.analysis === 'string' ? JSON.parse(img.analysis) : (img.analysis || {});
+                } catch (e) { continue; }
+
+                if (!analysis.tags || !analysis.objects) continue;
+
+                const originalTags = JSON.stringify(analysis.tags);
+                deduplicateTags(analysis);
+                const newTags = JSON.stringify(analysis.tags);
+
+                if (originalTags !== newTags) {
+                    updateStmt.run(JSON.stringify(analysis), now, img.id);
+                    updatedCount++;
+                }
+            }
+        })();
+
+        if (updatedCount > 0) {
+            generateSearchIndex();
+        }
+
+        console.log(`[MAINTENANCE] Completed. Updated ${updatedCount} images.`);
+        res.json({ success: true, updatedCount });
+
+    } catch (err) {
+        console.error('[MAINTENANCE] Error:', err);
+        res.status(500).json({ error: 'Maintenance failed' });
     }
 });
 

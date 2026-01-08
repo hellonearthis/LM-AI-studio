@@ -40,7 +40,7 @@ async function initSearch() {
         searchBtn.textContent = 'Loading Index...';
 
         // Fetch images only (Force runtime indexing to avoid stale index issues)
-        const imagesRes = await fetch(`${API_BASE_URL}/images`);
+        const imagesRes = await fetch(`${API_BASE_URL}/images?t=${Date.now()}`);
         const imagesData = await imagesRes.json();
 
         // Handle both old array format and new object format { images: [], ... }
@@ -98,7 +98,7 @@ async function initSearch() {
 
 async function refreshData() {
     try {
-        const res = await fetch(`${API_BASE_URL}/images`);
+        const res = await fetch(`${API_BASE_URL}/images?t=${Date.now()}`);
         const data = await res.json();
 
         const imagesList = Array.isArray(data) ? data : data.images;
@@ -275,9 +275,12 @@ function createResultHtml(img) {
                 </div>
             </div>
             
-            <p style="font-size: 0.9rem; color: var(--text-primary); margin-bottom: 1rem; line-height: 1.4;">
-                ${escapeHtml(analysis.summary) || 'No summary available'}
-            </p>
+            <div style="display: flex; gap: 0.5rem; align-items: flex-start; margin-bottom: 1rem;">
+                <p style="font-size: 0.9rem; color: var(--text-primary); margin: 0; line-height: 1.4; flex: 1;">
+                    ${escapeHtml(analysis.summary) || 'No summary available'}
+                </p>
+                <button class="copy-btn" data-text="${escapeHtml(analysis.summary || '')}" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.25rem 0.5rem; border-radius: 4px; cursor: pointer; font-size: 0.75rem; white-space: nowrap;" title="Copy to clipboard">Copy</button>
+            </div>
             
             <div class="tags-section">
                 <div class="tags-container" style="margin-bottom: 0.5rem;">
@@ -307,6 +310,30 @@ loadStats = async function () {
 
 // Global Event Listeners for Search Results (Delegation)
 searchResults.addEventListener('click', (e) => {
+    // Copy Button Click
+    const copyBtn = e.target.closest('.copy-btn');
+    if (copyBtn) {
+        e.stopPropagation();
+        const text = copyBtn.dataset.text;
+        if (text) {
+            navigator.clipboard.writeText(text).then(() => {
+                const originalText = copyBtn.textContent;
+                copyBtn.textContent = 'Copied!';
+                copyBtn.style.borderColor = 'var(--accent)';
+                copyBtn.style.color = 'var(--accent)';
+                setTimeout(() => {
+                    copyBtn.textContent = originalText;
+                    copyBtn.style.borderColor = 'var(--border)';
+                    copyBtn.style.color = 'var(--text-secondary)';
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy to clipboard', err);
+            });
+        }
+        return;
+    }
+
+    // Thumbnail Click
     // Thumbnail Click
     if (e.target.classList.contains('thumbnail-preview')) {
         e.stopPropagation();
