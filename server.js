@@ -255,9 +255,20 @@ app.post('/analyze', async (req, res) => {
                 mergeOutput: true
             }) || {};
             console.log('[ANALYZE] EXIF extracted:', Object.keys(metadata).length, 'fields');
-            // console.log('[ANALYZE] Metadata keys:', Object.keys(metadata)); // Debug log
         } catch (exifError) {
             console.log('[ANALYZE] No EXIF data or error parsing:', exifError.message);
+        }
+
+        // FALLBACK: Use Sharp for basic metadata (Width, Height, Format) - Critical for GIFs/WebP
+        try {
+            const sharpMeta = await sharp(buffer).metadata();
+            // Merge sharp metadata if missing in exifr
+            if (!metadata.ImageWidth && sharpMeta.width) metadata.ImageWidth = sharpMeta.width;
+            if (!metadata.ImageHeight && sharpMeta.height) metadata.ImageHeight = sharpMeta.height;
+            if (!metadata.format) metadata.format = sharpMeta.format;
+            console.log(`[ANALYZE] Sharp metadata merged: ${sharpMeta.width}x${sharpMeta.height} (${sharpMeta.format})`);
+        } catch (err) {
+            console.error('[ANALYZE] Sharp metadata extraction failed:', err);
         }
 
         // Special handling for ComfyUI metadata (prompt/workflow are JSON strings)
@@ -631,6 +642,15 @@ app.post('/save', async (req, res) => {
 
         // Deduplication based on Hash AND Path
         // 1. Check by Hash first (Content Match)
+
+        // Extract dimensions/size for column storage
+        let width = req.body.width || metadata.ImageWidth || metadata.ExifImageWidth || metadata.width || null;
+        let height = req.body.height || metadata.ImageHeight || metadata.ExifImageHeight || metadata.height || null;
+        let size = req.body.size || null;
+
+        // Fallback: If not validation-checked, maybe we can get size from file? 
+        // Typically client sends size, but if not we can rely on integrity check later.
+
         if (file_hash) {
             const checkHashSql = `SELECT * FROM images WHERE file_hash = ?`;
             const existingByHash = db.prepare(checkHashSql).get(file_hash);
@@ -647,11 +667,11 @@ app.post('/save', async (req, res) => {
                         console.log(`[SAVE] Updating existing file (same hash) with new analysis/metadata`);
                         const updateSql = `
                             UPDATE images 
-                            SET metadata = ?, analysis = ?, mtime = ?, updated_at = ?
+                            SET metadata = ?, analysis = ?, mtime = ?, updated_at = ?, width = ?, height = ?, size = ?
                             WHERE id = ?
                         `;
                         const now = new Date().toISOString();
-                        db.prepare(updateSql).run(JSON.stringify(metadata), JSON.stringify(analysis), mtime || null, now, existingByHash.id);
+                        db.prepare(updateSql).run(JSON.stringify(metadata), JSON.stringify(analysis), mtime || null, now, width, height, size, existingByHash.id);
                         generateSearchIndex();
                         return res.json({ message: 'Updated successfully', id: existingByHash.id, updated: true });
                     }
@@ -687,17 +707,17 @@ app.post('/save', async (req, res) => {
             console.log(`[SAVE] Updating existing file by path: ${path}`);
             const updateSql = `
                 UPDATE images 
-                SET filename = ?, file_hash = ?, metadata = ?, analysis = ?, created_at = ?, mtime = ?
+                SET filename = ?, file_hash = ?, metadata = ?, analysis = ?, created_at = ?, mtime = ?, width = ?, height = ?, size = ?
                 WHERE id = ?
             `;
-            db.prepare(updateSql).run(filename, file_hash, JSON.stringify(metadata), JSON.stringify(analysis), created_at, mtime || null, existingByPath.id);
+            db.prepare(updateSql).run(filename, file_hash, JSON.stringify(metadata), JSON.stringify(analysis), created_at, mtime || null, width, height, size, existingByPath.id);
             generateSearchIndex(); // Update index
             return res.json({ message: 'Updated successfully', id: existingByPath.id, updated: true });
         }
 
         // 3. New Insert
-        const insertSql = `INSERT INTO images (filename, path, file_hash, metadata, analysis, created_at, mtime) VALUES (?, ?, ?, ?, ?, ?, ?)`;
-        const info = db.prepare(insertSql).run(filename, path, file_hash, JSON.stringify(metadata), JSON.stringify(analysis), created_at, mtime || null);
+        const insertSql = `INSERT INTO images (filename, path, file_hash, metadata, analysis, created_at, mtime, width, height, size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+        const info = db.prepare(insertSql).run(filename, path, file_hash, JSON.stringify(metadata), JSON.stringify(analysis), created_at, mtime || null, width, height, size);
         console.log(`[SAVE] Success. New ID: ${info.lastInsertRowid}`);
         generateSearchIndex(); // Update index
         res.json({ message: 'Saved successfully', id: info.lastInsertRowid, new: true });
@@ -922,10 +942,66 @@ app.post('/validate-database', async (req, res) => {
         missing: 0,
         fixedThumbnails: 0,
         reanalyzed: 0,
+        duplicatesRemoved: 0,
         errors: []
     };
 
     try {
+        // 0. De-duplicate (Prioritize entries with metadata/analysis)
+        const allImages = db.prepare('SELECT * FROM images').all();
+        const pathMap = new Map();
+
+        // Transaction for safety
+        const dedupeTransaction = db.transaction((images) => {
+            for (const img of images) {
+                // Normalize path for Windows case-insensitivity logic
+                const normPath = (img.path || '').toLowerCase().trim();
+
+                if (pathMap.has(normPath)) {
+                    const existing = pathMap.get(normPath);
+                    let keepExisting = true;
+
+                    // Scoring function: Higher is better
+                    const getScore = (item) => {
+                        let score = 0;
+                        if (item.width && item.height) score += 100; // valid dimensions
+                        if (item.analysis && item.analysis.length > 10) score += 50; // has analysis
+                        if (!item.file_hash) score -= 10; // missing hash
+                        return score;
+                    };
+
+                    const s1 = getScore(existing);
+                    const s2 = getScore(img);
+
+                    if (s2 > s1) {
+                        keepExisting = false;
+                    } else if (s2 === s1) {
+                        // Tie-breaker: Keep most recently updated
+                        if (new Date(img.updated_at || 0) > new Date(existing.updated_at || 0)) {
+                            keepExisting = false;
+                        }
+                    }
+
+                    if (keepExisting) {
+                        db.prepare('DELETE FROM images WHERE id = ?').run(img.id);
+                        results.duplicatesRemoved++;
+                        console.log(`[VALIDATE] Removed duplicate (inferior): ${img.path}`);
+                    } else {
+                        db.prepare('DELETE FROM images WHERE id = ?').run(existing.id);
+                        results.duplicatesRemoved++;
+                        console.log(`[VALIDATE] Removed duplicate (inferior): ${existing.path}`);
+                        pathMap.set(normPath, img); // Update map with the winner
+                    }
+
+                } else {
+                    pathMap.set(normPath, img);
+                }
+            }
+        });
+
+        dedupeTransaction(allImages);
+
+        // Refresh images list after dedupe
         const images = db.prepare(`SELECT * FROM images`).all();
         results.total = images.length;
 
@@ -966,6 +1042,39 @@ app.post('/validate-database', async (req, res) => {
                 } catch (err) {
                     console.error(`[VALIDATE] Failed to regenerate thumbnail for ${filePath}:`, err.message);
                     results.errors.push(`Thumbnail error: ${img.filename}`);
+                }
+            }
+
+            // 3. Check for missing metadata (dimensions)
+            if (!img.width || !img.height) {
+                // Try from stored metadata first
+                let metaObj = {};
+                try {
+                    metaObj = typeof img.metadata === 'string' ? JSON.parse(img.metadata) : (img.metadata || {});
+                } catch (e) { }
+
+                const metaH = metaObj.ImageHeight || metaObj.ExifImageHeight || metaObj.PixelYDimension || metaObj.height;
+                const metaW = metaObj.ImageWidth || metaObj.ExifImageWidth || metaObj.PixelXDimension || metaObj.width;
+
+                if (metaW && metaH) {
+                    console.log(`[VALIDATE] Restoring dimensions from metadata for ${img.filename}`);
+                    db.prepare('UPDATE images SET width = ?, height = ? WHERE id = ?')
+                        .run(metaW, metaH, img.id);
+                    results.metadataRepaired = (results.metadataRepaired || 0) + 1;
+                } else {
+                    // Fallback to file scan
+                    console.log(`[VALIDATE] Missing dimensions for ${img.filename}, scanning file...`);
+                    try {
+                        const metadata = await sharp(img.path).metadata();
+                        if (metadata.width && metadata.height) {
+                            db.prepare('UPDATE images SET width = ?, height = ? WHERE id = ?')
+                                .run(metadata.width, metadata.height, img.id);
+                            results.metadataRepaired = (results.metadataRepaired || 0) + 1;
+                            console.log(`[VALIDATE] Repaired dimensions: ${metadata.width}x${metadata.height}`);
+                        }
+                    } catch (err) {
+                        console.error(`[VALIDATE] Failed to repair metadata for ${img.filename}:`, err.message);
+                    }
                 }
             }
 
