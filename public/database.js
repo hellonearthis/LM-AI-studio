@@ -428,6 +428,54 @@ const closeStatus = document.getElementById('closeStatus');
 
 if (validateBtn) {
     validateBtn.addEventListener('click', async () => {
+        if (!confirm('Run database integrity check?\n\nThis will:\n1. Remove database entries for missing files.\n2. Regenerate missing thumbnails.\n3. Fix basic data consistency issues.')) {
+            return;
+        }
+
+        validateBtn.disabled = true;
+        validationStatus.style.display = 'block';
+        validationText.textContent = 'Running integrity check...';
+        validationProgressBar.style.width = '30%'; // Fake progress start
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/validate-database`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reanalyze: false }) // Default to false for speed
+            });
+
+            if (!response.ok) throw new Error('Validation failed');
+
+            const data = await response.json();
+            const res = data.results;
+
+            validationProgressBar.style.width = '100%';
+
+            let message = `<strong>Check Complete</strong><br>`;
+            if (res.missing > 0) message += `🗑️ Removed ${res.missing} missing files<br>`;
+            if (res.fixedThumbnails > 0) message += `🖼️ Fixed ${res.fixedThumbnails} thumbnails<br>`;
+            if (res.errors.length > 0) message += `⚠️ ${res.errors.length} errors occurred`;
+
+            if (res.missing === 0 && res.fixedThumbnails === 0 && res.errors.length === 0) {
+                message += "✅ Database is healthy!";
+            }
+
+            validationText.innerHTML = message;
+
+            // Refresh grid if changes were made
+            if (res.missing > 0 || res.fixedThumbnails > 0) {
+                setTimeout(() => {
+                    initDatabase(); // Reload current view
+                }, 1000);
+            }
+
+        } catch (err) {
+            console.error('Validation error:', err);
+            validationText.textContent = 'Error: ' + err.message;
+            validationProgressBar.style.backgroundColor = '#ef4444';
+        } finally {
+            validateBtn.disabled = false;
+        }
     });
 }
 
