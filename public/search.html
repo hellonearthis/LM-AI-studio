@@ -111,8 +111,8 @@
                         <div class="filter-section">
                             <label
                                 style="display: block; margin-bottom: 0.5rem; color: var(--text-secondary); font-size: 0.9rem;">Keywords</label>
-                            <input type="text" id="searchQuery" placeholder="Search descriptions, objects..."
-                                style="width: 100%; padding: 0.75rem; background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); margin-bottom: 0.5rem;">
+                            <input type="text" id="searchQuery" placeholder="Search descriptions, objects..." autofocus
+                                style="width: 100%; padding: 0.75rem; background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); margin-bottom: 0.5rem; position: relative; z-index: 50;">
 
                             <div style="display: flex; align-items: center; gap: 0.5rem;">
                                 <label class="switch"
@@ -212,6 +212,9 @@
         </div>
         <div class="context-menu-item delete" id="ctxDelete">
             <span>🗑️</span> Delete Tag
+        </div>
+        <div class="context-menu-item" id="ctxRename" style="display: none;">
+            <span>📝</span> Rename File
         </div>
     </div>
 

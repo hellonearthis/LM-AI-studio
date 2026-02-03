@@ -11,6 +11,7 @@ import Fuse from 'fuse.js';
 
 import crypto from 'crypto';
 import { exec } from 'child_process';
+import util from 'util';
 
 
 // ... [Inside existing routes, add generateSearchIndex() calls]
@@ -664,6 +665,23 @@ app.post('/save', async (req, res) => {
                     const hasNewData = (analysis && Object.keys(analysis).length > 0) || (metadata && Object.keys(metadata).length > 0);
 
                     if (hasNewData) {
+                        try {
+                            const currentMeta = JSON.parse(existingByHash.metadata || '{}');
+                            const currentAnalysis = JSON.parse(existingByHash.analysis || '{}');
+
+                            const metaChanged = !util.isDeepStrictEqual(metadata, currentMeta);
+                            const analysisChanged = !util.isDeepStrictEqual(analysis, currentAnalysis);
+
+                            if (!metaChanged && !analysisChanged) {
+                                console.log('[SAVE] No changes detected (content match). Skipping update.');
+                                const updateMtimeSql = `UPDATE images SET mtime = ? WHERE id = ?`;
+                                if (mtime) db.prepare(updateMtimeSql).run(mtime, existingByHash.id);
+                                return res.json({ message: 'No changes detected', id: existingByHash.id, updated: false });
+                            }
+                        } catch (e) {
+                            console.warn('[SAVE] Error comparing metadata, forcing update:', e);
+                        }
+
                         console.log(`[SAVE] Updating existing file (same hash) with new analysis/metadata`);
                         const updateSql = `
                             UPDATE images 
@@ -1274,6 +1292,54 @@ app.post('/maintenance/deduplicate-tags', (req, res) => {
     } catch (err) {
         console.error('[MAINTENANCE] Error:', err);
         res.status(500).json({ error: 'Maintenance failed' });
+    }
+});
+
+// Rename Endpoint
+app.post('/rename', (req, res) => {
+    const { id, newFilename } = req.body;
+    if (!id || !newFilename) return res.status(400).json({ error: 'Missing ID or filename' });
+
+    try {
+        const image = db.prepare('SELECT * FROM images WHERE id = ?').get(id);
+        if (!image) return res.status(404).json({ error: 'Image not found' });
+
+        const oldPath = image.path;
+        const dir = path.dirname(oldPath);
+        const newPath = path.join(dir, newFilename);
+
+        // Security / Validation
+        if (fs.existsSync(newPath)) {
+            return res.status(409).json({ error: 'A file with that name already exists in this folder.' });
+        }
+
+        // Rename on Disk
+        fs.renameSync(oldPath, newPath);
+
+        // Best effort thumbnail rename
+        const thumbDir = path.join(__dirname, 'public/thumbnails');
+        const oldBase = path.parse(oldPath).name; // e.g. 'foo'
+        const newBase = path.parse(newFilename).name; // e.g. 'bar'
+
+        try {
+            const oldThumbPath = path.join(thumbDir, oldBase + '.avif');
+            const newThumbPath = path.join(thumbDir, newBase + '.avif');
+            if (fs.existsSync(oldThumbPath)) {
+                fs.renameSync(oldThumbPath, newThumbPath);
+            }
+        } catch (e) {
+            console.warn('[RENAME] Failed to rename thumbnail:', e);
+        }
+
+        // Update Database
+        db.prepare('UPDATE images SET filename = ?, path = ?, mtime = ? WHERE id = ?')
+            .run(newFilename, newPath, new Date().toISOString(), id);
+
+        res.json({ success: true, newPath, newFilename });
+
+    } catch (err) {
+        console.error('[RENAME] Error:', err);
+        res.status(500).json({ error: err.message });
     }
 });
 

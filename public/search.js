@@ -450,24 +450,33 @@ function showContextMenu(e, id, type, tag = null, card = null) {
     ctxTarget = { id, type, tag, card };
     contextMenu.style.display = 'block';
 
-    // Show/Hide relevant items
+
+
+    contextMenu.style.left = `${e.clientX}px`;
+    contextMenu.style.top = `${e.clientY}px`;
+
+    // Show/Hide Items
     const regenItem = document.getElementById('ctxRegenThumb');
     const editItem = document.getElementById('ctxEdit');
     const deleteItem = document.getElementById('ctxDelete');
+    const renameItem = document.getElementById('ctxRename');
 
     if (type === 'thumbnail') {
         regenItem.style.display = 'block';
         editItem.style.display = 'none';
         deleteItem.style.display = 'none';
+        if (renameItem) renameItem.style.display = 'none';
+    } else if (type === 'file') {
+        regenItem.style.display = 'none';
+        editItem.style.display = 'none';
+        deleteItem.style.display = 'none';
+        if (renameItem) renameItem.style.display = 'block';
     } else {
         regenItem.style.display = 'none';
         editItem.style.display = 'block';
         deleteItem.style.display = 'block';
+        if (renameItem) renameItem.style.display = 'none';
     }
-
-    contextMenu.style.left = `${e.clientX}px`;
-    contextMenu.style.top = `${e.clientY}px`;
-    console.log('[DEBUG] Context menu displayed, ctxTarget set to:', ctxTarget);
 }
 
 function hideContextMenu() {
@@ -501,8 +510,75 @@ document.addEventListener('contextmenu', (e) => {
         return;
     }
 
+    // Filename Right-Click
+    const fileLink = e.target.closest('.file-link');
+    if (fileLink) {
+        e.preventDefault();
+        e.stopPropagation();
+        const card = fileLink.closest('.card');
+        const id = card.dataset.id;
+        const filename = fileLink.textContent.trim();
+        showContextMenu(e, id, 'file', filename, card);
+        console.log('Right clicked file');
+        return;
+    }
+
     hideContextMenu();
 });
+
+// Rename Action
+const ctxRename = document.getElementById('ctxRename');
+if (ctxRename) {
+    ctxRename.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!ctxTarget) return;
+        const { id, tag: currentFilename } = ctxTarget;
+        hideContextMenu();
+
+        showTagInputModal('Rename File', currentFilename, async (newName) => {
+            if (!newName || newName === currentFilename) return;
+
+            // Basic validation
+            if (newName.match(/[<>:"\/\\|?*]/)) {
+                alert('Invalid characters in filename. Avoid: < > : " / \\ | ? *');
+                return;
+            }
+
+            try {
+                const res = await fetch(`${API_BASE_URL}/rename`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id, newFilename: newName })
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.error || 'Rename failed');
+                }
+
+                const data = await res.json();
+
+                // Update UI locally
+                const card = document.querySelector(`.card[data-id="${id}"]`);
+                if (card) {
+                    const fileLink = card.querySelector('.file-link');
+                    if (fileLink) {
+                        fileLink.textContent = data.newFilename;
+                        fileLink.dataset.path = data.newPath;
+                    }
+                    // Search specific: update cache if needed
+                    const img = allImages.find(i => i.id == id);
+                    if (img) {
+                        img.filename = data.newFilename;
+                        img.path = data.newPath;
+                    }
+                }
+            } catch (err) {
+                alert('Rename Error: ' + err.message);
+            }
+        });
+    });
+}
 
 // Thumbnail Regen Action
 document.getElementById('ctxRegenThumb').addEventListener('click', async () => {
@@ -1059,12 +1135,12 @@ if (processSelectedBtn) {
 // 4. Validate (Integrity Check)
 if (validateBtn) {
     validateBtn.addEventListener('click', () => {
-        showConfirmModal('Run database integrity check? This will verify files and thumbnails.', async () => {
+        showConfirmModal('Run database integrity check?\n\nThis will:\n1. Remove duplicates & missing files\n2. Repair metadata & dimensions\n3. Regenerate thumbnails', async () => {
 
             if (validationStatus) {
                 validationStatus.style.display = 'block';
                 validationText.textContent = 'Running check...';
-                validationProgressBar.style.width = '50%';
+                validationProgressBar.style.width = '30%';
             }
 
             try {
@@ -1074,19 +1150,36 @@ if (validateBtn) {
                     body: JSON.stringify({ reanalyze: false })
                 });
                 const data = await res.json();
+                const r = data.results;
 
-                if (validationText) validationText.textContent = `Check Complete. Missing removed: ${data.results.missing}`;
                 if (validationProgressBar) validationProgressBar.style.width = '100%';
+
+                let message = `<strong>Check Complete</strong><br>`;
+                if (r.duplicatesRemoved > 0) message += `🧹 Removed ${r.duplicatesRemoved} duplicates<br>`;
+                if (r.metadataRepaired > 0) message += `🔧 Repaired ${r.metadataRepaired} metadata<br>`;
+                if (r.missing > 0) message += `🗑️ Removed ${r.missing} missing files<br>`;
+                if (r.fixedThumbnails > 0) message += `🖼️ Fixed ${r.fixedThumbnails} thumbnails<br>`;
+                if (r.errors.length > 0) message += `⚠️ ${r.errors.length} errors occurred`;
+
+                if (r.duplicatesRemoved === 0 && r.metadataRepaired === 0 && r.missing === 0 && r.fixedThumbnails === 0 && r.errors.length === 0) {
+                    message += "✅ Database is healthy!";
+                }
+
+                if (validationText) validationText.innerHTML = message;
 
                 await refreshData();
 
+                // Keep status visible longer if we did something
+                const delay = (r.duplicatesRemoved > 0 || r.metadataRepaired > 0 || r.missing > 0) ? 5000 : 3000;
+
                 setTimeout(() => {
                     if (validationStatus) validationStatus.style.display = 'none';
-                }, 3000);
+                }, delay);
             } catch (e) {
                 alert('Check failed: ' + e.message);
+                if (validationStatus) validationStatus.style.display = 'none';
             }
-        }, 'Run Check', '#3b82f6');
+        }, 'Run Check', 'var(--accent)');
     });
 }
 

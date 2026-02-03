@@ -88,7 +88,8 @@ npm run ls:serve
 1. Navigate to the **Database** page via the sidebar.
 2. Browse all analyzed images with thumbnails.
 3. **Batch Actions**: Use the sidebar to select images and run batch analysis (e.g., "Select Missing" -> "Process").
-4. **Validate Database**: Click the 🛠️ button to scan for integrity issues.
+4. **Validate Database**: Click the 🛠️ button to scan for integrity issues (deduplication, missing metadata, regeneration).
+5. **Rename Files**: Right-click any filename to rename it directly on disk and in the database.
 
 ### Searching
 

@@ -428,9 +428,13 @@ const closeStatus = document.getElementById('closeStatus');
 
 if (validateBtn) {
     validateBtn.addEventListener('click', async () => {
-        if (!confirm('Run database integrity check?\n\nThis will:\n1. Remove database entries for missing files.\n2. Regenerate missing thumbnails.\n3. Fix basic data consistency issues.')) {
-            return;
-        }
+        const confirmed = await showModal(
+            'Run Database Check?',
+            'This will:\n1. Remove entries for missing files\n2. Regenerate missing thumbnails\n3. Fix basic data issues',
+            true
+        );
+
+        if (!confirmed) return;
 
         validateBtn.disabled = true;
         validationStatus.style.display = 'block';
@@ -783,9 +787,17 @@ function showContextMenu(e, id, type, tag = null, card = null) {
     contextMenu.style.top = `${y}px`;
 
     // Show/hide relevant items
+    const isFileLink = e.target.closest('.file-link');
+    const renameItem = document.getElementById('ctxRename');
+
     document.getElementById('ctxRegenThumb').style.display = type === 'thumbnail' ? 'block' : 'none';
     document.getElementById('ctxEdit').style.display = type === 'tag' ? 'block' : 'none';
     document.getElementById('ctxDelete').style.display = type === 'tag' ? 'block' : 'none';
+
+    if (renameItem) {
+        renameItem.style.display = (type === 'file' || isFileLink) ? 'block' : 'none';
+        if (isFileLink && !tag) ctxTarget.tag = isFileLink.textContent.trim();
+    }
 
     const dividers = contextMenu.querySelectorAll('.context-menu-divider');
     dividers.forEach(d => d.style.display = type === 'tag' ? 'block' : 'none');
@@ -818,8 +830,69 @@ document.addEventListener('contextmenu', (e) => {
         return;
     }
 
+    // Filename Right-Click
+    const fileLink = e.target.closest('.file-link');
+    if (fileLink) {
+        e.preventDefault();
+        e.stopPropagation();
+        const card = fileLink.closest('.card');
+        const id = card.dataset.id;
+        showContextMenu(e, id, 'file', fileLink.textContent.trim(), card);
+        return;
+    }
+
     hideContextMenu();
 });
+
+// Rename Action
+const ctxRename = document.getElementById('ctxRename');
+if (ctxRename) {
+    ctxRename.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!ctxTarget) return;
+        const { id, tag: currentFilename } = ctxTarget;
+        hideContextMenu();
+
+        showTagInputModal('Rename File', currentFilename, async (newName) => {
+            if (!newName || newName === currentFilename) return;
+            if (newName.match(/[<>:"\/\\|?*]/)) {
+                alert('Invalid characters in filename.');
+                return;
+            }
+
+            try {
+                const res = await fetch(`${API_BASE_URL}/rename`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id, newFilename: newName })
+                });
+
+                if (!res.ok) throw new Error((await res.json()).error || 'Rename failed');
+
+                const data = await res.json();
+
+                // Update UI
+                const card = document.querySelector(`.card[data-id="${id}"]`);
+                if (card) {
+                    const fileLink = card.querySelector('.file-link');
+                    if (fileLink) {
+                        fileLink.textContent = data.newFilename;
+                        fileLink.dataset.path = data.newPath;
+                    }
+                    const img = imagesData.find(i => i.id == id);
+                    if (img) {
+                        img.filename = data.newFilename;
+                        img.path = data.newPath;
+                    }
+                }
+            } catch (err) {
+                alert('Rename Error: ' + err.message);
+            }
+        });
+    });
+}
+
+
 
 // Click delegation for Add Tag button
 dbGrid.addEventListener('click', (e) => {
