@@ -38,6 +38,9 @@ app.use('/ls-data', express.static('ls-data'));
 // ============================================================================
 const db = new Database('images.db');
 
+// MTime Tolerance (in ms) to handle minor OS timestamp differences
+const MTIME_TOLERANCE = 2000;
+
 // Create table if it doesn't exist
 db.exec(`
     CREATE TABLE IF NOT EXISTS images (
@@ -87,9 +90,11 @@ app.post('/check-fast', (req, res) => {
             return res.json({ exists: false });
         }
 
-        // Exact match check (mtime tolerance of 100ms just in case)
-        // size must match exactly
-        if (row.size === size && row.mtime === mtime) {
+        // Exact match check with tolerance
+        const timeDiff = Math.abs(row.mtime - mtime);
+
+        // size must match exactly, but time can have tolerance
+        if (row.size === size && timeDiff < MTIME_TOLERANCE) {
             return res.json({ exists: true, match: 'exact' });
         }
 
@@ -118,10 +123,13 @@ app.post('/check-fast-batch', (req, res) => {
                 const row = stmt.get(file.path);
                 if (!row) {
                     results[file.path] = 'missing';
-                } else if (row.size === file.size && row.mtime === file.mtime) {
-                    results[file.path] = 'exact';
                 } else {
-                    results[file.path] = 'partial'; // Exists but modified
+                    const timeDiff = Math.abs(row.mtime - file.mtime);
+                    if (row.size === file.size && timeDiff < MTIME_TOLERANCE) {
+                        results[file.path] = 'exact';
+                    } else {
+                        results[file.path] = 'partial'; // Exists but modified
+                    }
                 }
             }
         });
@@ -1063,7 +1071,25 @@ app.post('/validate-database', async (req, res) => {
                 }
             }
 
-            // 3. Check for missing metadata (dimensions)
+            // 3. Check for filename mismatch (Corruption repair)
+            // Use regex to handle both forward and backslashes safely
+            const correctFilename = (img.path || '').split(/[/\\]/).pop();
+
+            // formatting check: If current filename looks like JSON or metadata, forcing update
+            const isSuspicious = img.filename.trim().startsWith('{') || img.filename.includes('Lite Graph');
+
+            if ((correctFilename && img.filename !== correctFilename) || isSuspicious) {
+                console.log(`[VALIDATE] Fixing corrupted filename for ID ${img.id}`);
+                console.log(`   Old: "${img.filename.substring(0, 50)}..."`);
+                console.log(`   New: "${correctFilename}"`);
+
+                if (correctFilename) {
+                    db.prepare('UPDATE images SET filename = ? WHERE id = ?').run(correctFilename, img.id);
+                    results.errors.push(`Fixed filename: ${correctFilename}`);
+                }
+            }
+
+            // 4. Check for missing metadata (dimensions)
             if (!img.width || !img.height) {
                 // Try from stored metadata first
                 let metaObj = {};
