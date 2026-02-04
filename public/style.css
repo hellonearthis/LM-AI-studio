@@ -17,12 +17,21 @@
 }
 
 body {
-    font-family: 'Inter', sans-serif;
+    font-family: 'Numans', sans-serif;
+    font-weight: 400;
+    /* Ensure regular weight is default */
     background-color: var(--bg-color);
     color: var(--text-primary);
     line-height: 1.6;
     display: flex;
     min-height: 100vh;
+}
+
+input,
+button,
+textarea,
+select {
+    font-family: inherit;
 }
 
 /* ============================================================================
