@@ -1,0 +1,217 @@
+/* Analysis Page Specific Styles */
+
+/* Sidebar Status */
+.sidebar-status {
+    padding: 1.5rem;
+    border-top: 1px solid var(--border);
+    margin-top: auto;
+    font-size: 0.85rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.status-label {
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    letter-spacing: 0.05em;
+    margin-bottom: 0.25rem;
+}
+
+.status-item {
+    display: flex;
+    justify-content: space-between;
+}
+
+.status-processed {
+    color: var(--text-primary);
+}
+
+.status-added {
+    color: var(--accent);
+}
+
+.status-updated {
+    color: #f59e0b;
+}
+
+.status-existing {
+    color: var(--text-secondary);
+}
+
+.status-errors {
+    color: #ef4444;
+}
+
+
+/* Analysis Controls */
+.analysis-controls-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.controls-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.control-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.control-label {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.25rem;
+}
+
+.modern-select {
+    width: 100%;
+    padding: 0.75rem;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    font-size: 1rem;
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+
+.modern-select:hover,
+.modern-input:hover {
+    border-color: var(--accent);
+}
+
+.modern-select:focus,
+.modern-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+}
+
+.modern-input {
+    width: 100%;
+    padding: 0.75rem;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    font-size: 1rem;
+    transition: border-color 0.2s;
+}
+
+/* Action Buttons */
+.action-buttons-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    margin-bottom: 1rem;
+}
+
+.action-column {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.action-btn {
+    background: var(--accent);
+    color: white;
+    padding: 1rem;
+    border-radius: 8px;
+    text-align: center;
+    cursor: pointer;
+    font-weight: 600;
+    transition: transform 0.1s, background-color 0.2s;
+    user-select: none;
+}
+
+.action-btn:hover {
+    background-color: #0ea5e9;
+    /* slightly lighter than default accent usually */
+    transform: translateY(-1px);
+}
+
+.action-btn:active {
+    transform: translateY(0);
+}
+
+
+/* Progress Bar */
+.progress-container {
+    margin-top: 1.5rem;
+    background: rgba(0, 0, 0, 0.2);
+    padding: 1rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+}
+
+.progress-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+    font-size: 0.9rem;
+}
+
+.progress-bar-bg {
+    height: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    background: var(--accent);
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
+    transition: width 0.3s ease;
+}
+
+.current-file {
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Status Area */
+.status-area {
+    margin-top: 1rem;
+    max-height: 150px;
+    overflow-y: auto;
+    font-family: monospace;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+}
+
+/* Results & Preview */
+.results-container {
+    margin-top: 2rem;
+}
+
+.preview-container {
+    margin-bottom: 2rem;
+    background: black;
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    justify-content: center;
+    border: 1px solid var(--border);
+}
+
+.preview-container img {
+    max-width: 100%;
+    max-height: 400px;
+    object-fit: contain;
+}

@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Database - Image Analysis Studio</title>
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="database.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Numans&display=swap"
         rel="stylesheet">
 </head>
@@ -34,34 +35,24 @@
                     style="font-size: 0.7em; opacity: 0.7; margin-left: 5px;">(β)</span>
             </a>
         </div>
-        </div>
 
         <!-- Sidebar Controls -->
-        <div class="sidebar-controls"
-            style="padding: 1.5rem; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 0.75rem;">
+        <div class="sidebar-controls">
 
-            <div id="validationStatus"
-                style="display: none; background: rgba(52, 211, 153, 0.1); border: 1px solid var(--accent); padding: 0.75rem; border-radius: 8px; margin-bottom: 1rem; position: relative; font-size: 0.85rem;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-                    <span id="validationText" style="color: var(--text-primary); word-break: break-word;">Ready</span>
-                    <button id="closeStatus"
-                        style="background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 1.2rem; line-height: 1;">&times;</button>
+            <div id="validationStatus" class="validation-status">
+                <div class="validation-header">
+                    <span id="validationText" class="validation-text">Ready</span>
+                    <button id="closeStatus" class="close-status-btn">&times;</button>
                 </div>
-                <div id="validationProgress"
-                    style="height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden;">
-                    <div id="validationProgressBar"
-                        style="width: 0%; height: 100%; background: var(--accent); transition: width 0.3s;"></div>
+                <div id="validationProgress" class="validation-progress-track">
+                    <div id="validationProgressBar" class="validation-progress-bar"></div>
                 </div>
             </div>
 
-
-
-            <div
-                style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">
+            <div class="batch-actions-label">
                 Batch Actions</div>
 
-            <select id="dbPromptType"
-                style="width: 100%; padding: 0.6rem; border-radius: 8px; background: var(--bg-color); color: var(--text-primary); border: 1px solid var(--border); font-family: inherit; font-size: 0.85rem; outline: none;">
+            <select id="dbPromptType" class="sidebar-select">
                 <option value="Detailed Analysis">Detailed Analysis</option>
                 <option value="Simple Description">Simple Description</option>
                 <option value="Detailed Description" selected>Detailed Description</option>
@@ -72,29 +63,23 @@
                 <option value="Prompt Refine & Expand">Prompt Refine & Expand</option>
             </select>
 
-            <button id="selectMissingBtn"
-                style="width: 100%; background: rgba(56, 189, 248, 0.1); border: 1px dashed var(--accent); color: var(--accent); padding: 0.6rem; border-radius: 8px; cursor: pointer; font-size: 0.85rem; text-align: center;">
+            <button id="selectMissingBtn" class="sidebar-btn-secondary">
                 Select Missing
             </button>
 
-            <button id="unselectAllBtn"
-                style="display: none; width: 100%; background: var(--bg-color); border: 1px solid var(--border); color: var(--text-secondary); padding: 0.6rem; border-radius: 8px; cursor: pointer; font-size: 0.85rem; text-align: center;">
+            <button id="unselectAllBtn" class="sidebar-btn-neutral">
                 Unselect All
             </button>
 
-            <button id="processSelectedBtn"
-                style="width: 100%; background: var(--accent); border: none; color: white; padding: 0.6rem; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.85rem; text-align: center;"
-                disabled>
+            <button id="processSelectedBtn" class="sidebar-btn-primary" disabled>
                 Process (0)
             </button>
 
-            <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
-                <button id="validateBtn" title="Integrity Check"
-                    style="flex: 1; background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.5rem; border-radius: 8px; cursor: pointer;">
+            <div class="sidebar-actions-row">
+                <button id="validateBtn" title="Integrity Check" class="check-btn">
                     🛠️ Check
                 </button>
-                <div
-                    style="background: var(--bg-color); padding: 0.5rem; border-radius: 8px; border: 1px solid var(--border); color: var(--accent); font-weight: bold; min-width: 50px; text-align: center; display: flex; align-items: center; justify-content: center;">
+                <div class="count-display">
                     <span id="dbCount">0</span>
                 </div>
             </div>
@@ -103,14 +88,14 @@
 
     <div class="main-wrapper">
         <div class="container">
-            <header style="display: flex; justify-content: space-between; align-items: center;">
+            <header class="page-header">
                 <div>
                     <h1>Database</h1>
                     <p>View and manage your analyzed images.</p>
                 </div>
             </header>
 
-            <div id="loadingDb" style="text-align: center; padding: 2rem; color: var(--text-secondary);">
+            <div id="loadingDb" class="loading-state">
                 Loading database...
             </div>
 
@@ -132,8 +117,7 @@
         <div class="context-menu-item" id="ctxDelete" style="color: #ef4444;">
             <span>🗑️</span> Delete Tag/Object
         </div>
-        <div class="context-menu-item" id="ctxRename"
-            style="display: none; border-top: 1px solid var(--border); margin-top: 0.25rem; padding-top: 0.5rem;">
+        <div class="context-menu-item context-menu-item-rename" id="ctxRename">
             <span>📝</span> Rename File
         </div>
     </div>
@@ -141,16 +125,13 @@
     <!-- Custom Modal Dialog -->
     <div id="customModal" class="custom-modal-overlay" style="display: none;">
         <div class="custom-modal-content">
-            <h3 id="modalTitle"
-                style="margin-top: 0; color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 0.75rem; margin-bottom: 1rem;">
+            <h3 id="modalTitle" class="modal-title">
                 Title</h3>
-            <p id="modalMessage" style="color: var(--text-primary); margin-bottom: 1.5rem; line-height: 1.5;">Message
+            <p id="modalMessage" class="modal-message">Message
                 goes here...</p>
-            <div style="display: flex; justify-content: flex-end; gap: 0.75rem;">
-                <button id="modalHasCancel" class="btn-secondary"
-                    style="border-color: var(--border); color: var(--text-secondary);">Cancel</button>
-                <button id="modalConfirm"
-                    style="background: var(--accent); color: white; border: none; padding: 0.5rem 1.25rem; border-radius: 6px; cursor: pointer; font-weight: 500;">Confirm</button>
+            <div class="modal-actions">
+                <button id="modalHasCancel" class="btn-secondary modal-btn-cancel">Cancel</button>
+                <button id="modalConfirm" class="modal-btn-confirm">Confirm</button>
             </div>
         </div>
     </div>

@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tags - Image Analysis Studio</title>
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="tags.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Numans&display=swap"
         rel="stylesheet">
 </head>
@@ -37,19 +38,17 @@
     </nav>
 
     <div class="main-wrapper">
-        <div class="container" style="max-width: 100%; padding: 2rem;">
+        <div class="container tags-container" style="max-width: 100%; padding: 2rem;">
             <!-- Header & Controls -->
-            <div style="margin-bottom: 2rem;">
-                <h2 style="font-size: 1.5rem; margin-bottom: 0.5rem;">Tags & Objects</h2>
+            <div class="tags-header-section">
+                <h2 class="tags-title">Tags & Objects</h2>
                 <p>Explore your image collection through extracted metadata.</p>
 
-                <div class="card" style="margin-top: 1.5rem; padding: 1rem;">
-                    <div
-                        style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; justify-content: space-between;">
+                <div class="card tags-controls-card">
+                    <div class="tags-controls-row">
 
                         <!-- Tabs -->
-                        <div class="tabs-container"
-                            style="background: var(--bg-secondary); padding: 0.25rem; border-radius: 8px; display: inline-flex;">
+                        <div class="tabs-container">
                             <button id="tabTags" class="tab-btn active" onclick="switchTab('tags')">Tags (<span
                                     id="tagsCount">0</span>)</button>
                             <button id="tabObjects" class="tab-btn" onclick="switchTab('objects')">Objects (<span
@@ -57,19 +56,13 @@
                         </div>
 
                         <!-- Search & Sort -->
-                        <div style="display: flex; gap: 1rem; flex: 1; justify-content: flex-end; align-items: center;">
-                            <input type="text" id="tagSearch" placeholder="Filter tags..."
-                                style="padding: 0.5rem 1rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); width: 200px;">
+                        <div class="tags-actions-area">
+                            <input type="text" id="tagSearch" placeholder="Filter tags..." class="tag-search-input">
 
-                            <select id="sortMethod" onchange="renderCurrentView()"
-                                style="padding: 0.5rem 1rem; border-radius: 6px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text-primary); cursor: pointer; appearance: none; -webkit-appearance: none; background-image: url('data:image/svg+xml;utf8,<svg fill=\"
-                                %23a0aec0\" height=\"20\" viewBox=\"0 0 24 24\" width=\"20\"
-                                xmlns=\"http://www.w3.org/2000/svg\">
-                                <path d=\"M7 10l5 5 5-5z\" /></svg>'); background-repeat: no-repeat;
-                                background-position: right 0.5rem center; padding-right: 2rem;">
-                                <option value="count" style="background: var(--card-bg); color: var(--text-primary);">
+                            <select id="sortMethod" onchange="renderCurrentView()" class="tag-sort-select">
+                                <option value="count" class="tag-sort-option">
                                     Most Frequent</option>
-                                <option value="name" style="background: var(--card-bg); color: var(--text-primary);">
+                                <option value="name" class="tag-sort-option">
                                     Alphabetical</option>
                             </select>
 
@@ -85,15 +78,14 @@
             </div>
 
             <!-- Alphabet Navigation (shown only in alphabetical list view) -->
-            <div id="alphabetNav"
-                style="display: none; margin-bottom: 1rem; padding: 0.5rem; background: var(--card-bg); border-radius: 8px; border: 1px solid var(--border); text-align: center;">
+            <div id="alphabetNav" class="alphabet-nav">
                 <!-- Populated by JS -->
             </div>
 
             <!-- Content Area -->
             <div id="contentArea" class="cloud-view">
                 <!-- Content will be injected here -->
-                <div style="text-align: center; padding: 3rem; color: var(--text-secondary);">Loading...</div>
+                <div class="loading-message">Loading...</div>
             </div>
 
         </div>

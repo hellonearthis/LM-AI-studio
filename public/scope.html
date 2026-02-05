@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LM Studio - Data Map</title>
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="scope.css">
     <script type="importmap">
         {
             "imports": {
@@ -26,14 +27,14 @@
 <body>
     <!-- SIDEBAR -->
     <nav class="sidebar">
-        <div class="logo">
-            <span class="logo-icon">🧠</span>
-            <span class="logo-text">LM Studio</span>
+        <div class="sidebar-header">
+            <h1>Lumina</h1>
+            <div class="sidebar-subtitle">AI Image Analysis</div>
         </div>
 
-        <div class="nav-links">
+        <div class="sidebar-nav">
             <a href="index.html" class="nav-item">
-                <span class="nav-icon">📊</span> Analysis
+                <span class="nav-icon">✨</span> Analysis
             </a>
             <a href="database.html" class="nav-item">
                 <span class="nav-icon">🗄️</span> Database
@@ -49,15 +50,10 @@
                     style="font-size: 0.7em; opacity: 0.7; margin-left: 5px;">(β)</span>
             </a>
         </div>
-
-        <div class="status-section">
-            <div id="statusDot" class="status-dot"></div>
-            <span id="statusText">Ready</span>
-        </div>
     </nav>
 
     <div class="main-wrapper">
-        <div class="container scope-container" style="max-width: 100%; padding: 0 2rem 2rem 2rem;">
+        <div class="container scope-page-container">
             <!-- Header & Controls -->
             <div
                 style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; margin-top: 2rem;">
@@ -69,13 +65,10 @@
 
                 <div class="scope-header-controls">
                     <button id="syncBtn" class="primary-btn"
-                        style="display: flex; align-items: center; gap: 0.5rem; background: var(--secondary-btn);">
+                        style="display: flex; align-items: center; gap: 0.5rem; background: var(--border);">
                         <span id="syncIcon">🔄</span> Sync Data
                     </button>
-                    <button id="openExtBtn" class="primary-btn"
-                        style="display: flex; align-items: center; gap: 0.5rem;">
-                        <span>🌐</span> Open in Browser
-                    </button>
+                    <!-- Note: Sync button color override moved from inline to simpler css or kept inline if dynamic logic needed -->
                 </div>
             </div>
 

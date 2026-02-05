@@ -1,0 +1,138 @@
+/* Tags Page Specific Styles */
+
+/* Header & Controls */
+.tags-header-section {
+    margin-bottom: 2rem;
+}
+
+.tags-title {
+    font-size: 1.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.tags-controls-card {
+    margin-top: 1.5rem;
+    padding: 1rem;
+}
+
+.tags-controls-row {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+}
+
+/* Tabs */
+.tabs-container {
+    background: var(--bg-secondary);
+    padding: 0.25rem;
+    border-radius: 8px;
+    display: inline-flex;
+}
+
+.tab-btn {
+    /* Assuming some base btn styles exist or need defining if previously relied on global/inline defaults */
+    background: transparent;
+    border: none;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+    border-radius: 6px;
+    font-weight: 500;
+}
+
+.tab-btn.active {
+    background: var(--card-bg);
+    /* Or typically white/accent depending on theme */
+    color: var(--text-primary);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* Search & Sort Area */
+.tags-actions-area {
+    display: flex;
+    gap: 1rem;
+    flex: 1;
+    justify-content: flex-end;
+    align-items: center;
+}
+
+.tag-search-input {
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    width: 200px;
+}
+
+.tag-sort-select {
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--card-bg);
+    color: var(--text-primary);
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    /* Inline SVG for arrow was in html, moving to url or keeping simple arrow if theme allows. 
+       Reusing inline SVG for exact replication if needed, but cleaner to use typical select arrow or image file.
+       Preserving inline SVG concept here for fidelity. */
+    background-image: url("data:image/svg+xml;utf8,<svg fill='%23a0aec0' height='20' viewBox='0 0 24 24' width='20' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z' /></svg>");
+    background-repeat: no-repeat;
+    background-position: right 0.5rem center;
+    padding-right: 2rem;
+}
+
+.tag-sort-option {
+    background: var(--card-bg);
+    color: var(--text-primary);
+}
+
+.view-toggles {
+    /* Assuming global class exists or defining here */
+    display: flex;
+    background: var(--bg-secondary);
+    border-radius: 6px;
+    padding: 2px;
+}
+
+.view-btn {
+    background: transparent;
+    border: none;
+    padding: 0.4rem 0.6rem;
+    cursor: pointer;
+    border-radius: 4px;
+    opacity: 0.6;
+}
+
+.view-btn.active {
+    background: var(--card-bg);
+    opacity: 1;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+
+/* Alphabet Nav */
+.alphabet-nav {
+    display: none;
+    /* Toggled by JS */
+    margin-bottom: 1rem;
+    padding: 0.5rem;
+    background: var(--card-bg);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    text-align: center;
+}
+
+/* Content Area */
+.content-area-cloud {
+    /* .cloud-view class in HTML */
+}
+
+.loading-message {
+    text-align: center;
+    padding: 3rem;
+    color: var(--text-secondary);
+}

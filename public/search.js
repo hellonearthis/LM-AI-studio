@@ -11,6 +11,7 @@
  */
 
 const searchQuery = document.getElementById('searchQuery');
+const negativeQuery = document.getElementById('negativeQuery'); // New input
 const sceneType = document.getElementById('sceneType');
 const startDate = document.getElementById('startDate');
 const endDate = document.getElementById('endDate');
@@ -38,6 +39,14 @@ const sentinel = document.getElementById('scroll-sentinel');
 const fuzzinessSlider = document.getElementById('fuzzinessSlider');
 const fuzzinessValue = document.getElementById('fuzzinessValue');
 
+// Scope Elements
+const scopeAnalysis = document.getElementById('scopeAnalysis');
+const scopeObjects = document.getElementById('scopeObjects');
+const scopeTags = document.getElementById('scopeTags');
+
+// Update Fuzziness Label
+const sortOrder = document.getElementById('sortOrder');
+
 // Update Fuzziness Label
 fuzzinessSlider.addEventListener('input', () => {
     fuzzinessValue.textContent = fuzzinessSlider.value;
@@ -50,19 +59,54 @@ fuzzinessSlider.addEventListener('change', () => {
     performSearch();
 });
 
+// Update Search on Scope Change
+[scopeAnalysis, scopeObjects, scopeTags, sortOrder, negativeQuery].forEach(el => {
+    if (el) {
+        el.addEventListener('change', () => { // Or 'input' for realtime? Stick to change/enter for now or input with debounce. The user didn't specify. 'change' + Enter keydown is standard.
+            // Actually, for text inputs, 'input' is often better but expensive. 'change' only fires on blur.
+            // Let's rely on Enter key for text inputs mainly, but `change` is safe.
+            // Wait, `negativeQuery` should behave like `searchQuery`.
+            if (el === sortOrder) {
+                performSearch();
+            } else if (el === negativeQuery) {
+                // handled by explicit listener usually, but here is fine too.
+                performSearch();
+            } else {
+                initFuse(parseFloat(fuzzinessSlider.value));
+                performSearch();
+            }
+        });
+    }
+});
+
+// Allow Enter key in negative query
+if (negativeQuery) {
+    negativeQuery.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') performSearch();
+    });
+}
+
 function initFuse(threshold = 0.2) {
+    const keys = [{ name: 'filename', weight: 1 }];
+
+    if (scopeAnalysis && scopeAnalysis.checked) {
+        keys.push({ name: 'analysis.summary', weight: 1 });
+    }
+    if (scopeObjects && scopeObjects.checked) {
+        keys.push({ name: 'analysis.objects', weight: 2 });
+    }
+    if (scopeTags && scopeTags.checked) {
+        keys.push({ name: 'analysis.tags', weight: 2 });
+    }
+
     const options = {
         includeScore: true,
         threshold: threshold,
         ignoreLocation: true,
-        keys: [
-            { name: 'filename', weight: 1 },
-            { name: 'analysis.summary', weight: 1 },
-            { name: 'analysis.objects', weight: 2 },
-            { name: 'analysis.tags', weight: 2 }
-        ]
+        keys: keys
     };
 
+    // Store original index for Fuse (to preserve original array order for Date sorting)
     const indexedImages = allImages.map(img => ({ ...img, analysis: img.analysis || {} }));
     fuse = new Fuse(indexedImages, options);
 }
@@ -129,8 +173,7 @@ async function refreshData() {
         });
 
         if (fuse) {
-            const indexedImages = allImages.map(img => ({ ...img, analysis: img.analysis || {} }));
-            fuse.setCollection(indexedImages);
+            initFuse(parseFloat(fuzzinessSlider.value));
         }
 
         performSearch();
@@ -155,10 +198,15 @@ function performSearch() {
     searchBtn.disabled = true;
     searchBtn.textContent = 'Searching...';
 
-    const queryText = searchQuery.value.trim();
+    let queryText = searchQuery.value.trim();
+    let negQueryText = negativeQuery ? negativeQuery.value.trim() : ''; // Get negative query
     const typeFilter = sceneType.value;
     const startFilter = startDate.value;
     const endFilter = endDate.value;
+    const currentSort = sortOrder ? sortOrder.value : 'newest';
+
+    // Negative Search: Extract terms from separate input
+    const negativeTerms = negQueryText ? negQueryText.toLowerCase().split(/\s+/).filter(t => t.length > 0) : [];
 
     let results = [];
 
@@ -171,6 +219,23 @@ function performSearch() {
     } else {
         // If no query, show everything
         results = [...allImages];
+    }
+
+    // 1.5 Negative Terms Filter
+    if (negativeTerms.length > 0) {
+        results = results.filter(img => {
+            // Check common fields
+            const analysis = img.analysis || {};
+            const textContent = [
+                img.filename,
+                analysis.summary,
+                ...(analysis.objects || []),
+                ...(analysis.tags || []),
+                analysis.scene_type
+            ].join(' ').toLowerCase();
+
+            return !negativeTerms.some(term => textContent.includes(term));
+        });
     }
 
     // 2. Apply Filters (Client-Side)
@@ -193,14 +258,27 @@ function performSearch() {
         return true;
     });
 
-    // 2.5 Sort Results (Default: Recent Updates)
+    // 2.5 Sort Results
     results.sort((a, b) => {
+        // Relevance Check: If we searched (queryText exists) AND sort is 'relevance', keep Fuse order
+        if (currentSort === 'relevance' && queryText) {
+            return 0; // Fuse already provided relevance order
+        }
+
         const dateA = new Date(a.created_at || 0).getTime();
         const dateB = new Date(b.created_at || 0).getTime();
         const updateA = a.updated_at ? new Date(a.updated_at).getTime() : dateA;
         const updateB = b.updated_at ? new Date(b.updated_at).getTime() : dateB;
 
-        return updateB - updateA;
+        if (currentSort === 'oldest') {
+            return dateA - dateB;
+        } else if (currentSort === 'relevance') {
+            // Fallback for relevance if no query: Use Newest
+            return updateB - updateA;
+        } else {
+            // Default: Newest
+            return updateB - updateA;
+        }
     });
 
     // 3. Reset Pagination and Display
@@ -315,12 +393,12 @@ function createResultHtml(img) {
             <div class="tags-section">
                 <div class="tags-container" style="margin-bottom: 0.5rem;">
                     <strong style="font-size: 0.75rem; color: var(--text-secondary); margin-right: 0.5rem;">Objects:</strong>
-                    ${objects.map(obj => `<span class="tag editable" data-id="${img.id}" data-type="objects" data-tag="${escapeHtml(obj)}" style="cursor: context-menu; font-size: 0.75rem; background-color: rgba(16, 185, 129, 0.2); color: #34d399;">${escapeHtml(obj)}</span>`).join('')}
+                    ${objects.map(obj => `<span class="tag editable" data-id="${img.id}" data-type="objects" data-tag="${escapeHtml(obj)}" title="Click to search, Right-click to edit" style="cursor: pointer; font-size: 0.75rem; background-color: rgba(16, 185, 129, 0.2); color: #34d399;">${escapeHtml(obj)}</span>`).join('')}
                     <button class="add-tag-btn" data-id="${img.id}" data-type="objects" title="Add Object">+</button>
                 </div>
                 <div class="tags-container">
                     <strong style="font-size: 0.75rem; color: var(--text-secondary); margin-right: 0.5rem;">Tags:</strong>
-                    ${tags.map(tag => `<span class="tag editable" data-id="${img.id}" data-type="tags" data-tag="${escapeHtml(tag)}" style="cursor: context-menu; font-size: 0.75rem;">${escapeHtml(tag)}</span>`).join('')}
+                    ${tags.map(tag => `<span class="tag editable" data-id="${img.id}" data-type="tags" data-tag="${escapeHtml(tag)}" title="Click to search, Right-click to edit" style="cursor: pointer; font-size: 0.75rem;">${escapeHtml(tag)}</span>`).join('')}
                     <button class="add-tag-btn" data-id="${img.id}" data-type="tags" title="Add Tag">+</button>
                 </div>
             </div>
@@ -379,6 +457,22 @@ searchResults.addEventListener('click', (e) => {
         e.stopPropagation();
         const fullPath = e.target.dataset.fullpath;
         if (fullPath) showImagePreview(fullPath);
+    }
+
+    // Tag Click (Add to Search)
+    const tagEl = e.target.closest('.tag.editable');
+    if (tagEl) {
+        e.stopPropagation();
+        const tagText = tagEl.dataset.tag;
+        if (tagText) {
+            // Check if tag is already in query to avoid duplicates
+            const currentQuery = searchQuery.value.trim();
+            if (!currentQuery.toLowerCase().includes(tagText.toLowerCase())) {
+                searchQuery.value = currentQuery ? `${currentQuery} ${tagText}` : tagText;
+                performSearch();
+            }
+        }
+        return;
     }
 
     // Delete Button Click

@@ -1,0 +1,308 @@
+/* Main Containers */
+.container {
+    display: flex;
+    align-items: flex-start;
+    max-width: 100%;
+    padding: 2rem;
+}
+
+.main-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.header-section {
+    margin-bottom: 0.5rem;
+}
+
+.header-title {
+    font-size: 1.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.header-subtitle {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+/* Sidebar */
+.sidebar-section {
+    width: 300px;
+    margin-left: 2rem;
+    flex-shrink: 0;
+}
+
+.sticky-card {
+    position: sticky;
+    top: 2rem;
+}
+
+/* Filters & Search Controls */
+.search-controls-card {
+    margin-bottom: 0.5rem;
+}
+
+.filters-grid {
+    display: grid;
+    gap: 0.5rem;
+}
+
+.filter-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.filter-label {
+    margin-bottom: 0;
+    color: var(--text-secondary);
+    font-size: 1rem;
+}
+
+.search-input {
+    width: 100%;
+    padding: 0.75rem;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
+    position: relative;
+    z-index: 50;
+}
+
+.negative-input {
+    width: 100%;
+    padding: 0.75rem;
+    background: rgba(60, 20, 20, 0.2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: #f87171;
+    margin-bottom: 0.5rem;
+    position: relative;
+    z-index: 49;
+    font-size: 0.9rem;
+}
+
+/* Fuzziness Slider */
+.fuzziness-container {
+    margin-top: 0.75rem;
+}
+
+.fuzziness-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.25rem;
+}
+
+.fuzziness-label {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.fuzziness-value {
+    color: var(--accent);
+}
+
+.fuzziness-range {
+    width: 80%;
+    cursor: pointer;
+}
+
+.fuzziness-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    margin-top: 2px;
+    padding-left: 20%;
+}
+
+/* Search Scope */
+.scope-container {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    flex-direction: row;
+}
+
+.scope-label {
+    margin-bottom: 0;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    min-width: 110px;
+    /* Aligns with dropdown labels */
+    flex-shrink: 0;
+}
+
+.scope-options {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    cursor: pointer;
+}
+
+.checkbox-input {
+    accent-color: var(--accent);
+}
+
+.checkbox-text {
+    font-size: 0.85rem;
+    color: var(--text-primary);
+}
+
+/* Sort Order & Scene Type */
+.dropdown-row {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    border-top: 1px solid var(--border);
+}
+
+.dropdown-label {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    min-width: 110px;
+    /* Aligns with scope labels */
+    flex-shrink: 0;
+}
+
+.styled-select {
+    flex: 1;
+    padding: 0.5rem;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+}
+
+/* Date Range */
+.date-range-container {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    border-top: 1px solid var(--border);
+}
+
+.date-inputs {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.date-input {
+    padding: 0.5rem;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+}
+
+.search-btn-container {
+    margin-left: auto;
+}
+
+.search-btn {
+    background-color: var(--accent);
+    color: white;
+    border: none;
+    padding: 0.75rem 2rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+/* Results Header */
+.results-header {
+    margin-top: 2rem;
+    margin-bottom: 1rem;
+    padding-top: 2rem;
+    border-top: 2px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.results-title {
+    font-size: 1.2rem;
+}
+
+.results-count {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.scroll-sentinel {
+    height: 20px;
+    width: 100%;
+}
+
+/* Right Sidebar Items */
+.sidebar-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.5rem;
+}
+
+.sidebar-title {
+    margin: 0;
+}
+
+.show-all-link {
+    font-size: 0.8rem;
+    color: var(--accent);
+    text-decoration: none;
+}
+
+.tags-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 2rem;
+}
+
+.objects-header {
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.5rem;
+}
+
+.objects-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.loading-text {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+/* Toggle Switch specific fix for Search Logic (copied from inline or style.css logic if needed, but it seems to use global .switch class, just wrapped in span) */
+.logic-label {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}

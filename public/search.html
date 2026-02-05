@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Search - Image Analysis Studio</title>
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="search.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Numans&display=swap"
         rel="stylesheet">
 </head>
@@ -97,146 +98,169 @@
     </nav>
 
     <div class="main-wrapper">
-        <div class="container" style="display: flex; align-items: flex-start; max-width: 100%; padding: 2rem;">
+        <div class="container">
             <!-- Main Content -->
-            <div style="flex: 1; min-width: 0;">
-                <div style="margin-bottom: 2rem;">
-                    <h2 style="font-size: 1.5rem; margin-bottom: 0.5rem;">Search Database</h2>
-                    <p>Find images by content, tags, or metadata.</p>
+            <div class="main-content">
+                <div class="header-section">
+                    <h2 class="header-title">
+                        Search Database
+                        <sup class="header-subtitle">
+                            Find images by content, tags, or metadata.
+                        </sup>
+                    </h2>
                 </div>
 
                 <!-- Search Controls -->
-                <div class="card" style="margin-bottom: 2rem;">
-                    <div class="filters-container" style="display: grid; gap: 1.5rem;">
+                <div class="card search-controls-card">
+                    <div class="filters-grid">
                         <!-- Text Search -->
                         <div class="filter-section">
-                            <label
-                                style="display: block; margin-bottom: 0.5rem; color: var(--text-secondary); font-size: 0.9rem;">Keywords</label>
-                            <input type="text" id="searchQuery" placeholder="Search descriptions, objects..." autofocus
-                                style="width: 100%; padding: 0.75rem; background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); margin-bottom: 0.5rem; position: relative; z-index: 50;">
-
-                            <div style="display: flex; align-items: center; gap: 0.5rem;">
-                                <label class="switch"
-                                    style="position: relative; display: inline-block; width: 34px; height: 20px;">
-                                    <input type="checkbox" id="searchLogicToggle"
-                                        style="opacity: 0; width: 0; height: 0;">
-                                    <span class="slider round"></span>
+                            <div class="filter-header">
+                                <label class="filter-label">
+                                    Keyword Search:
                                 </label>
-                                <span id="logicLabel" style="font-size: 0.8rem; color: var(--text-secondary);">Match
-                                    All
-                                    (AND)</span>
+                                <span id="logicLabel" class="logic-label">
+                                    Match All (AND)
+                                    <label class="switch"
+                                        style="position: relative; display: inline-block; width: 34px; height: 20px;">
+                                        <input type="checkbox" id="searchLogicToggle"
+                                            style="opacity: 0; width: 0; height: 0;">
+                                        <span class="slider round"> </span>
+                                    </label>
+                                </span>
                             </div>
+                            <input type="text" id="searchQuery" class="search-input"
+                                placeholder="Search descriptions, objects..." autofocus>
+
+                            <input type="text" id="negativeQuery" class="negative-input"
+                                placeholder="Exclude terms (e.g. blurry, dark)...">
 
                             <!-- Search Fuzziness Slider -->
-                            <div style="margin-top: 1rem;">
-                                <div
-                                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
-                                    <label style="font-size: 0.8rem; color: var(--text-secondary);">Fuzziness: <span
-                                            id="fuzzinessValue" style="color: var(--accent);">0.2</span></label>
+                            <div class="fuzziness-container">
+                                <div class="fuzziness-header">
+                                    <label class="fuzziness-label">Fuzziness: <span id="fuzzinessValue"
+                                            class="fuzziness-value">0.2</span></label>
+                                    <input type="range" id="fuzzinessSlider" class="fuzziness-range" min="0.0" max="0.6"
+                                        step="0.1" value="0.2">
                                 </div>
-                                <input type="range" id="fuzzinessSlider" min="0.0" max="0.6" step="0.1" value="0.2"
-                                    style="width: 100%; cursor: pointer;">
-                                <div
-                                    style="display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--text-secondary); margin-top: 2px;">
+                                <div class="fuzziness-labels">
                                     <span>Exact</span>
                                     <span>Loose</span>
                                 </div>
+                            </div>
+
+                            <!-- Search Scope -->
+                            <div class="scope-container">
+                                <label class="scope-label">Search Scope:</label>
+
+                                <div class="scope-options">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="scopeAnalysis" class="checkbox-input" checked>
+                                        <span class="checkbox-text">AI Summaries</span>
+                                    </label>
+
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="scopeObjects" class="checkbox-input" checked>
+                                        <span class="checkbox-text">Objects</span>
+                                    </label>
+
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="scopeTags" class="checkbox-input" checked>
+                                        <span class="checkbox-text">Tags</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Sort Order -->
+                            <div class="dropdown-row">
+                                <label class="dropdown-label">Sort Order</label>
+                                <select id="sortOrder" class="styled-select">
+                                    <option value="relevance">Relevance (Best Match)</option>
+                                    <option value="newest" selected>Newest First</option>
+                                    <option value="oldest">Oldest First</option>
+                                </select>
                             </div>
                         </div>
 
                         <!-- Scene Type -->
                         <div class="filter-section">
-                            <label
-                                style="display: block; margin-bottom: 0.5rem; color: var(--text-secondary); font-size: 0.9rem;">Scene
-                                Type</label>
-                            <select id="sceneType"
-                                style="width: 100%; padding: 0.75rem; background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);">
-                                <option value="all">All Types</option>
-                                <option value="indoor">Indoor</option>
-                                <option value="outdoor">Outdoor</option>
-                                <option value="portrait">Portrait</option>
-                                <option value="landscape">Landscape</option>
-                                <option value="urban">Urban</option>
-                                <option value="nature">Nature</option>
-                            </select>
+                            <div class="dropdown-row">
+                                <label class="dropdown-label">Scene Type</label>
+                                <select id="sceneType" class="styled-select">
+                                    <option value="all">All Types</option>
+                                    <option value="indoor">Indoor</option>
+                                    <option value="outdoor">Outdoor</option>
+                                    <option value="portrait">Portrait</option>
+                                    <option value="landscape">Landscape</option>
+                                    <option value="urban">Urban</option>
+                                    <option value="nature">Nature</option>
+                                </select>
+                            </div>
+
+                            <!-- Date Range -->
+                            <div class="date-range-container">
+                                <label class="scope-label">Date Range</label>
+
+                                <div class="date-inputs">
+                                    <input type="date" id="startDate" class="date-input">
+                                    <input type="date" id="endDate" class="date-input">
+                                </div>
+
+                                <div class="search-btn-container">
+                                    <button id="searchBtn" class="search-btn">Search Images</button>
+                                </div>
+                            </div>
+
+                            <!-- Results Area -->
+                            <div class="results-header">
+                                <h3 class="results-title">Results</h3>
+                                <span id="resultsCount" class="results-count">0 results</span>
+                            </div>
+
+                            <div id="searchResults" class="analysis-grid">
+                                <!-- Results will be injected here -->
+                            </div>
+                            <div id="scroll-sentinel" class="scroll-sentinel"></div>
                         </div>
 
-                        <!-- Date Range -->
-                        <div class="filter-section">
-                            <label
-                                style="display: block; margin-bottom: 0.5rem; color: var(--text-secondary); font-size: 0.9rem;">Date
-                                Range</label>
-                            <div style="display: flex; gap: 0.5rem;">
-                                <input type="date" id="startDate"
-                                    style="flex: 1; padding: 0.75rem; background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);">
-                                <input type="date" id="endDate"
-                                    style="flex: 1; padding: 0.75rem; background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);">
+                        <!-- Stats Sidebar -->
+                        <div class="sidebar-section">
+                            <div class="card sticky-card">
+                                <div class="sidebar-header-row">
+                                    <h3 class="sidebar-title">Top Tags</h3>
+                                    <a href="tags.html" class="show-all-link">Show All</a>
+                                </div>
+                                <div id="topTagsList" class="tags-list">
+                                    <span class="loading-text">Loading...</span>
+                                </div>
+
+                                <h3 class="objects-header">Top Objects</h3>
+                                <div id="topObjectsList" class="objects-list">
+                                    <span class="loading-text">Loading...</span>
+                                </div>
                             </div>
                         </div>
                     </div>
+                </div>
 
-                    <div style="margin-top: 1.5rem; display: flex; justify-content: flex-end;">
-                        <button id="searchBtn"
-                            style="background-color: var(--accent); color: white; border: none; padding: 0.75rem 2rem; border-radius: 6px; cursor: pointer; font-weight: 600;">Search
-                            Images</button>
+
+                <div id="contextMenu" class="context-menu">
+                    <div class="context-menu-item" id="ctxRegenThumb">
+                        <span>🔄</span> Regenerate Thumbnail
+                    </div>
+                    <div class="context-menu-item" id="ctxEdit">
+                        <span>✏️</span> Edit Tag
+                    </div>
+                    <div class="context-menu-item delete" id="ctxDelete">
+                        <span>🗑️</span> Delete Tag
+                    </div>
+                    <div class="context-menu-item" id="ctxRename" style="display: none;">
+                        <span>📝</span> Rename File
                     </div>
                 </div>
 
-                <!-- Results Area -->
-                <div style="margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center;">
-                    <h3 style="font-size: 1.2rem;">Results</h3>
-                    <span id="resultsCount" style="color: var(--text-secondary); font-size: 0.9rem;">0
-                        results</span>
-                </div>
-
-                <div id="searchResults" class="analysis-grid">
-                    <!-- Results will be injected here -->
-                </div>
-                <div id="scroll-sentinel" style="height: 20px; width: 100%;"></div>
-            </div>
-
-            <!-- Stats Sidebar -->
-            <div style="width: 300px; margin-left: 2rem; flex-shrink: 0;">
-                <div class="card" style="position: sticky; top: 2rem;">
-                    <div
-                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;">
-                        <h3 style="margin: 0;">Top Tags</h3>
-                        <a href="tags.html" style="font-size: 0.8rem; color: var(--accent); text-decoration: none;">Show
-                            All</a>
-                    </div>
-                    <div id="topTagsList" style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 2rem;">
-                        <span style="color: var(--text-secondary); font-size: 0.9rem;">Loading...</span>
-                    </div>
-
-                    <h3 style="margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;">
-                        Top
-                        Objects</h3>
-                    <div id="topObjectsList" style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
-                        <span style="color: var(--text-secondary); font-size: 0.9rem;">Loading...</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-
-    <div id="contextMenu" class="context-menu">
-        <div class="context-menu-item" id="ctxRegenThumb">
-            <span>🔄</span> Regenerate Thumbnail
-        </div>
-        <div class="context-menu-item" id="ctxEdit">
-            <span>✏️</span> Edit Tag
-        </div>
-        <div class="context-menu-item delete" id="ctxDelete">
-            <span>🗑️</span> Delete Tag
-        </div>
-        <div class="context-menu-item" id="ctxRename" style="display: none;">
-            <span>📝</span> Rename File
-        </div>
-    </div>
-
-    <script src="libs/fuse.min.js"></script>
-    <script src="search.js?v=2"></script>
+                <script src="libs/fuse.min.js"></script>
+                <script src="search.js?v=2"></script>
 </body>
 
 </html>
