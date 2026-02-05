@@ -80,7 +80,15 @@ try {
     console.error('[DB] Migration error:', err);
 }
 
-// Fast Check Endpoint
+// ============================================================================
+// FAST SYNC ENDPOINTS
+// ============================================================================
+
+/**
+ * Checks if a single file needs to be re-analyzed.
+ * Compares file size and modification time (mtime) with the database record.
+ * Uses a tolerance (MTIME_TOLERANCE) to allow for minor filesystem discrepancies.
+ */
 app.post('/check-fast', (req, res) => {
     try {
         const { path, size, mtime } = req.body;
@@ -107,7 +115,11 @@ app.post('/check-fast', (req, res) => {
     }
 });
 
-// Bulk Fast Check Endpoint
+/**
+ * Bulk version of /check-fast.
+ * Checks an array of files against the database in a single transaction.
+ * Returns a map of results: 'exact', 'missing', or 'partial'.
+ */
 app.post('/check-fast-batch', (req, res) => {
     try {
         const { files } = req.body; // Array of { path, size, mtime }
@@ -958,8 +970,17 @@ app.post('/search', (req, res) => {
 });
 
 // ============================================================================
-// DATABASE VALIDATION
+// DATABASE VALIDATION & REPAIR
 // ============================================================================
+
+/**
+ * Performs a deep integrity check of the database.
+ * 1. Deduplicates tags and objects.
+ * 2. Prunes records for missing files.
+ * 3. Repairs corrupted metadata JSON.
+ * 4. regenerate missing or valid thumbnails (including deep verification).
+ * 5. Deduplicates entire image records based on file path.
+ */
 app.post('/validate-database', async (req, res) => {
     console.log('[VALIDATE] Request received');
     const { reanalyze } = req.body;
@@ -1051,13 +1072,24 @@ app.post('/validate-database', async (req, res) => {
 
             // 2. Check for missing thumbnail
             const filenameBase = img.filename.substring(0, img.filename.lastIndexOf('.')) || img.filename;
+            let thumbValid = false;
             const thumbPath = path.join(__dirname, 'public', 'thumbnails', `${filenameBase}.avif`);
 
-            if (!fs.existsSync(thumbPath)) {
-                console.log(`[VALIDATE] Thumbnail missing, regenerating: ${filePath}`);
+            if (fs.existsSync(thumbPath) && fs.statSync(thumbPath).size > 0) {
                 try {
-                    const buffer = fs.readFileSync(filePath);
-                    await sharp(buffer)
+                    // Deep check: Verify the thumbnail is actually a valid image
+                    await sharp(thumbPath).metadata();
+                    thumbValid = true;
+                } catch (e) {
+                    console.warn(`[VALIDATE] Corrupted thumbnail detected for ${img.filename}, deleting.`);
+                    try { fs.unlinkSync(thumbPath); } catch (err) { }
+                }
+            }
+
+            if (!thumbValid) {
+                console.log(`[VALIDATE] Thumbnail missing/invalid, generating: ${filePath}`);
+                try {
+                    await sharp(filePath)
                         .resize(100, 100, {
                             fit: 'contain',
                             background: { r: 0, g: 0, b: 0, alpha: 0 }

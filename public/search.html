@@ -126,6 +126,22 @@
                                     All
                                     (AND)</span>
                             </div>
+
+                            <!-- Search Fuzziness Slider -->
+                            <div style="margin-top: 1rem;">
+                                <div
+                                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
+                                    <label style="font-size: 0.8rem; color: var(--text-secondary);">Fuzziness: <span
+                                            id="fuzzinessValue" style="color: var(--accent);">0.2</span></label>
+                                </div>
+                                <input type="range" id="fuzzinessSlider" min="0.0" max="0.6" step="0.1" value="0.2"
+                                    style="width: 100%; cursor: pointer;">
+                                <div
+                                    style="display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--text-secondary); margin-top: 2px;">
+                                    <span>Exact</span>
+                                    <span>Loose</span>
+                                </div>
+                            </div>
                         </div>
 
                         <!-- Scene Type -->
@@ -220,7 +236,7 @@
     </div>
 
     <script src="libs/fuse.min.js"></script>
-    <script src="search.js"></script>
+    <script src="search.js?v=2"></script>
 </body>
 
 </html>

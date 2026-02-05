@@ -1,6 +1,14 @@
 // ============================================================================
 // SEARCH PAGE LOGIC
 // ============================================================================
+/**
+ * Handles all logic for the search.html page.
+ * Includes:
+ * - Fuse.js fuzzy search initialization and execution
+ * - Search rendering with infinite scroll (IntersectionObserver)
+ * - Filtering by date and scene type
+ * - Inline tag management and file operations
+ */
 
 const searchQuery = document.getElementById('searchQuery');
 const sceneType = document.getElementById('sceneType');
@@ -12,11 +20,6 @@ const searchBtn = document.getElementById('searchBtn');
 const searchResults = document.getElementById('searchResults');
 const resultsCount = document.getElementById('resultsCount');
 const API_BASE_URL = 'http://localhost:3000';
-
-// Toggle Label Update
-searchLogicToggle.addEventListener('change', () => {
-    logicLabel.textContent = searchLogicToggle.checked ? 'Match Any (OR)' : 'Match All (AND)';
-});
 
 // State
 let allImages = [];
@@ -31,7 +34,48 @@ const BATCH_SIZE = 50;
 let observer = null;
 const sentinel = document.getElementById('scroll-sentinel');
 
-// Initialize Search Page
+// Toggle Label Update
+const fuzzinessSlider = document.getElementById('fuzzinessSlider');
+const fuzzinessValue = document.getElementById('fuzzinessValue');
+
+// Update Fuzziness Label
+fuzzinessSlider.addEventListener('input', () => {
+    fuzzinessValue.textContent = fuzzinessSlider.value;
+});
+
+// Update Search on Slider Change
+fuzzinessSlider.addEventListener('change', () => {
+    // Re-initialize Fuse with new threshold
+    initFuse(parseFloat(fuzzinessSlider.value));
+    performSearch();
+});
+
+function initFuse(threshold = 0.2) {
+    const options = {
+        includeScore: true,
+        threshold: threshold,
+        ignoreLocation: true,
+        keys: [
+            { name: 'filename', weight: 1 },
+            { name: 'analysis.summary', weight: 1 },
+            { name: 'analysis.objects', weight: 2 },
+            { name: 'analysis.tags', weight: 2 }
+        ]
+    };
+
+    const indexedImages = allImages.map(img => ({ ...img, analysis: img.analysis || {} }));
+    fuse = new Fuse(indexedImages, options);
+}
+
+
+
+/**
+ * Initializes the search page.
+ * - Fetches all image data from the server.
+ * - Prepares the data for Fuse.js indexing.
+ * - Sets up the initial fuzzy search index.
+ * - Triggers an initial empty search to populate the view.
+ */
 async function initSearch() {
     if (isInitialized) return;
 
@@ -39,11 +83,8 @@ async function initSearch() {
         searchBtn.disabled = true;
         searchBtn.textContent = 'Loading Index...';
 
-        // Fetch images only (Force runtime indexing to avoid stale index issues)
         const imagesRes = await fetch(`${API_BASE_URL}/images?t=${Date.now()}`);
         const imagesData = await imagesRes.json();
-
-        // Handle both old array format and new object format { images: [], ... }
         const imagesList = Array.isArray(imagesData) ? imagesData : imagesData.images;
 
         allImages = imagesList.map(img => {
@@ -53,34 +94,11 @@ async function initSearch() {
             return img;
         });
 
-        // Initialize Fuse.js
-        const options = {
-            includeScore: true,
-            threshold: 0.2, // Stricter matching (0.0 = perfect, 1.0 = anything)
-            ignoreLocation: true,
-            // useExtendedSearch: true, // Disabled: causing "match all" behavior with some queries
-            keys: [
-                { name: 'filename', weight: 1 },
-                { name: 'analysis.summary', weight: 1 },
-                { name: 'analysis.objects', weight: 2 },
-                { name: 'analysis.tags', weight: 2 }
-            ]
-        };
+        // Initial Fuse Setup
+        initFuse(parseFloat(fuzzinessSlider.value)); // Use slider default
 
-        // Prepare data for Fuse
-        const indexedImages = allImages.map(img => {
-            // Ensure analysis is an object
-            return { ...img, analysis: img.analysis || {} };
-        });
 
-        // Debug: Check index data
-        if (indexedImages.length > 0) {
-            console.log('[DEBUG] First indexed item:', JSON.stringify(indexedImages[0].analysis));
-        }
 
-        // Runtime Indexing
-        console.log('[DEBUG] Creating Fuse index with', indexedImages.length, 'items');
-        fuse = new Fuse(indexedImages, options);
 
         isInitialized = true;
 
@@ -122,7 +140,13 @@ async function refreshData() {
 }
 
 
-// Search Function
+/**
+ * Executes a search based on current input and filters.
+ * 1. Performs fuzzy search via Fuse.js (if query exists).
+ * 2. Filters results by Scene Type and Date Range.
+ * 3. Sorts results by `updated_at`.
+ * 4. Resets pagination and triggers `renderBatch`.
+ */
 function performSearch() {
     if (!isInitialized) return;
 
@@ -217,7 +241,16 @@ function renderBatch() {
     }
 
     const batch = filteredImages.slice(currentIndex, currentIndex + BATCH_SIZE);
-    const batchHtml = batch.map(img => createResultHtml(img)).join('');
+
+    // Safely render batch
+    let batchHtml = '';
+    for (const img of batch) {
+        try {
+            batchHtml += createResultHtml(img);
+        } catch (err) {
+            console.error('Error rendering image card:', img, err);
+        }
+    }
 
     searchResults.insertAdjacentHTML('beforeend', batchHtml);
     currentIndex += batch.length;
@@ -236,15 +269,12 @@ function createResultHtml(img) {
             .replace(/'/g, '&#039;');
     };
 
-    const date = new Date(img.created_at).toLocaleDateString();
+    const date = new Date(img.created_at || Date.now()).toLocaleDateString();
 
-    let displayPath;
-    if (img.path && img.path.endsWith('.avif')) {
-        displayPath = img.path.includes('thumbnails/') ? img.path : `thumbnails/${img.path}`;
-    } else {
-        const filenameBase = img.filename.substring(0, img.filename.lastIndexOf('.')) || img.filename;
-        displayPath = `thumbnails/${filenameBase}.avif`;
-    }
+    // Thumbnail path logic
+    const filename = img.filename || 'unknown.png';
+    const filenameBase = filename.substring(0, filename.lastIndexOf('.')) || filename;
+    const displayPath = `thumbnails/${filenameBase}.avif`;
 
     const analysis = img.analysis || {};
     const objects = analysis.objects || [];
@@ -299,10 +329,20 @@ function createResultHtml(img) {
 }
 
 // Override Load Stats to also init search
-const originalLoadStats = loadStats;
-loadStats = async function () {
-    await originalLoadStats();
-    initSearch();
+// Initialize directly
+initSearch();
+
+// Event Listeners
+if (searchBtn) {
+    searchBtn.addEventListener('click', () => {
+        performSearch();
+    });
+}
+// Allow Enter key in search box
+if (searchQuery) {
+    searchQuery.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') performSearch();
+    });
 }
 
 // Display Results

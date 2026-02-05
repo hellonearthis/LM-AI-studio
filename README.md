@@ -88,25 +88,28 @@ npm run ls:serve
 1. Navigate to the **Database** page via the sidebar.
 2. Browse all analyzed images with thumbnails.
 3. **Batch Actions**: Use the sidebar to select images and run batch analysis (e.g., "Select Missing" -> "Process").
-4. **Validate Database**: Click the 🛠️ button to scan for integrity issues (deduplication, missing metadata, regeneration).
-5. **Rename Files**: Right-click any filename to rename it directly on disk and in the database.
+1.  Navigate to the **Database** page via the sidebar.
+2.  Browse all analyzed images with thumbnails.
+3.  **Batch Actions**: Use the sidebar to select images and run batch analysis (e.g., "Select Missing" -> "Process").
+4.  **Validate Database**: Click the 🛠️ button to scan for integrity issues (deduplication, missing metadata, regeneration).
+5.  **Rename Files**: Right-click any filename to rename it directly on disk and in the database.
 
 ### Searching
 
-1. Navigate to the **Search** page.
-2. **Text Search**: Enter keywords to search descriptions, objects, and tags. **Fuzzy search** handles typos.
-3. **Filters**:
-   - **Scene Type**: Filter by Indoor, Outdoor, Portrait, Landscape, Urban, Nature.
-   - **Date Range**: Restrict results to a specific timeframe.
-4. **Search Logic**: Toggle between **Match All (AND)** and **Match Any (OR)** logic.
-5. **Inline Tag Management**: Right-click any tag/object to edit or delete it. Click `+` to add new tags.
-6. **Results**: Results are automatically sorted by **Most Recently Updated** first.
+1.  Navigate to the **Search** page.
+2.  **Text Search**: Enter keywords to search descriptions, objects, and tags. **Fuzzy search** handles typos.
+3.  **Fuzziness Control**: Use the slider to adjust search strictness.
+    -   **Exact (0.0)**: Use for precise keyword matching.
+    -   **Loose (0.6)**: Use to find related terms or handle significant typos.
+4.  **Filters**:
+    -   **Scene Type**: Filter by Indoor, Outdoor, Portrait, Landscape, Urban, Nature.
+    -   **Date Range**: Restrict results to a specific timeframe.
+5.  **Search Logic**: Toggle between **Match All (AND)** and **Match Any (OR)** logic.
+6.  **Inline Tag Management**: Right-click any tag/object to edit or delete it. Click `+` to add new tags (supports comma-separated multiple tags).
+7.  **Results**: Results are automatically sorted by **Most Recently Updated** first.
 
 ### Tags & Objects
 
-1. Click **Tags** to explore your metadata.
-2. Toggle between **Tags** and **Objects** tabs.
-3. Switch between **Cloud View** (visual) and **List View** (detailed).
 4. Sort by frequency or **alphabetical order** with A-Z navigation.
 
 ### Data Map (Latent Scope)

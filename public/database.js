@@ -11,6 +11,32 @@ const dbGrid = document.getElementById('dbGrid');
 const loadingDb = document.getElementById('loadingDb');
 
 // ============================================================================
+// TOAST NOTIFICATIONS
+// ============================================================================
+function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast-notification ${type}`;
+
+    // Choose icon
+    let icon = 'ℹ️';
+    if (type === 'success') icon = '✅';
+    if (type === 'error') icon = '⚠️';
+
+    toast.innerHTML = `
+        <span style="font-size: 1.2rem;">${icon}</span>
+        <span>${message}</span>
+    `;
+
+    document.body.appendChild(toast);
+
+    // Auto remove
+    setTimeout(() => {
+        toast.style.animation = 'fadeOut 0.3s forwards';
+        toast.addEventListener('animationend', () => toast.remove());
+    }, 3000);
+}
+
+// ============================================================================
 // MAIN FUNCTION - LOAD DATABASE
 // ============================================================================
 // ============================================================================
@@ -29,7 +55,12 @@ let isSelectionMode = false;
 let selectedIds = new Set();
 let observer = null;
 
-// Fetches images in batches from the server
+/**
+ * Initializes the database viewer.
+ * - Resets all pagination state.
+ * - Clears the current grid.
+ * - Triggers the first page load via `loadNextPage()`.
+ */
 async function initDatabase() {
     try {
         // Reset state
@@ -51,6 +82,13 @@ async function initDatabase() {
     }
 }
 
+/**
+ * Loads the next page of images from the server.
+ * - Checks if already loading or if no more pages exist.
+ * - Appends new data to `imagesData` cache.
+ * - Renders the new batch of images to the DOM.
+ * - Updates the sentinel for infinite scrolling.
+ */
 async function loadNextPage() {
     if (isLoading || !hasMore) return;
 
@@ -138,6 +176,11 @@ function setupIntersectionObserver(sentinel) {
     observer.observe(sentinel);
 }
 
+/**
+ * Generates the HTML for a single image card.
+ * @param {Object} img - The image object containing metadata and analysis.
+ * @returns {string} The HTML string for the card.
+ */
 function createCardHtml(img) {
     // Parse stored JSON data (handle if already parsed or string)
     let analysis = img.analysis;
@@ -166,13 +209,8 @@ function createCardHtml(img) {
         .join('\n');
 
     // Thumbnail path logic
-    let displayPath;
-    if (img.path && img.path.endsWith('.avif')) {
-        displayPath = img.path.includes('thumbnails/') ? img.path : `thumbnails/${img.path}`;
-    } else {
-        const filenameBase = img.filename.substring(0, img.filename.lastIndexOf('.')) || img.filename;
-        displayPath = `thumbnails/${filenameBase}.avif`;
-    }
+    const filenameBase = img.filename.substring(0, img.filename.lastIndexOf('.')) || img.filename;
+    const displayPath = `thumbnails/${filenameBase}.avif`;
 
     const fullPath = img.path;
     const isSelected = selectedIds.has(String(img.id));
@@ -291,11 +329,11 @@ dbGrid.addEventListener('click', async (e) => {
                 fallback.style.display = 'none';
 
             } else {
-                alert('Failed to regenerate thumbnail');
+                showToast('Failed to regenerate thumbnail', 'error');
             }
         } catch (err) {
             console.error('Regen error:', err);
-            alert('Error regenerating thumbnail');
+            showToast('Error regenerating thumbnail', 'error');
         } finally {
             btn.disabled = false;
             btn.textContent = '🔄 Regen';
@@ -352,7 +390,7 @@ async function showImagePreview(imagePath) {
             console.error('Failed to load image:', imagePath);
             modal.remove();
             URL.revokeObjectURL(url);
-            alert('Failed to load image');
+            showToast('Failed to load image', 'error');
         };
 
         // Prevent clicks on image from closing modal
@@ -380,7 +418,7 @@ async function showImagePreview(imagePath) {
 
     } catch (error) {
         console.error('[IMAGE PREVIEW] Error loading image:', error);
-        alert(`Image File Not Found!\n\nPath in database: ${imagePath}\n\nThe file may have been moved or the path may be incorrect.`);
+        showToast(`Image File Not Found!\nPath: ${imagePath}`, 'error');
     }
 }
 
@@ -401,7 +439,7 @@ document.addEventListener("click", (e) => {
         window.electronAPI.showInFolder(fullPath);
     } else {
         console.warn('Electron API not available. File path:', fullPath);
-        alert('This feature requires Electron. File path: ' + fullPath);
+        showToast('This feature requires Electron.', 'error');
     }
 });
 
@@ -504,7 +542,7 @@ function showModal(title, message, isConfirm = false) {
         if (!customModal) {
             // Fallback if modal elements aren't found (shouldn't happen)
             if (isConfirm) resolve(confirm(message));
-            else { alert(message); resolve(true); }
+            else { showToast(message, 'info'); resolve(true); }
             return;
         }
 
@@ -947,9 +985,18 @@ document.getElementById('ctxDelete').addEventListener('click', () => {
 });
 
 async function addTag(id, type) {
-    showTagInputModal(`Add new ${type.slice(0, -1)}`, '', (newTag) => {
-        if (newTag && newTag.trim()) {
-            updateTag(id, type, null, newTag.trim(), 'add');
+    showTagInputModal(`Add new ${type.slice(0, -1)}`, '', (inputValue) => {
+        if (inputValue && inputValue.trim()) {
+            // Split by comma to support multiple tags
+            const tags = inputValue.split(',').map(t => t.trim()).filter(t => t.length > 0);
+
+            tags.forEach(newTag => {
+                updateTag(id, type, null, newTag, 'add');
+            });
+
+            if (tags.length > 0) {
+                showToast(`Added ${tags.length} tag(s)`, 'success');
+            }
         }
     });
 }
@@ -992,7 +1039,7 @@ async function updateTag(id, type, oldTag, newTag, action) {
 
     } catch (error) {
         console.error('Tag update error:', error);
-        alert('Failed to update tags: ' + error.message);
+        showToast('Failed to update tags: ' + error.message, 'error');
     }
 }
 
@@ -1028,7 +1075,7 @@ async function deleteFromDatabase(id) {
 
         } catch (error) {
             console.error('Delete error:', error);
-            showModal('Error', 'Failed to delete: ' + error.message);
+            showToast('Failed to delete: ' + error.message, 'error');
         }
     });
 }
@@ -1224,8 +1271,8 @@ async function regenerateThumbnail(id, cardElement) {
         }
 
     } catch (error) {
-        console.error('Thumbnail regeneration error:', error);
-        alert('Failed to regenerate thumbnail: ' + error.message);
+        console.error('Regenerate error:', error);
+        showToast('Failed to regenerate thumbnail: ' + error.message, 'error');
     } finally {
         const thumbImg = cardElement.querySelector('.thumbnail-preview');
         if (thumbImg) thumbImg.style.opacity = '1';
