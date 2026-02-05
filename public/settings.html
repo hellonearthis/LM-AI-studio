@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings - Image Analysis Studio</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="index.css"> <!-- Reusing index styles for card layout -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Numans&display=swap"
+        rel="stylesheet">
+    <style>
+        /* Settings specific tweaks */
+        .settings-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .form-helper {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-top: 0.25rem;
+        }
+
+        .save-btn {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .save-btn:hover {
+            filter: brightness(1.1);
+        }
+
+        .refresh-btn {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 0.5rem 1rem;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 0.85rem;
+            margin-left: 0.5rem;
+        }
+
+        .refresh-btn:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+    </style>
+</head>
+
+<body>
+    <nav class="sidebar">
+        <div class="sidebar-header">
+            <h1>Lumina</h1>
+            <div class="sidebar-subtitle">AI Image Analysis</div>
+        </div>
+        <div class="sidebar-nav">
+            <a href="index.html" class="nav-item">
+                <span class="nav-icon">✨</span> Analysis
+            </a>
+            <a href="database.html" class="nav-item">
+                <span class="nav-icon">🗄️</span> Database
+            </a>
+            <a href="search.html" class="nav-item">
+                <span class="nav-icon">🔍</span> Search
+            </a>
+            <a href="tags.html" class="nav-item">
+                <span class="nav-icon">🏷️</span> Tags
+            </a>
+            <a href="scope.html" class="nav-item">
+                <span class="nav-icon">🗺️</span> Map <span
+                    style="font-size: 0.7em; opacity: 0.7; margin-left: 5px;">(β)</span>
+            </a>
+            <a href="settings.html" class="nav-item active">
+                <span class="nav-icon">⚙️</span> Settings
+            </a>
+        </div>
+    </nav>
+
+    <div class="main-wrapper">
+        <div class="container">
+            <header>
+                <h1>Configuration</h1>
+                <p>Manage AI model selection and system preferences.</p>
+            </header>
+
+            <div class="settings-card">
+                <h2>LM Studio Integration</h2>
+                <div style="display: flex; align-items: center; margin-bottom: 1rem;">
+                    <p style="margin: 0; color: var(--text-secondary);">Select which loaded models to use for each task.
+                    </p>
+                    <button id="refreshModelsBtn" class="refresh-btn">🔄 Refresh Models</button>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="visionModelSelect">Image Analysis Model (Vision)</label>
+                    <select id="visionModelSelect" class="modern-select">
+                        <option value="">Auto-detect (Recommended)</option>
+                    </select>
+                    <p class="form-helper">Used for describing images. Must have vision capabilities (e.g., Qwen-VL,
+                        Llava).</p>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="embeddingModelSelect">Semantic Search Model (Embeddings)</label>
+                    <select id="embeddingModelSelect" class="modern-select">
+                        <option value="">Auto-detect (Recommended)</option>
+                    </select>
+                    <p class="form-helper">Used for "Semantic Search". Must be a text embedding model (e.g., Nomic,
+                        Bert).</p>
+                </div>
+
+                <div style="margin-top: 2rem;">
+                    <button id="saveConfigBtn" class="save-btn">Save Changes</button>
+                    <span id="saveStatus" style="margin-left: 1rem; color: #4ade80; display: none;">Saved!</span>
+                </div>
+            </div>
+
+            <div class="settings-card">
+                <h2>Current Diagnostics</h2>
+                <pre id="diagnosticsOutput"
+                    style="background: rgba(0,0,0,0.2); padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem;">Loading...</pre>
+            </div>
+        </div>
+    </div>
+
+    <script src="settings.js"></script>
+</body>
+
+</html>

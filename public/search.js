@@ -23,8 +23,10 @@ const resultsCount = document.getElementById('resultsCount');
 const API_BASE_URL = 'http://localhost:3000';
 
 // State
-let allImages = [];
-let fuse = null;
+let allImages = []; // We keep a local copy for filtering date/scene types quickly if needed, or we rely on worker results.
+// Actually, worker sends back "results" (which are full objects from search-data.json). 
+// So we update this list based on search results.
+let searchWorker = null;
 let isInitialized = false;
 
 // State for pagination
@@ -36,8 +38,10 @@ let observer = null;
 const sentinel = document.getElementById('scroll-sentinel');
 
 // Toggle Label Update
+// Toggle Label Update
 const fuzzinessSlider = document.getElementById('fuzzinessSlider');
 const fuzzinessValue = document.getElementById('fuzzinessValue');
+const semanticToggle = document.getElementById('semanticToggle');
 
 // Scope Elements
 const scopeAnalysis = document.getElementById('scopeAnalysis');
@@ -54,30 +58,54 @@ fuzzinessSlider.addEventListener('input', () => {
 
 // Update Search on Slider Change
 fuzzinessSlider.addEventListener('change', () => {
-    // Re-initialize Fuse with new threshold
-    initFuse(parseFloat(fuzzinessSlider.value));
-    performSearch();
+    if (semanticToggle && semanticToggle.checked) return; // Ignore if semantic is on
+
+    if (searchWorker) {
+        searchWorker.postMessage({
+            type: 'UPDATE_CONFIG',
+            payload: { fuzziness: parseFloat(fuzzinessSlider.value) }
+        });
+        performSearch();
+    }
 });
 
 // Update Search on Scope Change
-[scopeAnalysis, scopeObjects, scopeTags, sortOrder, negativeQuery].forEach(el => {
+[scopeAnalysis, scopeObjects, scopeTags, sortOrder, negativeQuery, semanticToggle].forEach(el => {
     if (el) {
-        el.addEventListener('change', () => { // Or 'input' for realtime? Stick to change/enter for now or input with debounce. The user didn't specify. 'change' + Enter keydown is standard.
-            // Actually, for text inputs, 'input' is often better but expensive. 'change' only fires on blur.
-            // Let's rely on Enter key for text inputs mainly, but `change` is safe.
-            // Wait, `negativeQuery` should behave like `searchQuery`.
-            if (el === sortOrder) {
+        el.addEventListener('change', () => {
+            if (el === semanticToggle) {
+                toggleSearchModeUI();
                 performSearch();
-            } else if (el === negativeQuery) {
-                // handled by explicit listener usually, but here is fine too.
+            } else if (el === sortOrder || el === negativeQuery) {
                 performSearch();
             } else {
-                initFuse(parseFloat(fuzzinessSlider.value));
-                performSearch();
+                if (semanticToggle && !semanticToggle.checked) {
+                    performSearch();
+                }
             }
         });
     }
 });
+
+function toggleSearchModeUI() {
+    const isSemantic = semanticToggle.checked;
+
+    // Disable/Dim Fuzziness & Scope (Not used in Semantic)
+    fuzzinessSlider.disabled = isSemantic;
+    scopeAnalysis.disabled = isSemantic;
+    scopeObjects.disabled = isSemantic;
+    scopeTags.disabled = isSemantic;
+
+    // Visual feedback
+    const opacity = isSemantic ? '0.5' : '1';
+    document.querySelector('.fuzziness-container').style.opacity = opacity;
+    document.querySelector('.scope-container').style.opacity = opacity;
+
+    // Force Sort to Relevance if Semantic turned on
+    if (isSemantic) {
+        sortOrder.value = 'relevance';
+    }
+}
 
 // Allow Enter key in negative query
 if (negativeQuery) {
@@ -86,145 +114,100 @@ if (negativeQuery) {
     });
 }
 
-function initFuse(threshold = 0.2) {
-    const keys = [{ name: 'filename', weight: 1 }];
-
-    if (scopeAnalysis && scopeAnalysis.checked) {
-        keys.push({ name: 'analysis.summary', weight: 1 });
-    }
-    if (scopeObjects && scopeObjects.checked) {
-        keys.push({ name: 'analysis.objects', weight: 2 });
-    }
-    if (scopeTags && scopeTags.checked) {
-        keys.push({ name: 'analysis.tags', weight: 2 });
-    }
-
-    const options = {
-        includeScore: true,
-        threshold: threshold,
-        ignoreLocation: true,
-        keys: keys
-    };
-
-    // Store original index for Fuse (to preserve original array order for Date sorting)
-    const indexedImages = allImages.map(img => ({ ...img, analysis: img.analysis || {} }));
-    fuse = new Fuse(indexedImages, options);
-}
-
-
-
 /**
- * Initializes the search page.
- * - Fetches all image data from the server.
- * - Prepares the data for Fuse.js indexing.
- * - Sets up the initial fuzzy search index.
- * - Triggers an initial empty search to populate the view.
+ * Initializes the search page using Web Worker.
  */
-async function initSearch() {
+function initSearch() {
     if (isInitialized) return;
 
-    try {
-        searchBtn.disabled = true;
-        searchBtn.textContent = 'Loading Index...';
-
-        const imagesRes = await fetch(`${API_BASE_URL}/images?t=${Date.now()}`);
-        const imagesData = await imagesRes.json();
-        const imagesList = Array.isArray(imagesData) ? imagesData : imagesData.images;
-
-        allImages = imagesList.map(img => {
-            if (typeof img.analysis === 'string') {
-                try { img.analysis = JSON.parse(img.analysis || '{}'); } catch (e) { img.analysis = {}; }
-            }
-            return img;
-        });
-
-        // Initial Fuse Setup
-        initFuse(parseFloat(fuzzinessSlider.value)); // Use slider default
-
-
-
-
-        isInitialized = true;
-
-        // Initial search to populate list
-        performSearch();
-
-    } catch (error) {
-        console.error('Failed to initialize search:', error);
-        searchResults.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: var(--text-secondary);">Failed to load search index.</div>';
-    } finally {
-        searchBtn.disabled = false;
-        searchBtn.textContent = 'Search Images';
-    }
-}
-
-async function refreshData() {
-    try {
-        const res = await fetch(`${API_BASE_URL}/images?t=${Date.now()}`);
-        const data = await res.json();
-
-        const imagesList = Array.isArray(data) ? data : data.images;
-
-        allImages = imagesList.map(img => {
-            if (typeof img.analysis === 'string') {
-                try { img.analysis = JSON.parse(img.analysis || '{}'); } catch (e) { img.analysis = {}; }
-            }
-            return img;
-        });
-
-        if (fuse) {
-            initFuse(parseFloat(fuzzinessSlider.value));
-        }
-
-        performSearch();
-    } catch (e) {
-        console.error('Failed to refresh data:', e);
-    }
-}
-
-
-/**
- * Executes a search based on current input and filters.
- * 1. Performs fuzzy search via Fuse.js (if query exists).
- * 2. Filters results by Scene Type and Date Range.
- * 3. Sorts results by `updated_at`.
- * 4. Resets pagination and triggers `renderBatch`.
- */
-function performSearch() {
-    if (!isInitialized) return;
-
-    console.log('[DEBUG] performSearch called, query:', searchQuery.value);
-
     searchBtn.disabled = true;
-    searchBtn.textContent = 'Searching...';
+    searchBtn.textContent = 'Loading Index...';
 
-    let queryText = searchQuery.value.trim();
-    let negQueryText = negativeQuery ? negativeQuery.value.trim() : ''; // Get negative query
+    // Initialize Worker
+    searchWorker = new Worker('search-worker.js');
+
+    searchWorker.onmessage = function (e) {
+        const { type, payload } = e.data;
+
+        switch (type) {
+            case 'READY':
+                console.log(`[MAIN] Worker Ready. Total items: ${payload.count}. Embeddings: ${payload.hasEmbeddings}`);
+                isInitialized = true;
+                searchBtn.disabled = false;
+                searchBtn.textContent = 'Search Images';
+
+                if (!payload.hasEmbeddings && semanticToggle) {
+                    semanticToggle.disabled = true;
+                    semanticToggle.closest('.filter-group').title = "No embeddings found. Run 'generate_embeddings.js' on server.";
+                    // Disable it visually too if possible, but the attribute is enough
+                }
+                break;
+
+            case 'RESULTS':
+                handleWorkerResults(payload.results);
+                break;
+
+            case 'ERROR':
+                console.error('[MAIN] Worker Error:', payload);
+                searchResults.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: var(--text-secondary);">Failed to load search index.</div>';
+                searchBtn.disabled = false;
+                searchBtn.textContent = 'Retry';
+                break;
+        }
+    };
+
+    // Start Worker Init
+    searchWorker.postMessage({
+        type: 'INIT',
+        payload: { fuzziness: parseFloat(fuzzinessSlider.value) }
+    });
+}
+
+function handleWorkerResults(results) {
+    // This function receives the "text match" results from the worker.
+    // We still need to apply Client-Side filters (Date, Scene Type, Negative) here 
+    // because sending those complex filters to worker is tricky (e.g. date parsing logic).
+    // It's efficient enough to filter 5000 items in main thread if the heavy Fuse search is done.
+
+    // 1. Store Search Matches
+    let finalResults = results; // These are the Fuse matches (or all items if no query)
+
+    // 2. Client-Side Filtering (Negative, Scene, Date, Sort)
+    // We reuse the logic from performSearch but applied here
+    finalResults = applyClientFilters(finalResults);
+
+    // 3. Render
+    window.currentSearchResults = finalResults;
+    filteredImages = finalResults;
+    currentIndex = 0;
+    searchResults.innerHTML = '';
+
+    resultsCount.textContent = `Found ${finalResults.length} results`;
+    searchBtn.disabled = false;
+    searchBtn.textContent = 'Search Images';
+
+    if (finalResults.length === 0) {
+        searchResults.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 2rem; color: var(--text-secondary);">No images found matching your criteria.</div>';
+    } else {
+        setupIntersectionObserver();
+        renderBatch();
+    }
+}
+
+function applyClientFilters(dataSet) {
+    const negQueryText = negativeQuery ? negativeQuery.value.trim() : '';
     const typeFilter = sceneType.value;
     const startFilter = startDate.value;
     const endFilter = endDate.value;
     const currentSort = sortOrder ? sortOrder.value : 'newest';
+    const queryText = searchQuery.value.trim();
+    const isSemantic = semanticToggle && semanticToggle.checked;
 
-    // Negative Search: Extract terms from separate input
     const negativeTerms = negQueryText ? negQueryText.toLowerCase().split(/\s+/).filter(t => t.length > 0) : [];
 
-    let results = [];
-
-    // 1. Fuse.js Search (if query exists)
-    if (queryText && fuse) {
-        console.log('[DEBUG] Searching Fuse for:', queryText);
-        const fuseResults = fuse.search(queryText);
-        console.log('[DEBUG] Fuse found:', fuseResults.length, 'matches');
-        results = fuseResults.map(res => res.item);
-    } else {
-        // If no query, show everything
-        results = [...allImages];
-    }
-
-    // 1.5 Negative Terms Filter
-    if (negativeTerms.length > 0) {
-        results = results.filter(img => {
-            // Check common fields
+    let results = dataSet.filter(img => {
+        // Negative Filter
+        if (negativeTerms.length > 0) {
             const analysis = img.analysis || {};
             const textContent = [
                 img.filename,
@@ -234,21 +217,18 @@ function performSearch() {
                 analysis.scene_type
             ].join(' ').toLowerCase();
 
-            return !negativeTerms.some(term => textContent.includes(term));
-        });
-    }
+            if (negativeTerms.some(term => textContent.includes(term))) return false;
+        }
 
-    // 2. Apply Filters (Client-Side)
-    results = results.filter(img => {
+        // Scene Type
         if (typeFilter !== 'all') {
-            const scene = img.analysis.scene_type || '';
+            const scene = (img.analysis && img.analysis.scene_type) || '';
             if (scene.toLowerCase() !== typeFilter.toLowerCase()) return false;
         }
 
+        // Date Range
         const imgDate = new Date(img.created_at);
-        if (startFilter) {
-            if (imgDate < new Date(startFilter)) return false;
-        }
+        if (startFilter && imgDate < new Date(startFilter)) return false;
         if (endFilter) {
             const end = new Date(endFilter);
             end.setHours(23, 59, 59);
@@ -258,11 +238,14 @@ function performSearch() {
         return true;
     });
 
-    // 2.5 Sort Results
+    // Sort
     results.sort((a, b) => {
-        // Relevance Check: If we searched (queryText exists) AND sort is 'relevance', keep Fuse order
+        // Relevance Check: simple heuristic - if we have a query, trust Worker/Fuse order (which returns by score)
+        // UNLESS user explicitly wants Date.
+        // Worker returns results sorted by score if query exists.
+
         if (currentSort === 'relevance' && queryText) {
-            return 0; // Fuse already provided relevance order
+            return 0; // Keep current order (Worker provided score)
         }
 
         const dateA = new Date(a.created_at || 0).getTime();
@@ -273,31 +256,71 @@ function performSearch() {
         if (currentSort === 'oldest') {
             return dateA - dateB;
         } else if (currentSort === 'relevance') {
-            // Fallback for relevance if no query: Use Newest
-            return updateB - updateA;
+            return updateB - updateA; // Fallback to newest
         } else {
-            // Default: Newest
-            return updateB - updateA;
+            return updateB - updateA; // Newest
         }
     });
 
-    // 3. Reset Pagination and Display
-    window.currentSearchResults = results; // Store for tag updates
-    filteredImages = results;
-    currentIndex = 0;
-    searchResults.innerHTML = '';
+    return results;
+}
 
-    resultsCount.textContent = `Found ${results.length} results`;
+async function performSearch() {
+    if (!isInitialized || !searchWorker) return;
 
-    if (results.length === 0) {
-        searchResults.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 2rem; color: var(--text-secondary);">No images found matching your criteria.</div>';
+    searchBtn.disabled = true;
+    searchBtn.innerHTML = '<div class="spinner"></div> Searching...';
+
+    const queryText = searchQuery.value.trim();
+    const isSemantic = semanticToggle && semanticToggle.checked;
+
+    if (isSemantic && queryText) {
+        // SEMANTIC MODE
+        try {
+            // 1. Get embedding for query from Server > LM Studio
+            searchBtn.textContent = 'Embedding...';
+            const res = await fetch('/api/embed', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: queryText })
+            });
+
+            if (!res.ok) throw new Error('Failed to get embedding');
+            const data = await res.json();
+
+            // 2. Send vector to worker
+            searchBtn.textContent = 'Comparing...';
+            searchWorker.postMessage({
+                type: 'SEMANTIC_SEARCH',
+                payload: { vector: data.embedding }
+            });
+
+        } catch (err) {
+            console.error('Semantic Search Failed:', err);
+            // Fallback? Or Alert?
+            alert('Semantic search failed: ' + err.message + '. Please ensure LM Studio is running.');
+            searchBtn.disabled = false;
+            searchBtn.textContent = 'Search Images';
+        }
+
     } else {
-        setupIntersectionObserver();
-        renderBatch();
+        // KEYWORD MODE (Default)
+        searchWorker.postMessage({
+            type: 'SEARCH',
+            payload: { query: queryText }
+        });
     }
+}
 
-    searchBtn.disabled = false;
-    searchBtn.textContent = 'Search Images';
+
+// Refresh Data (Simplistic implementation: just reload page or re-init worker?)
+// For now, re-init worker is safer to get fresh JSONs
+function refreshData() {
+    if (searchWorker) {
+        searchWorker.terminate();
+        isInitialized = false;
+        initSearch();
+    }
 }
 
 function setupIntersectionObserver() {
@@ -659,6 +682,56 @@ document.addEventListener('contextmenu', (e) => {
 
     hideContextMenu();
 });
+
+// Generate Embeddings Action
+const generateEmbeddingsBtn = document.getElementById('generateEmbeddingsBtn');
+const genProgress = document.getElementById('genProgress');
+
+if (generateEmbeddingsBtn) {
+    generateEmbeddingsBtn.addEventListener('click', async () => {
+        if (!confirm('This will generate embeddings for all images using LM Studio. This may take a while. Ensure LM Studio server is running with a TEXT EMBEDDING model loaded. Continue?')) {
+            return;
+        }
+
+        generateEmbeddingsBtn.disabled = true;
+        generateEmbeddingsBtn.textContent = 'Generating...';
+        if (genProgress) {
+            genProgress.style.display = 'block';
+            genProgress.textContent = 'Starting...';
+        }
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/maintenance/generate-embeddings`, { method: 'POST' });
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                const text = decoder.decode(value);
+                // Update UI with latest chunk
+                if (genProgress) {
+                    // Just show last 100 chars or accumulation logic?
+                    // Let's just append but limit length
+                    const current = genProgress.textContent;
+                    const combined = current + text;
+                    genProgress.textContent = combined.slice(-200); // Show trail
+                }
+            }
+
+            alert('Generation Complete!');
+            refreshData(); // Reload worker to pick up new file
+
+        } catch (err) {
+            console.error('Generation Error:', err);
+            alert('Error generating embeddings: ' + err.message);
+        } finally {
+            generateEmbeddingsBtn.disabled = false;
+            generateEmbeddingsBtn.textContent = 'Generate Data';
+            if (genProgress) setTimeout(() => genProgress.style.display = 'none', 5000);
+        }
+    });
+}
 
 // Rename Action
 const ctxRename = document.getElementById('ctxRename');

@@ -13,3 +13,6 @@ ls-data/
 !ls-data/custom_models.json
 
 public/search-index.json
+config.json
+public/search-data.json
+public/search-embeddings.json

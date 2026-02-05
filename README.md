@@ -14,9 +14,11 @@ An Electron-based desktop application that uses local AI (via LM Studio) to anal
 - **Customizable Prompts**: Choose from multiple analysis modes (Detailed, Cinematic, Video Summary) or define your own via `qwen_vl3_prompts.json`.
 - **ComfyUI Integration**: Automatically extracts and displays ComfyUI workflow and prompt data from PNG metadata.
 - **Improved Performance**: Infinite scroll and server-side pagination ensure fluid browsing even with thousands of images.
-- **Advanced Fuzzy Search**: Typos? No problem. Find images instantly with weighted fuzzy matching (Fuse.js).
+- **Semantic Search**: Go beyond keywords. Search for concepts ("peaceful morning", "cyberpunk vibe") using AI embeddings.
+- **Advanced Fuzzy Search**: Typos? No problem. Find images instantly with weighted fuzzy matching.
 - **Smart Filtering**: Filter search results by **Scene Type** (Indoor, Outdoor, Portrait, etc.) and **Date Range**.
 - **Batch Processing**: Select multiple images to analyze efficiently. Use **"Select Missing"** to target unanalyzed content.
+- **Configuration UI**: Easily manage your AI model preferences (Vision & Embeddings) directly from the new **Settings** page.
 - **Automated Database Repair**: Prune missing records, regenerate deleted thumbnails, and heal broken data.
 - **Inline Tag Management**: Edit, delete, and add tags directly from search results or the database browser via right-click.
 - **Robust Thumbnailing**: Efficient AVIF thumbnail generation with automatic background regeneration.
@@ -28,11 +30,13 @@ An Electron-based desktop application that uses local AI (via LM Studio) to anal
 ### Prerequisites
 
 1. **Node.js** (v18 or higher)
-2. **LM Studio** running locally with a vision-capable model (e.g., Qwen-VL, LLaVA)
+2. **LM Studio** running locally (Port 1234)
+   - **Vision Model**: (e.g., Qwen-VL, LLaVA) for analyzing images.
+   - **Embedding Model**: (e.g., Nomic Embed Text) for Semantic Search.
 3. **Python 3.12+** (Optional, for Latent Scope integration)
 
 > **Why LM Studio?**  
-> LM Studio makes it easy to run the latest AI vision-to-text models locally. New models can be downloaded and swapped in without changing any code—just load a compatible vision model and start analyzing!
+> LM Studio makes it easy to run the latest AI models locally. Lumina connects to it automatically.
 
 ### Installation
 
@@ -46,9 +50,6 @@ npm install
 
 # Setup Latent Scope (Python venv)   <<<<<<<   Optional  for latent Scope  >>>>>>>
 npm run ls:setup
-
-# Create a .env file (optional)
-echo "LM_STUDIO_URL=http://localhost:1234/v1/chat/completions" > .env
 ```
 
 ### Running the App
@@ -64,11 +65,17 @@ npm run dev
 npm run ls:serve
 ```
 
-> **Note**: Make sure LM Studio is running on port 1234 with a vision model loaded before starting analysis.
+> **Note**: Start LM Studio (Port 1234) *before* asking Lumina to analyze or embed images.
 
 ---
 
 ## 📖 Usage
+
+### Configuration (New!)
+Navigate to the **Settings ⚙️** page to select your AI models.
+- **Vision Model**: Used for analyzing text descriptions from images.
+- **Embedding Model**: Used for enabling "Semantic Search" capabilities.
+- *Selections are saved locally and persist across restarts.*
 
 ### Analyzing Single Images
 
@@ -85,9 +92,6 @@ npm run ls:serve
 
 ### Viewing the Database
 
-1. Navigate to the **Database** page via the sidebar.
-2. Browse all analyzed images with thumbnails.
-3. **Batch Actions**: Use the sidebar to select images and run batch analysis (e.g., "Select Missing" -> "Process").
 1.  Navigate to the **Database** page via the sidebar.
 2.  Browse all analyzed images with thumbnails.
 3.  **Batch Actions**: Use the sidebar to select images and run batch analysis (e.g., "Select Missing" -> "Process").
@@ -97,19 +101,24 @@ npm run ls:serve
 ### Searching
 
 1.  Navigate to the **Search** page.
-2.  **Text Search**: Enter keywords to search descriptions, objects, and tags. **Fuzzy search** handles typos.
-3.  **Fuzziness Control**: Use the slider to adjust search strictness.
+2.  **Semantic Search**: Toggle "Semantic Search" to find images by concept (requires Embeddings).
+    - If needed, click **"Generate Data"** to build embeddings for your library.
+3.  **Text Search**: Enter keywords to search descriptions, objects, and tags. **Fuzzy search** handles typos.
+4.  **Fuzziness Control**: Use the slider to adjust search strictness.
     -   **Exact (0.0)**: Use for precise keyword matching.
     -   **Loose (0.6)**: Use to find related terms or handle significant typos.
-4.  **Filters**:
+5.  **Filters**:
     -   **Scene Type**: Filter by Indoor, Outdoor, Portrait, Landscape, Urban, Nature.
     -   **Date Range**: Restrict results to a specific timeframe.
-5.  **Search Logic**: Toggle between **Match All (AND)** and **Match Any (OR)** logic.
-6.  **Inline Tag Management**: Right-click any tag/object to edit or delete it. Click `+` to add new tags (supports comma-separated multiple tags).
-7.  **Results**: Results are automatically sorted by **Most Recently Updated** first.
+6.  **Search Logic**: Toggle between **Match All (AND)** and **Match Any (OR)** logic.
+7.  **Inline Tag Management**: Right-click any tag/object to edit or delete it. Click `+` to add new tags (supports comma-separated multiple tags).
+8.  **Results**: Results are automatically sorted by **Most Recently Updated** first.
 
 ### Tags & Objects
 
+1. Navigate to the **Tags** page to see a frequency cloud of all extracted metadata.
+2. Click any tag to start a search for it.
+3. Use the **Discovery** tab to find related concepts.
 4. Sort by frequency or **alphabetical order** with A-Z navigation.
 
 ### Data Map (Latent Scope)
@@ -128,13 +137,17 @@ LM-AI-studio/
 ├── main.js                 # Electron main process
 ├── preload.cjs             # Electron preload script
 ├── server.js               # Express backend + SQLite database
-├── qwen_vl3_prompts.json  # Config file for custom AI analysis prompts
+├── qwen_vl3_prompts.json   # Config file for custom AI analysis prompts
+├── config.json             # (New) User preferences for models
 ├── public/
 │   ├── index.html          # Analysis page
 │   ├── database.html       # Database browser
 │   ├── search.html         # Search interface
+│   ├── settings.html       # (New) Configuration UI
 │   ├── app.js              # Main application logic
 │   ├── search.js           # Search page logic
+│   ├── search-worker.js    # (New) Worker for search & embeddings
+│   ├── settings.js         # (New) Settings logic
 │   ├── style.css           # Global styles
 │   └── thumbnails/         # Generated AVIF thumbnails
 ├── images.db               # SQLite database (auto-created)
@@ -145,10 +158,13 @@ LM-AI-studio/
 
 ## 🔧 Configuration
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LM_STUDIO_URL` | `http://localhost:1234/v1/chat/completions` | LM Studio API endpoint |
-| `PORT` | `3000` | Express server port |
+You can configure models via the **Settings UI** or by creating a `.env` file (advanced).
+
+| Variable | Description |
+|----------|-------------|
+| `VISION_MODEL_ID` | Override for the Image Analysis model ID |
+| `EMBEDDING_MODEL_ID` | Override for the Semantic Search model ID |
+| `LM_STUDIO_URL` | Base URL for LM Studio (default: localhost:1234) |
 
 **Customizing Prompts**: Modify `qwen_vl3_prompts.json` to add or edit the analysis strategies available in the dropdown menu.
 

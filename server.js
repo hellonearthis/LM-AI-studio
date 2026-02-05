@@ -170,11 +170,14 @@ console.log('[DB] Database initialized');
 // ============================================================================
 // SEARCH INDEX GENERATION
 // ============================================================================
+// ============================================================================
+// SEARCH INDEX GENERATION
+// ============================================================================
 function generateSearchIndex() {
-    console.log('[INDEX] Generating search index...');
+    console.log('[INDEX] Generating search index and data...');
     try {
         // Fetch all images for indexing (Must match /images sort order)
-        const sql = `SELECT * FROM images ORDER BY COALESCE(updated_at, created_at) DESC`;
+        const sql = `SELECT id, filename, path, analysis, width, height, size, created_at, updated_at FROM images ORDER BY COALESCE(updated_at, created_at) DESC`;
         const images = db.prepare(sql).all();
 
         // Pre-process data for indexing (parse JSON strings)
@@ -190,7 +193,7 @@ function generateSearchIndex() {
             };
         });
 
-        // Create Index
+        // 1. Create Fuse Index
         // Keys must match client-side expected keys
         const index = Fuse.createIndex(
             [
@@ -202,11 +205,18 @@ function generateSearchIndex() {
             indexData
         );
 
-        // Serialize and Save
-        const outputPath = path.join(__dirname, 'public', 'search-index.json');
-        fs.writeFileSync(outputPath, JSON.stringify(index.toJSON()));
+        // 2. Save Index (The structure)
+        const indexOutputPath = path.join(__dirname, 'public', 'search-index.json');
+        fs.writeFileSync(indexOutputPath, JSON.stringify(index.toJSON()));
+
+        // 3. Save Data (The content - Lightweight, no 'metadata' column)
+        const dataOutputPath = path.join(__dirname, 'public', 'search-data.json');
+        fs.writeFileSync(dataOutputPath, JSON.stringify(indexData));
 
         console.log(`[INDEX] Generated successfully (${images.length} items)`);
+        console.log(`[INDEX] Index saved to: ${indexOutputPath}`);
+        console.log(`[INDEX] Data saved to: ${dataOutputPath}`);
+
     } catch (err) {
         console.error('[INDEX] Generation failed:', err);
     }
@@ -1189,8 +1199,28 @@ app.post('/validate-database', async (req, res) => {
                             .toBuffer();
                         const imageData = `data:image/jpeg;base64,${standardizedBuffer.toString('base64')}`;
 
+                        // Dynamically find vision model (or use Config/ENV override)
+                        const config = getConfig();
+                        let analysisModel = config.visionModel || process.env.VISION_MODEL_ID || "qwen2.5-vl-7b-instruct";
+
+                        // Only auto-detect if NOT configured
+                        if (!config.visionModel && !process.env.VISION_MODEL_ID) {
+                            try {
+                                const mRes = await fetch('http://127.0.0.1:1234/v1/models');
+                                if (mRes.ok) {
+                                    const mData = await mRes.json();
+                                    // Look for common vision model identifiers
+                                    const vModel = mData.data.find(m => {
+                                        const id = m.id.toLowerCase();
+                                        return (id.includes('vl') || id.includes('vision') || id.includes('xc') || id.includes('llava')) && !id.includes('embed');
+                                    });
+                                    if (vModel) analysisModel = vModel.id;
+                                }
+                            } catch (e) { /* ignore */ }
+                        }
+
                         const payload = {
-                            model: "qwen2.5-vl-7b-instruct",
+                            model: analysisModel,
                             messages: [
                                 {
                                     role: "system",
@@ -1304,6 +1334,67 @@ app.post('/regenerate-thumbnail', async (req, res) => {
     }
 });
 
+// Semantic Search Embedding Proxy
+// Proxies client request to LM Studio to get vector for query
+app.post('/api/embed', async (req, res) => {
+    const { text } = req.body;
+    if (!text) return res.status(400).json({ error: 'Text is required' });
+
+    try {
+        // Use the same base but different endpoint
+        // Existing LM_STUDIO_URL is likely 'http://127.0.0.1:1234/v1/chat/completions' or similar BASE
+        // Let's assume standard local URL for now or parse from existing.
+        // If LM_STUDIO_URL is 'http://localhost:1234/v1/chat/completions', we want 'http://localhost:1234/v1/embeddings'
+
+        // Fetch model ID dynamically
+        const config = getConfig();
+        let modelId = config.embeddingModel || process.env.EMBEDDING_MODEL_ID || 'local-model';
+
+        if (!config.embeddingModel && !process.env.EMBEDDING_MODEL_ID) {
+            try {
+                // Quick fetch to get current model
+                const modelsRes = await fetch('http://127.0.0.1:1234/v1/models');
+                if (modelsRes.ok) {
+                    const modelsData = await modelsRes.json();
+                    if (modelsData.data && modelsData.data.length > 0) {
+                        const embeddingModel = modelsData.data.find(m => m.id.toLowerCase().includes('embed'));
+                        modelId = embeddingModel ? embeddingModel.id : modelsData.data[0].id;
+                    }
+                }
+            } catch (e) {
+                console.warn('[EMBED] Failed to fetch model list, using fallback.');
+            }
+        }
+
+        const embedUrl = 'http://127.0.0.1:1234/v1/embeddings';
+
+        const response = await fetch(embedUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                input: text,
+                model: modelId
+            })
+        });
+
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`LM Studio Error: ${response.status} ${errText}`);
+        }
+
+        const data = await response.json();
+        if (data.data && data.data[0] && data.data[0].embedding) {
+            res.json({ embedding: data.data[0].embedding });
+        } else {
+            throw new Error('Invalid response format from LM Studio');
+        }
+
+    } catch (err) {
+        console.error('[EMBED] Proxy Error:', err.message);
+        res.status(500).json({ error: 'Failed to generate embedding', details: err.message });
+    }
+});
+
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
@@ -1322,8 +1413,259 @@ function deduplicateTags(analysis) {
 }
 
 // ============================================================================
+// CONFIGURATION & SETTINGS
+// ============================================================================
+const CONFIG_PATH = path.join(__dirname, 'config.json');
+
+function getConfig() {
+    if (fs.existsSync(CONFIG_PATH)) {
+        try {
+            return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+        } catch (e) { return {}; }
+    }
+    return {};
+}
+
+app.get('/api/config', (req, res) => {
+    res.json(getConfig());
+});
+
+app.post('/api/config', (req, res) => {
+    try {
+        const newConfig = req.body;
+        // Merge with existing or overwrite? Simple overwrite is fine for now.
+        fs.writeFileSync(CONFIG_PATH, JSON.stringify(newConfig, null, 2));
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to save config' });
+    }
+});
+
+app.get('/api/proxy/models', async (req, res) => {
+    try {
+        const response = await fetch('http://127.0.0.1:1234/v1/models');
+        if (!response.ok) throw new Error('LM Studio Error');
+        const data = await response.json();
+        res.json(data);
+    } catch (e) {
+        res.status(502).json({ error: 'Failed to fetch models from LM Studio' });
+    }
+});
+
+app.get('/api/diagnostics', async (req, res) => {
+    const config = getConfig();
+    let visionSource = 'Auto-detect';
+    let visionId = 'Unknown (will detect on demand)';
+    let embedSource = 'Auto-detect';
+    let embedId = 'Unknown (will detect on demand)';
+
+    // Simulate Vision Logic
+    if (config.visionModel) {
+        visionSource = 'Settings (config.json)';
+        visionId = config.visionModel;
+    } else if (process.env.VISION_MODEL_ID) {
+        visionSource = 'Environment Variable (.env)';
+        visionId = process.env.VISION_MODEL_ID;
+    } else {
+        // Try fetch
+        try {
+            const mRes = await fetch('http://127.0.0.1:1234/v1/models');
+            if (mRes.ok) {
+                const mData = await mRes.json();
+                const vModel = mData.data.find(m => {
+                    const id = m.id.toLowerCase();
+                    return (id.includes('vl') || id.includes('vision') || id.includes('xc') || id.includes('llava')) && !id.includes('embed');
+                });
+                if (vModel) visionId = vModel.id;
+            }
+        } catch (e) { visionId = 'LM Studio Unreachable'; }
+    }
+
+    // Simulate Embed Logic
+    if (config.embeddingModel) {
+        embedSource = 'Settings (config.json)';
+        embedId = config.embeddingModel;
+    } else if (process.env.EMBEDDING_MODEL_ID) {
+        embedSource = 'Environment Variable (.env)';
+        embedId = process.env.EMBEDDING_MODEL_ID;
+    } else {
+        // Try fetch
+        try {
+            const mRes = await fetch('http://127.0.0.1:1234/v1/models');
+            if (mRes.ok) {
+                const mData = await mRes.json();
+                const eModel = mData.data.find(m => m.id.toLowerCase().includes('embed'));
+                if (eModel) embedId = eModel.id;
+                else if (mData.data.length > 0) embedId = mData.data[0].id + " (Fallback)";
+            }
+        } catch (e) { embedId = 'LM Studio Unreachable'; }
+    }
+
+    const report = `
+SYSTEM DIAGNOSTICS
+------------------
+Vision Model:    ${visionId}
+Source:          ${visionSource}
+
+Embedding Model: ${embedId}
+Source:          ${embedSource}
+
+Config Path:     ${CONFIG_PATH}
+    `;
+    res.send(report.trim());
+});
+
+// ============================================================================
 // MAINTENANCE ENDPOINTS
 // ============================================================================
+// Generate Embeddings (Streaming)
+app.post('/maintenance/generate-embeddings', async (req, res) => {
+    console.log('[MAINTENANCE] Generating embeddings...');
+
+    // Set headers for long-running streaming response
+    res.setHeader('Content-Type', 'text/plain');
+    res.setHeader('Transfer-Encoding', 'chunked');
+
+    try {
+        const images = db.prepare(`SELECT id, filename, analysis FROM images WHERE analysis IS NOT NULL AND analysis != '{}'`).all();
+        const msgFound = `Found ${images.length} images with analysis.\n`;
+        res.write(msgFound);
+        console.log(msgFound.trim());
+
+        const OUTPUT_PATH = path.join(__dirname, 'public', 'search-embeddings.json');
+
+        let embeddingMap = {};
+        if (fs.existsSync(OUTPUT_PATH)) {
+            try {
+                embeddingMap = JSON.parse(fs.readFileSync(OUTPUT_PATH, 'utf8'));
+                res.write(`Loaded ${Object.keys(embeddingMap).length} existing embeddings.\n`);
+            } catch (e) {
+                res.write('Starting fresh (invalid existing file).\n');
+            }
+        }
+
+        // Fetch Model ID
+        const config = getConfig();
+        let modelId = config.embeddingModel || process.env.EMBEDDING_MODEL_ID || 'local-model';
+
+        if (config.embeddingModel || process.env.EMBEDDING_MODEL_ID) {
+            const msgModel = `Using Configured Embedding Model: ${modelId}\n`;
+            res.write(msgModel);
+            console.log(msgModel.trim());
+        } else {
+            try {
+                const modelsRes = await fetch('http://127.0.0.1:1234/v1/models');
+                if (modelsRes.ok) {
+                    const modelsData = await modelsRes.json();
+                    if (modelsData.data && modelsData.data.length > 0) {
+                        // Smart Selection: Prefer models with "embed" in the name
+                        const embeddingModel = modelsData.data.find(m => m.id.toLowerCase().includes('embed'));
+                        if (embeddingModel) {
+                            modelId = embeddingModel.id;
+                            const msgModel = `Using Dedicated Embedding Model: ${modelId}\n`;
+                            res.write(msgModel);
+                            console.log(msgModel.trim());
+                        } else {
+                            modelId = modelsData.data[0].id;
+                            const msgModel = `Warning: No model with 'embed' found. Using first available: ${modelId}\n`;
+                            res.write(msgModel);
+                            console.log(msgModel.trim());
+                        }
+                    }
+                }
+            } catch (e) {
+                res.write('Warning: Could not check models. Using default ID.\n');
+                console.warn('Warning: Could not check models. Using default ID.');
+            }
+        }
+
+        let newCount = 0;
+        let skipCount = 0;
+        let errorCount = 0;
+
+        for (const img of images) {
+            // Check cancellation (if connection closed)
+            if (res.writableEnded || res.closed) {
+                console.log('[MAINTENANCE] Connection closed by client.');
+                break;
+            }
+
+            if (embeddingMap[img.id]) {
+                skipCount++;
+                if (skipCount % 100 === 0) process.stdout.write('.'); // Use process.stdout.write for dots
+                continue;
+            }
+
+            // Parse Analysis
+            let analysis = {};
+            try {
+                analysis = typeof img.analysis === 'string' ? JSON.parse(img.analysis) : img.analysis;
+            } catch (e) { continue; }
+
+            // Construct Text
+            const textParts = [];
+            if (analysis.summary) textParts.push(`Description: ${analysis.summary}`);
+            if (analysis.scene_type) textParts.push(`Scene Type: ${analysis.scene_type}`);
+            if (analysis.objects && analysis.objects.length > 0) textParts.push(`Objects: ${analysis.objects.join(', ')}`);
+            if (analysis.tags && analysis.tags.length > 0) textParts.push(`Tags: ${analysis.tags.join(', ')}`);
+
+            const inputText = textParts.join('. ');
+            if (!inputText) continue;
+
+            try {
+                const response = await fetch('http://127.0.0.1:1234/v1/embeddings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        input: inputText,
+                        model: modelId
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.data && data.data[0] && data.data[0].embedding) {
+                        embeddingMap[img.id] = data.data[0].embedding;
+                        newCount++;
+                        res.write('+'); // Success dot
+                        if (newCount % 10 === 0) console.log(`[EMBED] Generated ${newCount}...`);
+                    } else {
+                        errorCount++;
+                        res.write('x');
+                        console.log(`[EMBED] Invalid format for ${img.id}`);
+                    }
+                } else {
+                    errorCount++;
+                    res.write('E'); // Error
+                    const errText = await response.text();
+                    console.error(`[EMBED] API Error for ${img.id}: ${response.status} ${errText}`);
+                }
+
+            } catch (err) {
+                errorCount++;
+                res.write('!');
+                console.error(`[EMBED] Fetch Error for ${img.id}:`, err.message);
+            }
+
+            // Save periodically
+            if (newCount % 20 === 0 && newCount > 0) {
+                fs.writeFileSync(OUTPUT_PATH, JSON.stringify(embeddingMap));
+                console.log(`[EMBED] Autosaved ${newCount} embeddings.`);
+            }
+        }
+
+        // Final Save
+        fs.writeFileSync(OUTPUT_PATH, JSON.stringify(embeddingMap));
+        res.write(`\n\nDone. Added: ${newCount}, Skipped: ${skipCount}, Errors: ${errorCount}\n`);
+        res.end();
+
+    } catch (err) {
+        console.error('[MAINTENANCE] Embed Generation Error:', err);
+        res.write(`\nError: ${err.message}\n`);
+        res.end();
+    }
+});
+
 app.post('/maintenance/deduplicate-tags', (req, res) => {
     console.log('[MAINTENANCE] Starting tag deduplication...');
     try {

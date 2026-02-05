@@ -34,6 +34,9 @@
                 <span class="nav-icon">🗺️</span> Map <span
                     style="font-size: 0.7em; opacity: 0.7; margin-left: 5px;">(β)</span>
             </a>
+            <a href="settings.html" class="nav-item">
+                <span class="nav-icon">⚙️</span> Settings
+            </a>
         </div>
 
         <!-- Sidebar Controls (Migrated from Database) -->
@@ -149,6 +152,32 @@
                                 </div>
                             </div>
 
+                            <!-- Search Mode -->
+                            <div class="filter-group">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <label class="filter-label" style="margin: 0;">Search Mode</label>
+                                    <button id="generateEmbeddingsBtn" class="action-btn"
+                                        style="font-size: 0.7rem; padding: 0.2rem 0.6rem; height: auto;"
+                                        title="Generate embeddings from existing images">Generate Data</button>
+                                </div>
+                                <div class="mode-toggle-container"
+                                    style="display: flex; gap: 1rem; align-items: center; margin-top: 0.5rem;">
+                                    <label class="switch-label"
+                                        style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                                        <input type="checkbox" id="semanticToggle">
+                                        <span class="slider-round"></span>
+                                        <span style="font-size: 0.9rem; color: var(--text-primary);">Semantic
+                                            Search</span>
+                                    </label>
+                                </div>
+                                <p style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.25rem;">
+                                    Use AI to find concepts (e.g., "sad robot"). Requires offline embedding generation.
+                                </p>
+                                <div id="genProgress"
+                                    style="font-size: 0.7rem; color: var(--accent); margin-top: 0.25rem; white-space: pre-wrap; display: none;">
+                                </div>
+                            </div>
+
                             <!-- Search Scope -->
                             <div class="scope-container">
                                 <label class="scope-label">Search Scope:</label>
@@ -259,7 +288,7 @@
                     </div>
                 </div>
 
-                <script src="libs/fuse.min.js"></script>
+
                 <script src="search.js?v=2"></script>
 </body>
 
