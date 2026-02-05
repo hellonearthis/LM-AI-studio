@@ -173,7 +173,8 @@ async function processSingleFile(filePath, fileName, fileBuffer, base64Data) {
             file_hash: fileHash,
             metadata: {},
             analysis: {},
-            created_at: fileCreationDate
+            created_at: fileCreationDate,
+            size: fileStats.size
         });
 
         if (checkResult.duplicate) {
@@ -260,7 +261,8 @@ async function processSingleFile(filePath, fileName, fileBuffer, base64Data) {
             metadata: result.metadata,
             analysis: result.analysis,
             created_at: fileCreationDate,
-            mtime: fileStats.mtime
+            mtime: fileStats.mtime,
+            size: fileStats.size
         });
         console.log('[APP] Final Save Result:', finalSaveResult);
 
@@ -417,7 +419,8 @@ async function processBatch(files) {
                 metadata: analysisResult.metadata,
                 analysis: analysisResult.analysis,
                 created_at: fileCreationDate,
-                mtime: fileData.mtime
+                mtime: fileData.mtime,
+                size: fileData.size
             });
 
             if (saveResult.new) {

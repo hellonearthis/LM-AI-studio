@@ -1154,6 +1154,20 @@ app.post('/validate-database', async (req, res) => {
                 }
             }
 
+            // 5. Check for missing size
+            if (!img.size) {
+                try {
+                    const stats = fs.statSync(img.path);
+                    if (stats.size) {
+                        db.prepare('UPDATE images SET size = ? WHERE id = ?').run(stats.size, img.id);
+                        results.metadataRepaired = (results.metadataRepaired || 0) + 1;
+                        console.log(`[VALIDATE] Repaired size for ${img.filename}: ${stats.size}`);
+                    }
+                } catch (e) {
+                    console.warn(`[VALIDATE] Failed to get size for ${img.path}:`, e.message);
+                }
+            }
+
             // 3. Check for missing AI analysis data (ONLY if requested)
             if (reanalyze) {
                 let analysis = {};
