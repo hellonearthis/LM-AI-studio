@@ -297,8 +297,7 @@ async function performSearch() {
 
         } catch (err) {
             console.error('Semantic Search Failed:', err);
-            // Fallback? Or Alert?
-            alert('Semantic search failed: ' + err.message + '. Please ensure LM Studio is running.');
+            showAlertModal('Semantic search failed: ' + err.message + '. Please ensure LM Studio is running.', 'Search Error');
             searchBtn.disabled = false;
             searchBtn.textContent = 'Search Images';
         }
@@ -550,7 +549,7 @@ function showDeleteModal(id, fullPath, cardElement) {
     // Disk & DB
     modal.querySelector('#deleteDiskBtn').onclick = async () => {
         if (!window.electronAPI || !window.electronAPI.trashFile) {
-            alert('Error: Electron API not available for file operations.');
+            showAlertModal('Error: Electron API not available for file operations.', 'System Error');
             return;
         }
 
@@ -560,7 +559,7 @@ function showDeleteModal(id, fullPath, cardElement) {
             await deleteFromDatabase(id, cardElement);
         } catch (error) {
             console.error('Error deleting file from disk:', error);
-            alert(`Failed to delete file from computer: ${error.message}`);
+            showAlertModal(`Failed to delete file from computer: ${error.message}`, 'File Error');
             modal.remove();
         }
     };
@@ -587,11 +586,11 @@ async function deleteFromDatabase(id, cardElement) {
             const currentCount = parseInt(countText.match(/\d+/)[0]);
             resultsCount.textContent = `Found ${Math.max(0, currentCount - 1)} results`;
         } else {
-            alert('Failed to delete entry from database');
+            showAlertModal('Failed to delete entry from database', 'Database Error');
         }
     } catch (error) {
         console.error('Error deleting from DB:', error);
-        alert('Failed to delete entry from database: ' + error.message);
+        showAlertModal('Failed to delete entry from database: ' + error.message, 'Database Error');
     }
 }
 
@@ -689,47 +688,44 @@ const genProgress = document.getElementById('genProgress');
 
 if (generateEmbeddingsBtn) {
     generateEmbeddingsBtn.addEventListener('click', async () => {
-        if (!confirm('This will generate embeddings for all images using LM Studio. This may take a while. Ensure LM Studio server is running with a TEXT EMBEDDING model loaded. Continue?')) {
-            return;
-        }
+        showConfirmModal('This will generate embeddings for all images using LM Studio. This may take a while. Ensure LM Studio server is running with a TEXT EMBEDDING model loaded. Continue?', async () => {
 
-        generateEmbeddingsBtn.disabled = true;
-        generateEmbeddingsBtn.textContent = 'Generating...';
-        if (genProgress) {
-            genProgress.style.display = 'block';
-            genProgress.textContent = 'Starting...';
-        }
-
-        try {
-            const response = await fetch(`${API_BASE_URL}/maintenance/generate-embeddings`, { method: 'POST' });
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                const text = decoder.decode(value);
-                // Update UI with latest chunk
-                if (genProgress) {
-                    // Just show last 100 chars or accumulation logic?
-                    // Let's just append but limit length
-                    const current = genProgress.textContent;
-                    const combined = current + text;
-                    genProgress.textContent = combined.slice(-200); // Show trail
-                }
+            generateEmbeddingsBtn.disabled = true;
+            generateEmbeddingsBtn.textContent = 'Generating...';
+            if (genProgress) {
+                genProgress.style.display = 'block';
+                genProgress.textContent = 'Starting...';
             }
 
-            alert('Generation Complete!');
-            refreshData(); // Reload worker to pick up new file
+            try {
+                const response = await fetch(`${API_BASE_URL}/maintenance/generate-embeddings`, { method: 'POST' });
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
 
-        } catch (err) {
-            console.error('Generation Error:', err);
-            alert('Error generating embeddings: ' + err.message);
-        } finally {
-            generateEmbeddingsBtn.disabled = false;
-            generateEmbeddingsBtn.textContent = 'Generate Data';
-            if (genProgress) setTimeout(() => genProgress.style.display = 'none', 5000);
-        }
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    const text = decoder.decode(value);
+                    // Update UI with latest chunk
+                    if (genProgress) {
+                        const current = genProgress.textContent;
+                        const combined = current + text;
+                        genProgress.textContent = combined.slice(-200); // Show trail
+                    }
+                }
+
+                showAlertModal('Generation Complete!', 'Embeddings');
+                refreshData(); // Reload worker to pick up new file
+
+            } catch (err) {
+                console.error('Generation Error:', err);
+                showAlertModal('Error generating embeddings: ' + err.message, 'Generation Error');
+            } finally {
+                generateEmbeddingsBtn.disabled = false;
+                generateEmbeddingsBtn.textContent = 'Generate Data';
+                if (genProgress) setTimeout(() => genProgress.style.display = 'none', 5000);
+            }
+        }, 'Continue', 'var(--accent)');
     });
 }
 
@@ -747,7 +743,7 @@ if (ctxRename) {
 
             // Basic validation
             if (newName.match(/[<>:"\/\\|?*]/)) {
-                alert('Invalid characters in filename. Avoid: < > : " / \\ | ? *');
+                showAlertModal('Invalid characters in filename. Avoid: < > : " / \\ | ? *', 'Invalid Name');
                 return;
             }
 
@@ -781,7 +777,7 @@ if (ctxRename) {
                     }
                 }
             } catch (err) {
-                alert('Rename Error: ' + err.message);
+                showAlertModal('Rename Error: ' + err.message, 'Rename error');
             }
         });
     });
@@ -951,6 +947,51 @@ function showConfirmModal(message, onConfirm, confirmText = 'Delete', confirmCol
     document.addEventListener('keydown', keyHandler);
 }
 
+// Custom Alert Modal (Replaces native alert)
+function showAlertModal(message, title = 'Notification', onOk = null) {
+    const modal = document.createElement('div');
+    modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;';
+
+    modal.innerHTML = `
+        <div style="background: var(--card-bg); padding: 2rem; border-radius: 12px; border: 1px solid var(--border); max-width: 400px; width: 90%; text-align: center;">
+            <h3 style="margin: 0 0 1rem 0; color: var(--text-primary);">${title}</h3>
+            <p style="margin: 0 0 1.5rem 0; color: var(--text-primary); font-size: 1.1rem;">${message}</p>
+            <div style="display: flex; gap: 1rem; justify-content: center;">
+                <button id="okAlertBtn" style="background: var(--accent); border: none; color: white; padding: 0.5rem 1.5rem; border-radius: 6px; cursor: pointer; font-weight: 500;">OK</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const okBtn = modal.querySelector('#okAlertBtn');
+
+    setTimeout(() => {
+        okBtn.focus();
+    }, 10);
+
+    const cleanup = () => {
+        document.removeEventListener('keydown', keyHandler);
+        modal.remove();
+        if (onOk) onOk();
+    };
+
+    okBtn.onclick = cleanup;
+
+    modal.onclick = (e) => {
+        if (e.target === modal) cleanup();
+    };
+
+    const keyHandler = (e) => {
+        if (e.key === 'Enter' || e.key === 'Escape') {
+            e.preventDefault();
+            cleanup();
+        }
+    };
+
+    document.addEventListener('keydown', keyHandler);
+}
+
 // Update Tag Backend Call
 async function updateTag(id, type, oldTag, newTag, action) {
     try {
@@ -1017,7 +1058,7 @@ async function updateTag(id, type, oldTag, newTag, action) {
 
     } catch (error) {
         console.error('Tag update error:', error);
-        alert('Failed to update tags: ' + error.message);
+        showAlertModal('Failed to update tags: ' + error.message, 'Tag Update Error');
     }
 }
 
@@ -1071,10 +1112,30 @@ async function showImagePreview(imagePath) {
             console.error('Failed to load image:', imagePath);
             modal.remove();
             URL.revokeObjectURL(url);
-            alert('Failed to load image');
+            showAlertModal('Failed to load image', 'Preview Error');
         };
 
         modal.appendChild(img);
+
+        // Create hint element
+        const hint = document.createElement('div');
+        hint.textContent = 'PRESS ANY KEY or Click anywhere TO EXIT';
+        hint.style.cssText = `
+            position: absolute;
+            top: 2rem;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(255,255,255,0.5);
+            font-size: 0.9rem;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            pointer-events: none;
+            background: rgba(0,0,0,0.3);
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+        `;
+        modal.appendChild(hint);
+
         document.body.appendChild(modal);
 
         // Close on background click (and image click since we removed stopPropagation)
@@ -1094,7 +1155,7 @@ async function showImagePreview(imagePath) {
 
     } catch (error) {
         console.error('[IMAGE PREVIEW] Error loading image:', error);
-        alert(`Image File Not Found!\n\nPath: ${imagePath}\n\nThe file may have been moved or the path may be incorrect.`);
+        showAlertModal(`Image File Not Found!\n\nPath: ${imagePath}\n\nThe file may have been moved or the path may be incorrect.`, 'File Error');
     }
 }
 
@@ -1160,7 +1221,7 @@ async function regenerateThumbnail(id, cardElement) {
 
     } catch (error) {
         console.error('Thumbnail regeneration error:', error);
-        alert('Failed to regenerate thumbnail: ' + error.message);
+        showAlertModal('Failed to regenerate thumbnail: ' + error.message, 'Regeneration Error');
     } finally {
         const thumbImg = cardElement.querySelector('.thumbnail-preview');
         if (thumbImg) thumbImg.style.opacity = '1';
@@ -1205,7 +1266,7 @@ document.addEventListener("click", (e) => {
         window.electronAPI.showInFolder(fullPath);
     } else {
         console.warn('Electron API not available. File path:', fullPath);
-        alert('This feature requires Electron. File path: ' + fullPath);
+        showAlertModal('This feature requires Electron. File path: ' + fullPath, 'System Limitation');
     }
 });
 
@@ -1270,7 +1331,7 @@ if (selectMissingBtn) {
         });
 
         if (count > 0) updateProcessButton();
-        else alert('No visible images found with missing data.');
+        else showAlertModal('No visible images found with missing data.', 'Auto Selection');
     });
 }
 
@@ -1383,7 +1444,7 @@ if (validateBtn) {
                     if (validationStatus) validationStatus.style.display = 'none';
                 }, delay);
             } catch (e) {
-                alert('Check failed: ' + e.message);
+                showAlertModal('Check failed: ' + e.message, 'Integrity Check Error');
                 if (validationStatus) validationStatus.style.display = 'none';
             }
         }, 'Run Check', 'var(--accent)');

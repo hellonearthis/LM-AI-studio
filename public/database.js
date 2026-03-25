@@ -399,6 +399,26 @@ async function showImagePreview(imagePath) {
         // });
 
         modal.appendChild(img);
+
+        // Create hint element
+        const hint = document.createElement('div');
+        hint.textContent = 'PRESS ANY KEY or Click anywhere TO EXIT';
+        hint.style.cssText = `
+            position: absolute;
+            top: 2rem;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(255,255,255,0.5);
+            font-size: 0.9rem;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            pointer-events: none;
+            background: rgba(0,0,0,0.3);
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+        `;
+        modal.appendChild(hint);
+
         document.body.appendChild(modal);
 
         // Close on background click
