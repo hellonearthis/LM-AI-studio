@@ -2,6 +2,17 @@
 
 An Electron-based desktop application that uses local AI (via LM Studio) to analyze images, extract metadata, and build a searchable database of your visual content.
 
+## 🚀 Quick Start
+
+1.  **Launch LM Studio**: Ensure it's running on port `1234`.
+2.  **Install & Run**:
+    ```bash
+    npm install
+    npm start
+    ```
+3.  **Configure**: Go to **Settings ⚙️** and select your Vision and Embedding models.
+4.  **Analyze**: Click "Choose Image" or "Load Folder" to begin your AI-powered library.
+
 > **Ai Joke** 🤖  
 > Why did the neural network become an artist?  
 > Because it had so many *layers* to express!
@@ -21,9 +32,9 @@ An Electron-based desktop application that uses local AI (via LM Studio) to anal
 - **Configuration UI**: Easily manage your AI model preferences (Vision & Embeddings) directly from the new **Settings** page.
 - **Automated Database Repair**: Prune missing records, regenerate deleted thumbnails, and heal broken data.
 - **Inline Tag Management**: Edit, delete, and add tags directly from search results or the database browser via right-click.
-- **High-Performance Text Rendering**: Uses `@chenglou/pretext` for arithmetic-based text measurement, eliminating DOM reflows and layout shifts during infinite scroll.
-- **Robust Thumbnailing**: Efficient AVIF thumbnail generation with automatic background regeneration.
-- **Improved UI Layout**: Floating interactive elements (like the Copy button) positioned within flowing AI summary text for a cleaner, unified look.
+- **High-Performance Text Rendering**: Uses [`@chenglou/pretext`](https://github.com/chenglou/pretext) for arithmetic-based text measurement, eliminating DOM reflows and layout shifts during infinite scroll.
+- **Robust Thumbnailing**: Efficient **AVIF** thumbnail generation with automatic background regeneration for maximum visual fidelity and minimal file size.
+- **Improved UI Layout**: Floating interactive elements (like the **Copy button**) positioned within flowing AI summary text for a cleaner, unified look.
 
 ---
 

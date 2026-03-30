@@ -12,7 +12,8 @@ The Search page offers advanced capabilities to find specific images within your
 
 - **Semantic Search**:
   - **Toggle**: Enable "Semantic Search" to find images based on meaning and concepts (e.g., "sad robot") rather than just keywords.
-  - **Generate Data**: Create embeddings for your library to enable semantic search capabilities.
+  - **Generate Data**: Create embeddings for your library using LM Studio to enable semantic search capabilities.
+  - **Hybrid Engine**: Combines **Fuse.js** for fuzzy keyword matching with **Vector Embeddings** for conceptual search.
 
 - **Filters**:
   - **Scene Type**: Filter by categories such as Indoor, Outdoor, Portrait, Landscape, Urban, or Nature.

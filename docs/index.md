@@ -23,6 +23,10 @@ The Analysis page is the primary entry point for **Lumina - AI Image Analysis St
   - Real-time progress bar showing percentage completion.
   - Sidebar status indicators tracking processed, added, updated, existing, and error counts.
 
+- **Interactive Results**:
+  - **Floating Copy Button**: AI summaries feature an inline interactive "Copy" button that flows with the text for efficient access.
+  - **Inline Tag Management**: Edit or delete tags and objects directly by right-clicking on specific items.
+
 - **Results Display**:
   - **Preview**: Shows the currently analyzed image.
   - **Metadata**: Displays extracted file information.

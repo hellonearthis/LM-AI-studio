@@ -6,9 +6,9 @@ The Database page serves as the central hub for managing your collection of anal
 
 - **Image Grid**: Displays all analyzed images with thumbnails.
 - **Batch Actions**:
-  - **Select Missing**: Automatically selects images that are missing specific analysis data.
-  - **Process Selected**: triggers analysis for all currently selected items using the sidebar configuration.
-  - **Prompt Selection**: Choose the specific analysis type for batch processing.
+  - **Select Missing**: Dynamically identifies and selects images that lack AI analysis data.
+  - **Analyze Selected**: Batch processes all selected items using the current sidebar Configuration.
+  - **Prompt Override**: Choose a specific analysis strategy (e.g., "Detailed") to apply to the selection.
 
 - **Management Tools**:
   - **Integrity Check**: Scans the database for consistency and valid file paths.
@@ -16,7 +16,7 @@ The Database page serves as the central hub for managing your collection of anal
     - *Regenerate Thumbnail*: Re-create the thumbnail image.
     - *Edit Tag/Object*: Modify associated metadata.
     - *Delete Tag/Object*: Remove specific metadata.
-    - *Rename File*: Rename the physical file and update the database record.
+    - *Rename File*: Rename the physical file on your disk and automatically update the database entry in one step.
 
 - **Sidebar Information**:
   - Displays the total count of images in the database.

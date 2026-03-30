@@ -6,9 +6,9 @@ The Settings page allows you to configure the core behavior of the application, 
 
 - **LM Studio Integration**:
   - **Refresh Models**: Reloads the list of available models from the connected LM Studio instance.
-  - **Vision Model**: Select the specific model to use for image analysis and descriptions (e.g., Qwen-VL, Llava).
-  - **Embedding Model**: Select the model used for generating semantic embeddings (e.g., Nomic, Bert).
-  - **Auto-detect**: Both model selectors support an "Auto-detect" option for easier configuration.
+  - **Vision Model**: Choose the AI model used to "see" and describe your images (e.g., Qwen-VL, Llava).
+  - **Embedding Model**: Choose the model used to convert text and image concepts into vectors for "Semantic Search" (e.g., Nomic Embed).
+  - **Auto-detect**: Intelligent fallback that picks the best available model if no specific selection is made.
 
 - **Diagnostics**:
   - Displays current configuration and connection status for troubleshooting.
