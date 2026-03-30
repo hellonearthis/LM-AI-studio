@@ -18,25 +18,13 @@
             <div class="sidebar-subtitle">AI Image Analysis</div>
         </div>
         <div class="sidebar-nav">
-            <a href="index.html" class="nav-item">
-                <span class="nav-icon">✨</span> Analysis
-            </a>
-            <a href="database.html" class="nav-item active">
-                <span class="nav-icon">🗄️</span> Database
-            </a>
-            <a href="search.html" class="nav-item">
-                <span class="nav-icon">🔍</span> Search
-            </a>
-            <a href="tags.html" class="nav-item">
-                <span class="nav-icon">🏷️</span> Tags
-            </a>
-            <a href="scope.html" class="nav-item">
-                <span class="nav-icon">🗺️</span> Map <span
-                    style="font-size: 0.7em; opacity: 0.7; margin-left: 5px;">(β)</span>
-            </a>
-            <a href="settings.html" class="nav-item">
-                <span class="nav-icon">⚙️</span> Settings
-            </a>
+            <a href="index.html" class="nav-item"><span class="nav-icon">✨</span> Analysis</a>
+            <a href="database.html" class="nav-item active"><span class="nav-icon">🗄️</span> Database</a>
+            <a href="search.html" class="nav-item"><span class="nav-icon">🔍</span> Search</a>
+            <a href="tags.html" class="nav-item"><span class="nav-icon">🏷️</span> Tags</a>
+            <a href="scope.html" class="nav-item"><span class="nav-icon">🗺️</span> Map <span
+                    class="beta-tag">(β)</span></a>
+            <a href="settings.html" class="nav-item"><span class="nav-icon">⚙️</span> Settings</a>
         </div>
 
         <!-- Sidebar Controls -->
@@ -66,25 +54,13 @@
                 <option value="Prompt Refine & Expand">Prompt Refine & Expand</option>
             </select>
 
-            <button id="selectMissingBtn" class="sidebar-btn-secondary">
-                Select Missing
-            </button>
-
-            <button id="unselectAllBtn" class="sidebar-btn-neutral">
-                Unselect All
-            </button>
-
-            <button id="processSelectedBtn" class="sidebar-btn-primary" disabled>
-                Process (0)
-            </button>
+            <button id="selectMissingBtn" class="sidebar-btn-secondary">Select Missing</button>
+            <button id="unselectAllBtn" class="sidebar-btn-neutral">Unselect All</button>
+            <button id="processSelectedBtn" class="sidebar-btn-primary" disabled>Process (0)</button>
 
             <div class="sidebar-actions-row">
-                <button id="validateBtn" title="Integrity Check" class="check-btn">
-                    🛠️ Check
-                </button>
-                <div class="count-display">
-                    <span id="dbCount">0</span>
-                </div>
+                <button id="validateBtn" title="Integrity Check" class="check-btn">🛠️ Check</button>
+                <div class="count-display"><span id="dbCount">0</span></div>
             </div>
         </div>
     </nav>
@@ -98,40 +74,25 @@
                 </div>
             </header>
 
-            <div id="loadingDb" class="loading-state">
-                Loading database...
-            </div>
-
-            <div id="dbGrid" class="analysis-grid">
-                <!-- Database entries will be injected here -->
-            </div>
+            <div id="loadingDb" class="loading-state">Loading database...</div>
+            <div id="dbGrid" class="analysis-grid"><!-- Database entries will be injected here --></div>
         </div>
     </div>
 
     <div id="contextMenu" class="context-menu">
-        <div class="context-menu-item" id="ctxRegenThumb">
-            <span>🔄</span> Regenerate Thumbnail
-        </div>
+        <div class="context-menu-item" id="ctxRegenThumb"><span>🔄</span> Regenerate Thumbnail</div>
         <div class="context-menu-divider"></div>
-        <div class="context-menu-item" id="ctxEdit">
-            <span>✏️</span> Edit Tag/Object
-        </div>
+        <div class="context-menu-item" id="ctxEdit"><span>✏️</span> Edit Tag/Object</div>
         <div class="context-menu-divider"></div>
-        <div class="context-menu-item" id="ctxDelete" style="color: #ef4444;">
-            <span>🗑️</span> Delete Tag/Object
-        </div>
-        <div class="context-menu-item context-menu-item-rename" id="ctxRename">
-            <span>📝</span> Rename File
-        </div>
+        <div class="context-menu-item" id="ctxDelete" style="color: #ef4444;"><span>🗑️</span> Delete Tag/Object</div>
+        <div class="context-menu-item context-menu-item-rename" id="ctxRename"><span>📝</span> Rename File</div>
     </div>
 
     <!-- Custom Modal Dialog -->
     <div id="customModal" class="custom-modal-overlay" style="display: none;">
         <div class="custom-modal-content">
-            <h3 id="modalTitle" class="modal-title">
-                Title</h3>
-            <p id="modalMessage" class="modal-message">Message
-                goes here...</p>
+            <h3 id="modalTitle" class="modal-title">Title</h3>
+            <p id="modalMessage" class="modal-message">Message goes here...</p>
             <div class="modal-actions">
                 <button id="modalHasCancel" class="btn-secondary modal-btn-cancel">Cancel</button>
                 <button id="modalConfirm" class="modal-btn-confirm">Confirm</button>

@@ -189,8 +189,6 @@ function renderBatch(newImages) {
     dbGrid.insertAdjacentHTML('beforeend', batchHtml);
 }
 
-
-
 function setupIntersectionObserver(sentinel) {
     if (observer) observer.disconnect();
 
