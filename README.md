@@ -21,7 +21,9 @@ An Electron-based desktop application that uses local AI (via LM Studio) to anal
 - **Configuration UI**: Easily manage your AI model preferences (Vision & Embeddings) directly from the new **Settings** page.
 - **Automated Database Repair**: Prune missing records, regenerate deleted thumbnails, and heal broken data.
 - **Inline Tag Management**: Edit, delete, and add tags directly from search results or the database browser via right-click.
+- **High-Performance Text Rendering**: Uses `@chenglou/pretext` for arithmetic-based text measurement, eliminating DOM reflows and layout shifts during infinite scroll.
 - **Robust Thumbnailing**: Efficient AVIF thumbnail generation with automatic background regeneration.
+- **Improved UI Layout**: Floating interactive elements (like the Copy button) positioned within flowing AI summary text for a cleaner, unified look.
 
 ---
 
@@ -148,6 +150,8 @@ LM-AI-studio/
 │   ├── search.js           # Search page logic
 │   ├── search-worker.js    # (New) Worker for search & embeddings
 │   ├── settings.js         # (New) Settings logic
+│   ├── pretext-layout.js   # (New) Pretext measurement wrapper
+│   ├── libs/               # Third-party libraries (Fuse.js, Pretext, etc.)
 │   ├── style.css           # Global styles
 │   └── thumbnails/         # Generated AVIF thumbnails
 ├── images.db               # SQLite database (auto-created)

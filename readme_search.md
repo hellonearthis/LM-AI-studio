@@ -25,9 +25,10 @@ This hybrid approach ensures high precision for known items and high recall for 
 - **Storage**: `public/search-embeddings.json` (Static map of ImageID -> Vector).
 - **Computation**: **Cosine Similarity** calculated in a **Web Worker** to prevent UI freezing.
 
-### Frontend Performance: **IntersectionObserver API**
-- **Role**: Infinite Scroll rendering.
-- **Implementation**: Renders items in batches of 50 to maintain 60fps scrolling.
+### Frontend Performance: **IntersectionObserver & @chenglou/pretext**
+- **Infinite Scroll**: Renders items in batches of 50 to maintain high frame rates.
+- **Layout Engine**: Uses `@chenglou/pretext` to pre-calculate summary text heights before DOM insertion.
+- **Benefits**: Eliminates "jumping" layout shifts and synchronous reflows, ensuring smooth 60fps scrolling even with hundreds of results.
 
 ### Backend Support: **Node.js (Express)**
 - **Endpoints**:

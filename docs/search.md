@@ -32,4 +32,8 @@ The Search page offers advanced capabilities to find specific images within your
    - Use the logic toggle and fuzziness slider to refine keyword matching.
    - Enable Semantic Search for conceptual queries.
 3. **Filtering**: Select a Scene Type or Date Range to narrow down results.
-4. **Interact**: Click on result items to view details or right-click for management options.
+## Performance & Rendering
+
+- **High-Performance Text Rendering**: The page uses the `@chenglou/pretext` engine to pre-calculate the height of AI summary text before it is inserted into the DOM. This eliminates layout shifts ("jumping") and expensive browser reflows during infinite scroll.
+- **Infinite Scroll**: Results are rendered in batches using the `IntersectionObserver` API to maintain high performance even with thousands of matching images.
+- **Floating Copy Button**: The summary text is designed to flow naturally around the interactive "Copy" button for a clean and efficient layout.

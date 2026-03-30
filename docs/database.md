@@ -29,4 +29,9 @@ The Database page serves as the central hub for managing your collection of anal
    - Select a prompt type from the sidebar.
    - Click "Select Missing" to find incomplete entries.
    - Click "Process" to run the analysis on selected items.
-3. **Manage Files**: Right-click an image to access management options like renaming or regenerating thumbnails.
+## Performance & Rendering
+
+- **Arithmetic Text Measurement**: This page utilizes the `@chenglou/pretext` rendering engine to pre-calculate summary text heights for each card. By doing so, the browser avoids hundreds of expensive "layout reflows" when rendering the grid.
+- **Improved Scroll Fidelity**: Pre-measured card heights ensure that the masonry column layout remains stable during infinite scrolling, eliminating visual "jitter" as new content is loaded.
+- **AVIF Thumbnailing**: Modern AVIF image format is used for thumbnails to ensure high visual quality with minimal file size and fast loading times.
+- **Copy Button Flow**: AI summaries are designed with an inline floating "Copy" button to maximize use of available space and maintain a clean aesthetic.

@@ -798,6 +798,16 @@ select option {
     }
 }
 
+/* ============================================================================
+   PRETEXT MEASURED TEXT
+   ============================================================================ */
+
+/* Applied to summary paragraphs with pretext-computed heights */
+.pretext-measured {
+    overflow: hidden;
+    transition: min-height 0.15s ease-out;
+}
+
 @keyframes fadeOut {
     from {
         opacity: 1;

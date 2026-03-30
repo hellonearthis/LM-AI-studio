@@ -73,6 +73,11 @@ async function initDatabase() {
         loadingDb.style.display = 'block';
         loadingDb.textContent = 'Loading database...';
 
+        // Initialize pretext measuring engine (waits for font load)
+        if (window.PretextLayout) {
+            await window.PretextLayout.init();
+        }
+
         await loadNextPage();
 
     } catch (error) {
@@ -156,8 +161,30 @@ function setupSentinel() {
 }
 
 function renderBatch(newImages) {
+    // Pre-measure summary heights with pretext if available
+    let summaryHeights = new Map();
+    if (window.PretextLayout && window.PretextLayout.ready) {
+        // Estimate card summary container width:
+        // Card padding: 0.75rem*2 = 24px, thumbnail: 100px, gap: 16px,
+        // flex inner padding/borders ~ 20px. Typical column ~350px.
+        const cardWidth = dbGrid.offsetWidth > 0
+            ? Math.min(dbGrid.offsetWidth, 400) - 160
+            : 200;
+
+        const items = newImages.map(img => {
+            const analysis = (typeof img.analysis === 'string')
+                ? JSON.parse(img.analysis || '{}') : (img.analysis || {});
+            return { id: img.id, text: analysis.summary || '' };
+        });
+
+        summaryHeights = window.PretextLayout.measureBatch(items, cardWidth, 'database');
+    }
+
     // Generate HTML for batch
-    const batchHtml = newImages.map(img => createCardHtml(img)).join('');
+    const batchHtml = newImages.map(img => {
+        const h = summaryHeights.get(String(img.id));
+        return createCardHtml(img, h);
+    }).join('');
     // Append to grid
     dbGrid.insertAdjacentHTML('beforeend', batchHtml);
 }
@@ -181,7 +208,7 @@ function setupIntersectionObserver(sentinel) {
  * @param {Object} img - The image object containing metadata and analysis.
  * @returns {string} The HTML string for the card.
  */
-function createCardHtml(img) {
+function createCardHtml(img, summaryHeight) {
     // Parse stored JSON data (handle if already parsed or string)
     let analysis = img.analysis;
     if (typeof analysis === 'string') {
@@ -256,7 +283,7 @@ function createCardHtml(img) {
                     <h3 style="font-size: 0.9rem; color: var(--text-secondary); margin: 0;">AI Summary</h3>
                     <button class="copy-btn" data-text="${(analysis.summary || '').replace(/"/g, '&quot;')}" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.15rem 0.4rem; border-radius: 4px; cursor: pointer; font-size: 0.65rem; white-space: nowrap;" title="Copy to clipboard">Copy</button>
                 </div>
-                <p style="margin: 0;">${analysis.summary || 'No summary'}</p>
+                <p class="${summaryHeight ? 'pretext-measured' : ''}" style="margin: 0;${summaryHeight ? ` min-height: ${summaryHeight}px;` : ''}">${analysis.summary || 'No summary'}</p>
             </div>
 
             <!-- Tags Section -->
@@ -1302,5 +1329,11 @@ async function regenerateThumbnail(id, cardElement) {
 // ============================================================================
 // INITIALIZE
 // ============================================================================
-// Load the database when the page loads
-initDatabase();
+// Defer init slightly to allow the pretext type="module" script to register
+// on window before the first renderBatch runs. Module scripts are deferred
+// by spec and execute after inline scripts, so a microtask yield suffices.
+Promise.resolve().then(() => {
+    // Double-yield: first microtask lets the module script queue,
+    // second requestAnimationFrame ensures it has executed.
+    requestAnimationFrame(() => initDatabase());
+});

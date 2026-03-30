@@ -123,6 +123,11 @@ function initSearch() {
     searchBtn.disabled = true;
     searchBtn.textContent = 'Loading Index...';
 
+    // Initialize pretext measuring engine (waits for font load)
+    if (window.PretextLayout) {
+        window.PretextLayout.init();
+    }
+
     // Initialize Worker
     searchWorker = new Worker('search-worker.js');
 
@@ -342,11 +347,30 @@ function renderBatch() {
 
     const batch = filteredImages.slice(currentIndex, currentIndex + BATCH_SIZE);
 
+    // Pre-measure summary heights with pretext if available
+    let summaryHeights = new Map();
+    if (window.PretextLayout && window.PretextLayout.ready) {
+        // Estimate summary container width from the results grid.
+        // Card padding ~24px, thumbnail 80px, gap 16px, copy btn ~50px, other padding ~30px.
+        const gridWidth = searchResults.offsetWidth;
+        const cardWidth = gridWidth > 0
+            ? Math.min(gridWidth, 400) - 200
+            : 180;
+
+        const items = batch.map(img => {
+            const analysis = img.analysis || {};
+            return { id: img.id, text: analysis.summary || '' };
+        });
+
+        summaryHeights = window.PretextLayout.measureBatch(items, cardWidth, 'search');
+    }
+
     // Safely render batch
     let batchHtml = '';
     for (const img of batch) {
         try {
-            batchHtml += createResultHtml(img);
+            const h = summaryHeights.get(String(img.id));
+            batchHtml += createResultHtml(img, h);
         } catch (err) {
             console.error('Error rendering image card:', img, err);
         }
@@ -357,7 +381,7 @@ function renderBatch() {
 }
 
 // Factor out result HTML generation (similar to card creation in database.js)
-function createResultHtml(img) {
+function createResultHtml(img, summaryHeight) {
     // Helper to escape HTML special characters
     const escapeHtml = (str) => {
         if (!str) return '';
@@ -405,11 +429,11 @@ function createResultHtml(img) {
                 </div>
             </div>
             
-            <div style="display: flex; gap: 0.5rem; align-items: flex-start; margin-bottom: 1rem;">
-                <p style="font-size: 0.9rem; color: var(--text-primary); margin: 0; line-height: 1.4; flex: 1;">
+            <div style="margin-bottom: 1rem;">
+                <p class="${summaryHeight ? 'pretext-measured' : ''}" style="font-size: 0.9rem; color: var(--text-primary); margin: 0; line-height: 1.4;${summaryHeight ? ` min-height: ${summaryHeight}px;` : ''}">
+                    <button class="copy-btn" data-text="${escapeHtml(analysis.summary || '')}" style="float: right; margin: 0.1rem 0 0.25rem 0.5rem; background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.25rem 0.5rem; border-radius: 4px; cursor: pointer; font-size: 0.75rem; white-space: nowrap;" title="Copy to clipboard">Copy</button>
                     ${escapeHtml(analysis.summary) || 'No summary available'}
                 </p>
-                <button class="copy-btn" data-text="${escapeHtml(analysis.summary || '')}" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.25rem 0.5rem; border-radius: 4px; cursor: pointer; font-size: 0.75rem; white-space: nowrap;" title="Copy to clipboard">Copy</button>
             </div>
             
             <div class="tags-section">
@@ -429,8 +453,8 @@ function createResultHtml(img) {
 }
 
 // Override Load Stats to also init search
-// Initialize directly
-initSearch();
+// Defer slightly to allow pretext module script to register on window
+requestAnimationFrame(() => initSearch());
 
 // Event Listeners
 if (searchBtn) {
