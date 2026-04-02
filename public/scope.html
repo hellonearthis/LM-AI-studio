@@ -58,17 +58,24 @@
             <div
                 style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; margin-top: 2rem;">
                 <div>
-                    <h2 style="font-size: 1.5rem; margin-bottom: 0.5rem;">Data Map</h2>
+                    <h2 style="font-size: 1.5rem; margin-bottom: 0.5rem; display: flex; align-items: baseline; gap: 0.5rem;">
+                        Data Map
+                        <span id="pointCountDisplay" style="font-size: 0.9rem; color: var(--text-secondary); font-weight: 500;"></span>
+                    </h2>
                     <p style="color: var(--text-secondary); margin: 0;">Visualize your image database as a semantic
                         universe.</p>
                 </div>
 
-                <div class="scope-header-controls">
+                <div class="scope-header-controls" style="display: flex; align-items: center;">
+                    <div class="toggle-group" style="display: flex; background: var(--card-bg); border-radius: 6px; overflow: hidden; border: 1px solid var(--border); margin-right: 1rem;">
+                        <button id="toggleParquetBtn" style="padding: 0.5rem 1rem; border: none; background: var(--accent); color: white; cursor: pointer; transition: background 0.2s;">Latent Scope</button>
+                        <button id="toggleDbBtn" style="padding: 0.5rem 1rem; border: left 1px solid var(--border); background: transparent; color: var(--text-primary); cursor: pointer; transition: background 0.2s;">Evoc DB</button>
+                    </div>
+
                     <button id="syncBtn" class="primary-btn"
                         style="display: flex; align-items: center; gap: 0.5rem; background: var(--border);">
                         <span id="syncIcon">🔄</span> Sync Data
                     </button>
-                    <!-- Note: Sync button color override moved from inline to simpler css or kept inline if dynamic logic needed -->
                 </div>
             </div>
 

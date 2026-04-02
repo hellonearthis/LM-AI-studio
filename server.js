@@ -1452,6 +1452,34 @@ app.get('/api/proxy/models', async (req, res) => {
     }
 });
 
+// Serve SQLite database cluster coordinates for the Data Map toggle function
+app.get('/api/scope/db-data', (req, res) => {
+    try {
+        const sql = `
+            SELECT 
+                c.x, 
+                c.y, 
+                cl.cluster_label as cluster, 
+                null as label, 
+                i.path, 
+                i.filename
+            FROM image_coordinates c
+            JOIN image_clusters cl ON c.image_id = cl.image_id
+            JOIN images i ON c.image_id = i.id
+        `;
+        const points = db.prepare(sql).all();
+        res.json(points);
+    } catch (err) {
+        console.error('[DB] Failed to fetch database scope data:', err);
+        // If tables don't exist yet, return an empty array gracefully
+        if (err.message.includes('no such table')) {
+            return res.json([]);
+        }
+        res.status(500).json({ error: 'Failed to fetch database coordinate data' });
+    }
+});
+
+
 app.get('/api/diagnostics', async (req, res) => {
     const config = getConfig();
     let visionSource = 'Auto-detect';
