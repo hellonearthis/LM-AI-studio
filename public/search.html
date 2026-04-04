@@ -97,6 +97,16 @@
                     🛠️ Check
                 </button>
             </div>
+            <div id="activeModelInfo"
+                style="margin-top: auto; padding: 0.8rem; border-top: 1px solid var(--border); font-size: 0.75rem; color: var(--text-secondary); display: flex; flex-direction: column; gap: 0.3rem;">
+                <div style="display: flex; align-items: center; gap: 0.4rem;">
+                    <span id="modelStatusDot"
+                        style="width: 8px; height: 8px; border-radius: 50%; background: #666; display: inline-block;"></span>
+                    <span style="font-weight: 600; color: var(--text-primary);">Active Model:</span>
+                </div>
+                <div id="activeModelName" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
+                    title="No model selected">None</div>
+            </div>
         </div>
     </nav>
 
@@ -226,6 +236,18 @@
                                 </select>
                             </div>
 
+                            <div class="dropdown-row">
+                                <label class="dropdown-label">Data Status</label>
+                                <select id="dataStatus" class="styled-select">
+                                    <option value="all">All Images</option>
+                                    <option value="missing-any">⚠️ Missing Any Data</option>
+                                    <option value="missing-tags">Missing Tags</option>
+                                    <option value="missing-objects">Missing Objects</option>
+                                    <option value="missing-badge">Missing Badge</option>
+                                    <option value="missing-summary">Missing Summary</option>
+                                </select>
+                            </div>
+
                             <!-- Date Range -->
                             <div class="date-range-container">
                                 <label class="scope-label">Date Range</label>
@@ -279,6 +301,15 @@
                     </div>
                     <div class="context-menu-item" id="ctxEdit">
                         <span>✏️</span> Edit Tag
+                    </div>
+                    <div class="context-menu-item" id="ctxEditSummary">
+                        <span>📝</span> Edit Description
+                    </div>
+                    <div class="context-menu-item" id="ctxReparseSummary">
+                        <span>🛠️</span> Reparse Description
+                    </div>
+                    <div class="context-menu-item" id="ctxReAnalyze">
+                        <span>🔍</span> Re-analyze Image
                     </div>
                     <div class="context-menu-item delete" id="ctxDelete">
                         <span>🗑️</span> Delete Tag

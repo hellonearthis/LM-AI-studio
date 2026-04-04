@@ -97,7 +97,17 @@ async function loadConfig() {
         const res = await fetch('/api/config');
         if (res.ok) {
             const config = await res.json();
-            if (config.visionModel) visionSelect.value = config.visionModel;
+            if (config.visionModel) {
+                // Check if it exists in select, if not, add it (it might be a JIT model not in the list yet)
+                const exists = Array.from(visionSelect.options).some(opt => opt.value === config.visionModel);
+                if (!exists && config.visionModel) {
+                    const opt = document.createElement('option');
+                    opt.value = config.visionModel;
+                    opt.textContent = `${config.visionModel} (Configured)`;
+                    visionSelect.appendChild(opt);
+                }
+                visionSelect.value = config.visionModel;
+            }
             if (config.embeddingModel) embeddingSelect.value = config.embeddingModel;
         }
     } catch (e) {
@@ -116,3 +126,47 @@ function updateDiagnostics(models = []) {
         diagnosticsOutput.textContent = 'Failed to load server diagnostics.';
     });
 }
+
+// Data Mapping & Clustering Logic
+const runEvocBtn = document.getElementById('runEvocBtn');
+const evocLogContainer = document.getElementById('evocLogContainer');
+const evocLogOutput = document.getElementById('evocLogOutput');
+const evocStatusText = document.getElementById('evocStatusText');
+
+runEvocBtn.addEventListener('click', async () => {
+    runEvocBtn.disabled = true;
+    runEvocBtn.textContent = '⏳ Processing Data...';
+    evocLogContainer.style.display = 'block';
+    evocLogOutput.innerHTML = '<i>Initializing pipeline...</i><br>';
+    evocStatusText.textContent = 'Starting Python EVoC + UMAP analysis...';
+
+    try {
+        const response = await fetch('/api/maintenance/run-evoc', { method: 'POST' });
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const text = decoder.decode(value, { stream: true });
+            const formatted = text.replace(/\n/g, '<br>').replace(/\[\*\]/g, '<span style="color: #0ff">[*]</span>');
+            evocLogOutput.innerHTML += formatted;
+            evocLogContainer.scrollTop = evocLogContainer.scrollHeight;
+        }
+
+        evocStatusText.textContent = 'Analysis complete! Check the Data Map.';
+        runEvocBtn.innerHTML = '✅ Analysis Finished';
+        setTimeout(() => {
+            runEvocBtn.disabled = false;
+            runEvocBtn.textContent = '🚀 Run Map Analysis (EVoC + UMAP)';
+        }, 5000);
+
+    } catch (e) {
+        console.error(e);
+        evocLogOutput.innerHTML += `<br><span style="color: #f00">Error: ${e.message}</span>`;
+        evocStatusText.textContent = 'Pipeline failed. Check output for details.';
+        runEvocBtn.disabled = false;
+        runEvocBtn.textContent = '🚀 Retry Map Analysis';
+    }
+});

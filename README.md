@@ -21,8 +21,10 @@ An Electron-based desktop application that uses local AI (via LM Studio) to anal
 
 ## ✨ Features
 
-- **AI-Powered Analysis**: Uses LM Studio's vision models (like Qwen-VL) to generate descriptions, detect objects, and tag images.
-- **Customizable Prompts**: Choose from multiple analysis modes (Detailed, Cinematic, Video Summary) or define your own via `qwen_vl3_prompts.json`.
+- **Model Selection & Status**: Switch between different Vision models (Qwen, Gemma-4, etc.) in Settings. Monitor real-time status (**🟢 Loaded**, **⚪ Standby**) directly in the search sidebar.
+- **Enhanced Data Filtering**: Use the **Data Status** filter to find images missing tags, objects, summary, or scene badges.
+- **Automatic Tag Cleaning**: System automatically strips brackets `[] () {}` and deduplicates tags/objects for a cleaner library.
+- **Model-Specific Optimization**: Automatically uses optimized prompt strategies for different model architectures (e.g., Qwen vs. Gemma-4) to prevent hallucinations and loops.
 - **ComfyUI Integration**: Automatically extracts and displays ComfyUI workflow and prompt data from PNG metadata.
 - **Improved Performance**: Infinite scroll and server-side pagination ensure fluid browsing even with thousands of images.
 - **Semantic Search**: Go beyond keywords. Search for concepts ("peaceful morning", "cyberpunk vibe") using AI embeddings.

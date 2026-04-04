@@ -206,6 +206,24 @@ function setupIntersectionObserver(sentinel) {
  * @param {Object} img - The image object containing metadata and analysis.
  * @returns {string} The HTML string for the card.
  */
+// Helper: Measure pretext height for a single card update
+function measureSingleCardHeight(img, context = 'database') {
+    if (!window.PretextLayout || !window.PretextLayout.ready) return undefined;
+    let analysis = img.analysis;
+    if (typeof analysis === 'string') {
+        try { analysis = JSON.parse(analysis || '{}'); } catch (e) { analysis = {}; }
+    }
+    analysis = analysis || {};
+    const summaryText = analysis.summary || '';
+    if (!summaryText) return undefined;
+
+    const cardWidth = dbGrid.offsetWidth > 0
+        ? Math.min(dbGrid.offsetWidth, 400) - 160
+        : 200;
+    const result = window.PretextLayout.measureText(summaryText, cardWidth, context);
+    return result.height;
+}
+
 function createCardHtml(img, summaryHeight) {
     // Parse stored JSON data (handle if already parsed or string)
     let analysis = img.analysis;
@@ -762,7 +780,7 @@ if (processSelectedBtn) {
                             // Update DOM
                             const existingCard = document.querySelector(`.card[data-id="${updated.id}"]`);
                             if (existingCard) {
-                                const newCardHtml = createCardHtml(localImg);
+                                const newCardHtml = createCardHtml(localImg, measureSingleCardHeight(localImg));
                                 const temp = document.createElement('div');
                                 temp.innerHTML = newCardHtml;
                                 existingCard.replaceWith(temp.firstElementChild);
@@ -1078,7 +1096,7 @@ async function updateTag(id, type, oldTag, newTag, action) {
         // In-Place UI Update
         const card = document.querySelector(`.card[data-id="${id}"]`);
         if (card) {
-            const newHtml = createCardHtml(image);
+            const newHtml = createCardHtml(image, measureSingleCardHeight(image));
             card.outerHTML = newHtml;
         }
 

@@ -57,14 +57,16 @@ This is the core table that tracks all physical image files successfully ingeste
 | `mtime` | INTEGER | | The native filesystem 'Modified Time' for tracking file system updates. |
 
 ### 2. `image_clusters`
-A lightweight relationship table representing unsupervised clustering assignments previously applied to the dataset.
+A lightweight relationship table representing unsupervised clustering assignments applied to the dataset via the EVoC algorithm. 
+- **Management**: Automatically updated by the **"Run Map Analysis"** tool in the Settings page.
 - **`image_id`** (`INTEGER PRIMARY KEY`): A 1:1 map directly back to `images.id`. 
-- **`cluster_label`** (`INTEGER`): An assigned categorical grouping index (e.g., `0`, `1`, `2`) calculated downstream by mathematical clustering algorithms (like Latent Scope or EVOC).
+- **`cluster_label`** (`INTEGER`): An assigned categorical grouping index (e.g., `0`, `1`, `2`) calculated by the EVoC clustering engine. `-1` represents noise/unclustered items.
 
 ### 3. `image_coordinates`
 A specialized table managing the 2D floating-point visualization vectors utilized by your Data Map (`scope.html`/`scope.js` exports).
+- **Management**: Automatically updated by the **"Run Map Analysis"** tool in the Settings page.
 - **`image_id`** (`INTEGER PRIMARY KEY`): A 1:1 map directly back to `images.id`.
-- **`x`** (`REAL`): The horizontal Cartesian projection coordinate generated via embeddings (UMAP, t-SNE, PCA).
+- **`x`** (`REAL`): The horizontal Cartesian projection coordinate generated via UMAP dimensionality reduction on embeddings.
 - **`y`** (`REAL`): The vertical Cartesian projection coordinate.
 
 ### 4. `sqlite_sequence`

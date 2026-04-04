@@ -13,6 +13,10 @@ The Tags page provides a high-level overview of your collection's metadata, allo
   - **Search**: Filter the visible tags/objects by name.
 - **Alphabet Navigation**: Jump to specific sections when in alphabetical list view.
 
+- **Metadata Cleaning**:
+  - The system automatically strips special characters like brackets `[ ] ( ) { }` from all tags and objects.
+  - **Deduplication**: Intelligent normalization (e.g., removing plurals, trimming extra spaces) ensures that "Tree" and "trees" are treated as the same concept to keep your library clean.
+
 ## Usage
 
 1. **Explore**: Toggle between Tags and Objects tabs to see the distribution of metadata in your library.

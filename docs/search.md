@@ -17,14 +17,17 @@ The Search page offers advanced capabilities to find specific images within your
 
 - **Filters**:
   - **Scene Type**: Filter by categories such as Indoor, Outdoor, Portrait, Landscape, Urban, or Nature.
+  - **Data Status**: Quickly find images with missing tags, objects, badge, or summary data.
   - **Date Range**: Restrict results to a specific timeframe.
   - **Sort Order**: Order results by Relevance, Newest, or Oldest.
 
 - **Search Scope**:
   - Configure which data fields to include in the search (AI Summaries, Objects, Tags).
 
-- **Statistics**:
-  - Sidebar displays top tags and objects for quick filtering.
+- **Active Model Status**:
+  - The sidebar displays exactly which Vision model is currently active.
+  - **Status Indicator**: Shows **🟢 Loaded** if the model is in VRAM, or **⚪ Standby** if it's available for JIT loading.
+  - Real-time polling ensures the status is always accurate.
 
 ## Usage
 

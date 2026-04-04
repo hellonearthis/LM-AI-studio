@@ -9,14 +9,8 @@ The Analysis page is the primary entry point for **Lumina - AI Image Analysis St
   - **Folder Upload**: Process entire directories of images at once.
 
 - **Analysis Configuration**:
-  - **AI Analysis Mode**: Choose the level of detail for image descriptions:
-    - *Detailed Analysis*
-    - *Simple Description*
-    - *Detailed Description* (Default)
-    - *Ultra Detailed Description*
-    - *Cinematic Description*
-    - *Video Summary*
-    - *Short Story*
+  - **AI Analysis Mode**: Choose the level of detail for image descriptions (e.g., Detailed Analysis, Cinematic, Video Summary).
+  - **Model-Specific Optimization**: The system automatically detects your active Vision Model (selected in Settings) and applies optimized prompting strategies (e.g., Qwen-specific vs. Gemma-specific) to ensure high-quality, formatted results without loops or hallucinations.
   - **Custom Tags**: Add user-defined tags that will be applied to all processed images in the current batch.
 
 - **Status & Progress**:

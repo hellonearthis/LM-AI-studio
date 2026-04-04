@@ -81,6 +81,23 @@
                 </div>
             </div>
 
+            <!-- New Data Mapping Tools Card -->
+            <div class="settings-card">
+                <h2>Data Mapping & Clustering</h2>
+                <p>Run EVoC and UMAP analysis to generate semantic clusters and 2D map coordinates from your image descriptions.</p>
+                
+                <div class="maintenance-actions" style="margin-top: 1.5rem;">
+                    <button id="runEvocBtn" class="primary-btn" style="background: var(--accent); border: none; padding: 0.8rem 1.5rem; color: white; border-radius: 6px; cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 0.5rem;">
+                        🚀 Run Map Analysis (EVoC + UMAP)
+                    </button>
+                    <p id="evocStatusText" style="margin-top: 0.8rem; font-size: 0.9rem; color: var(--text-secondary);"></p>
+                </div>
+
+                <div id="evocLogContainer" style="margin-top: 1rem; background: #000; color: #0f0; padding: 1rem; border-radius: 6px; font-family: 'Courier New', Courier, monospace; font-size: 0.85rem; max-height: 300px; overflow-y: auto; display: none; line-height: 1.4;">
+                    <div id="evocLogOutput"></div>
+                </div>
+            </div>
+
             <div class="settings-card">
                 <h2>Current Diagnostics</h2>
                 <pre id="diagnosticsOutput" class="diagnostics-log">Loading...</pre>

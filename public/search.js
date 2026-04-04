@@ -22,6 +22,70 @@ const searchResults = document.getElementById('searchResults');
 const resultsCount = document.getElementById('resultsCount');
 const API_BASE_URL = 'http://localhost:3000';
 
+// Helper: Deduplicate tags and objects
+function deduplicateTags(analysis) {
+    if (!analysis) return;
+    
+    // Helper: Normalize by removing plurals, brackets, and extra spaces
+    const normalize = (s) => String(s).trim().toLowerCase().replace(/[\[\]\(\)\{\}]/g, '').replace(/\s+/g, ' ').trim().replace(/s$/, '');
+
+    if (Array.isArray(analysis.objects)) {
+        // Initial cleaning
+        let objects = analysis.objects
+            .map(o => String(o).trim())
+            .filter(o => o.length > 0 && o.length < 100 && o.split(/\s+/).length <= 8);
+
+        // Case-insensitive distinct
+        const seen = new Set();
+        analysis.objects = objects.filter(o => {
+            const norm = normalize(o);
+            if (seen.has(norm)) return false;
+            seen.add(norm);
+            return true;
+        });
+    }
+    
+    if (Array.isArray(analysis.tags)) {
+        // 1. Initial cleaning (Length and Word Count limits)
+        let tags = analysis.tags
+            .map(t => String(t).trim())
+            .filter(t => t.length > 0 && t.length < 120 && t.split(/\s+/).length <= 10);
+
+        // 2. Case-insensitive and Plural-insensitive deduplication
+        const seen = new Set();
+        tags = tags.filter(t => {
+            const norm = normalize(t);
+            if (seen.has(norm)) return false;
+            seen.add(norm);
+            return true;
+        });
+
+        // 3. Substring / Recursive pruning:
+        tags.sort((a, b) => a.length - b.length); 
+
+        const finalTags = [];
+        for (const tag of tags) {
+            const normTag = normalize(tag);
+            const isRedundant = finalTags.some(existing => {
+                const normExisting = normalize(existing);
+                if (normTag.length > 5 && normExisting.length > 5) {
+                    if (normTag.includes(normExisting) || normExisting.includes(normTag)) return true;
+                }
+                return false;
+            });
+            if (!isRedundant) finalTags.push(tag);
+        }
+
+        analysis.tags = finalTags;
+
+        // 4. Remove tags that are already represented as objects
+        if (Array.isArray(analysis.objects)) {
+            const objectNorms = new Set(analysis.objects.map(normalize));
+            analysis.tags = analysis.tags.filter(tag => !objectNorms.has(normalize(tag)));
+        }
+    }
+}
+
 // State
 let allImages = []; // We keep a local copy for filtering date/scene types quickly if needed, or we rely on worker results.
 // Actually, worker sends back "results" (which are full objects from search-data.json). 
@@ -70,7 +134,7 @@ fuzzinessSlider.addEventListener('change', () => {
 });
 
 // Update Search on Scope Change
-[scopeAnalysis, scopeObjects, scopeTags, sortOrder, negativeQuery, semanticToggle].forEach(el => {
+[scopeAnalysis, scopeObjects, scopeTags, sortOrder, negativeQuery, semanticToggle, document.getElementById('dataStatus')].forEach(el => {
     if (el) {
         el.addEventListener('change', () => {
             if (el === semanticToggle) {
@@ -202,6 +266,7 @@ function handleWorkerResults(results) {
 function applyClientFilters(dataSet) {
     const negQueryText = negativeQuery ? negativeQuery.value.trim() : '';
     const typeFilter = sceneType.value;
+    const dataStatusFilter = document.getElementById('dataStatus') ? document.getElementById('dataStatus').value : 'all';
     const startFilter = startDate.value;
     const endFilter = endDate.value;
     const currentSort = sortOrder ? sortOrder.value : 'newest';
@@ -238,6 +303,21 @@ function applyClientFilters(dataSet) {
             const end = new Date(endFilter);
             end.setHours(23, 59, 59);
             if (imgDate > end) return false;
+        }
+
+        // Data Status Filter
+        if (dataStatusFilter !== 'all') {
+            const analysis = img.analysis || {};
+            const hasTags = Array.isArray(analysis.tags) && analysis.tags.length > 0;
+            const hasObjects = Array.isArray(analysis.objects) && analysis.objects.length > 0;
+            const hasBadge = !!analysis.scene_type && analysis.scene_type !== 'unknown';
+            const hasSummary = !!analysis.summary && analysis.summary.length > 0;
+
+            if (dataStatusFilter === 'missing-any' && hasTags && hasObjects && hasBadge && hasSummary) return false;
+            if (dataStatusFilter === 'missing-tags' && hasTags) return false;
+            if (dataStatusFilter === 'missing-objects' && hasObjects) return false;
+            if (dataStatusFilter === 'missing-badge' && hasBadge) return false;
+            if (dataStatusFilter === 'missing-summary' && hasSummary) return false;
         }
 
         return true;
@@ -381,6 +461,19 @@ function renderBatch() {
 }
 
 // Factor out result HTML generation (similar to card creation in database.js)
+// Helper: Measure pretext height for a single card update
+function measureSingleCardHeight(img, context = 'search') {
+    if (!window.PretextLayout || !window.PretextLayout.ready) return undefined;
+    const analysis = img.analysis || {};
+    const summaryText = analysis.summary || '';
+    if (!summaryText) return undefined;
+
+    const gridWidth = searchResults.offsetWidth;
+    const cardWidth = gridWidth > 0 ? Math.min(gridWidth, 400) - 200 : 180;
+    const result = window.PretextLayout.measureText(summaryText, cardWidth, context);
+    return result.height;
+}
+
 function createResultHtml(img, summaryHeight) {
     // Helper to escape HTML special characters
     const escapeHtml = (str) => {
@@ -430,7 +523,7 @@ function createResultHtml(img, summaryHeight) {
             </div>
             
             <div style="margin-bottom: 1rem;">
-                <p class="${summaryHeight ? 'pretext-measured' : ''}" style="font-size: 0.9rem; color: var(--text-primary); margin: 0; line-height: 1.4;${summaryHeight ? ` min-height: ${summaryHeight}px;` : ''}">
+                <p class="summary-text ${summaryHeight ? 'pretext-measured' : ''}" data-id="${img.id}" style="font-size: 0.9rem; color: var(--text-primary); margin: 0; line-height: 1.4;${summaryHeight ? ` min-height: ${summaryHeight}px;` : ''}">
                     <button class="copy-btn" data-text="${escapeHtml(analysis.summary || '')}" style="float: right; margin: 0.1rem 0 0.25rem 0.5rem; background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.25rem 0.5rem; border-radius: 4px; cursor: pointer; font-size: 0.75rem; white-space: nowrap;" title="Copy to clipboard">Copy</button>
                     ${escapeHtml(analysis.summary) || 'No summary available'}
                 </p>
@@ -640,22 +733,38 @@ function showContextMenu(e, id, type, tag = null, card = null) {
     const editItem = document.getElementById('ctxEdit');
     const deleteItem = document.getElementById('ctxDelete');
     const renameItem = document.getElementById('ctxRename');
+    const editSummaryItem = document.getElementById('ctxEditSummary');
+    const reparseSummaryItem = document.getElementById('ctxReparseSummary');
+    const reAnalyzeItem = document.getElementById('ctxReAnalyze');
 
     if (type === 'thumbnail') {
         regenItem.style.display = 'block';
         editItem.style.display = 'none';
         deleteItem.style.display = 'none';
         if (renameItem) renameItem.style.display = 'none';
+        if (editSummaryItem) editSummaryItem.style.display = 'none';
     } else if (type === 'file') {
         regenItem.style.display = 'none';
         editItem.style.display = 'none';
         deleteItem.style.display = 'none';
         if (renameItem) renameItem.style.display = 'block';
+        if (editSummaryItem) editSummaryItem.style.display = 'none';
+    } else if (type === 'summary') {
+        regenItem.style.display = 'none';
+        editItem.style.display = 'none';
+        deleteItem.style.display = 'none';
+        if (renameItem) renameItem.style.display = 'none';
+        if (editSummaryItem) editSummaryItem.style.display = 'block';
+        if (reparseSummaryItem) reparseSummaryItem.style.display = 'block';
+        if (reAnalyzeItem) reAnalyzeItem.style.display = 'block';
     } else {
         regenItem.style.display = 'none';
         editItem.style.display = 'block';
         deleteItem.style.display = 'block';
         if (renameItem) renameItem.style.display = 'none';
+        if (editSummaryItem) editSummaryItem.style.display = 'none';
+        if (reparseSummaryItem) reparseSummaryItem.style.display = 'none';
+        if (reAnalyzeItem) reAnalyzeItem.style.display = 'none';
     }
 }
 
@@ -700,6 +809,20 @@ document.addEventListener('contextmenu', (e) => {
         const filename = fileLink.textContent.trim();
         showContextMenu(e, id, 'file', filename, card);
         console.log('Right clicked file');
+        return;
+    }
+
+    // Description Right-Click
+    const summaryEl = e.target.closest('.summary-text');
+    if (summaryEl) {
+        e.preventDefault();
+        e.stopPropagation();
+        const id = summaryEl.dataset.id;
+        // Try to get clean text from cache instead of scraping innerText
+        const img = (allImages.find(i => i.id == id)) || 
+                    (window.currentSearchResults && window.currentSearchResults.find(i => i.id == id));
+        const text = img ? img.analysis.summary : summaryEl.innerText.replace('Copy', '').trim();
+        showContextMenu(e, id, 'summary', text);
         return;
     }
 
@@ -840,6 +963,102 @@ document.getElementById('ctxDelete').addEventListener('click', (e) => {
     });
 });
 
+document.getElementById('ctxEditSummary').addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!ctxTarget) return;
+    const { id, tag: currentSummary } = ctxTarget;
+    hideContextMenu();
+
+    showSummaryInputModal('Edit Description', currentSummary, (newSummary) => {
+        if (newSummary !== null && newSummary.trim() !== currentSummary) {
+            updateTag(id, 'summary', currentSummary, newSummary.trim(), 'edit');
+        }
+    });
+});
+
+document.getElementById('ctxReparseSummary').addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (!ctxTarget) return;
+    const { id } = ctxTarget;
+    hideContextMenu();
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/reparse-analysis`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id })
+        });
+
+        const data = await response.json();
+        if (data.success) {
+            // Update local cache
+            const img = (allImages.find(i => i.id == id)) || 
+                        (window.currentSearchResults && window.currentSearchResults.find(i => i.id == id));
+            if (img) img.analysis = data.analysis;
+
+            // In-Place UI Update
+            const card = document.querySelector(`.card[data-id="${id}"]`);
+            if (card) {
+                card.outerHTML = createResultHtml(img, measureSingleCardHeight(img));
+            }
+            
+            showAlertModal('Successfully recovered tags and objects from processed description!', 'Success');
+        } else {
+            showAlertModal(data.message || 'Description could not be reparsed.', 'Reparse Failed');
+        }
+    } catch (error) {
+        showAlertModal('Error connecting to server for reparse.', 'Error');
+    }
+});
+
+document.getElementById('ctxReAnalyze').addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (!ctxTarget) return;
+    const { id } = ctxTarget;
+    hideContextMenu();
+
+    // Show a "Processing" message because AI can take time
+    const loadingModal = document.createElement('div');
+    loadingModal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10000; color: white; font-weight: bold; flex-direction: column; gap: 1rem;';
+    loadingModal.innerHTML = '<div>🔍 Analyzing Image...</div><div style="font-size: 0.8rem; font-weight: normal;">This may take a few seconds</div>';
+    document.body.appendChild(loadingModal);
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/re-analyze`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id })
+        });
+
+        const data = await response.json();
+        loadingModal.remove();
+
+        if (data.success) {
+            // Update local cache
+            const img = (allImages.find(i => i.id == id)) || 
+                        (window.currentSearchResults && window.currentSearchResults.find(i => i.id == id));
+            if (img) {
+                img.analysis = data.analysis;
+                img.updated_at = data.updated_at;
+            }
+
+            // In-Place UI Update
+            const card = document.querySelector(`.card[data-id="${id}"]`);
+            if (card) {
+                card.outerHTML = createResultHtml(img, measureSingleCardHeight(img));
+            }
+            
+            // Success indicator (optional, maybe just visual update is enough)
+        } else {
+            showAlertModal(data.error || 'Re-analysis failed.', 'Error');
+        }
+    } catch (error) {
+        loadingModal.remove();
+        console.error('Re-analyze error:', error);
+        showAlertModal('Error connecting to server for re-analysis.', 'Error');
+    }
+});
+
 // Add Tag Logic
 async function addTag(id, type) {
     showTagInputModal(`Add new ${type.slice(0, -1)}`, '', (newTag) => {
@@ -909,6 +1128,57 @@ function showTagInputModal(title, initialValue, callback) {
     });
 
     // Click outside to close
+    modal.onclick = (e) => {
+        if (e.target === modal) cleanup();
+    };
+}
+
+// Custom Textarea Modal for Summaries
+function showSummaryInputModal(title, initialValue, callback) {
+    const modal = document.createElement('div');
+    modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 9999;';
+
+    modal.innerHTML = `
+        <div style="background: var(--card-bg); padding: 2rem; border-radius: 12px; border: 1px solid var(--border); max-width: 600px; width: 90%;">
+            <h3 style="margin: 0 0 1rem 0; color: var(--text-primary);">${title}</h3>
+            <textarea id="summaryInput" style="width: 100%; height: 200px; padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary); margin-bottom: 1.5rem; font-size: 0.9rem; line-height: 1.4; font-family: inherit; resize: vertical;">${initialValue || ''}</textarea>
+            <div style="display: flex; gap: 1rem; justify-content: flex-end;">
+                <button id="cancelSummaryBtn" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer;">Cancel</button>
+                <button id="saveSummaryBtn" style="background: var(--accent); border: none; color: white; padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; font-weight: 500;">Save Changes</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const textarea = modal.querySelector('#summaryInput');
+    const saveBtn = modal.querySelector('#saveSummaryBtn');
+    const cancelBtn = modal.querySelector('#cancelSummaryBtn');
+
+    const cleanup = () => {
+        document.removeEventListener('keydown', keyHandler);
+        modal.remove();
+    };
+
+    const keyHandler = (e) => {
+        if (e.key === 'Escape') cleanup();
+    };
+    document.addEventListener('keydown', keyHandler);
+
+    const save = () => {
+        const val = textarea.value;
+        cleanup();
+        callback(val);
+    };
+
+    setTimeout(() => {
+        textarea.focus();
+        textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    }, 10);
+
+    saveBtn.onclick = save;
+    cancelBtn.onclick = cleanup;
+
     modal.onclick = (e) => {
         if (e.target === modal) cleanup();
     };
@@ -1029,18 +1299,24 @@ async function updateTag(id, type, oldTag, newTag, action) {
         if (!image) throw new Error('Image not found in any local cache');
 
         let analysis = image.analysis || {};
-        let list = analysis[type] || [];
 
-        if (action === 'edit') {
-            const idx = list.indexOf(oldTag);
-            if (idx !== -1) list[idx] = newTag;
-        } else if (action === 'delete') {
-            list = list.filter(t => t !== oldTag);
-        } else if (action === 'add') {
-            if (!list.includes(newTag)) list.push(newTag);
+        if (type === 'summary') {
+            analysis.summary = newTag; // Here newTag is actually the new description
+        } else {
+            let list = analysis[type] || [];
+            if (action === 'edit') {
+                const idx = list.indexOf(oldTag);
+                if (idx !== -1) list[idx] = newTag;
+            } else if (action === 'delete') {
+                list = list.filter(t => t !== oldTag);
+            } else if (action === 'add') {
+                if (!list.includes(newTag)) list.push(newTag);
+            }
+            analysis[type] = list; // Update the list
         }
 
-        analysis[type] = list; // Update the list
+        // Standardize and cleanup
+        deduplicateTags(analysis);
 
         // Update BOTH references to ensure consistency
         if (masterImage) masterImage.analysis = analysis;
@@ -1059,11 +1335,6 @@ async function updateTag(id, type, oldTag, newTag, action) {
 
         if (!response.ok) throw new Error('Update failed');
 
-        // Update Fuse index collection to reflect new tags/objects
-        if (fuse) {
-            fuse.setCollection(allImages);
-        }
-
         // Refresh stats list
         loadStats();
 
@@ -1073,7 +1344,7 @@ async function updateTag(id, type, oldTag, newTag, action) {
             // Re-render only the inner content to preserve card structure if needed, 
             // but createResultHtml returns a full card string.
             // Let's replace the whole card's content or outer if simpler.
-            const newHtml = createResultHtml(image);
+            const newHtml = createResultHtml(image, measureSingleCardHeight(image));
             card.outerHTML = newHtml;
         } else {
             // Fallback for extreme cases (shouldn't happen if card is visible)
@@ -1269,6 +1540,48 @@ searchQuery.addEventListener('keypress', (e) => {
 // Initialize
 loadStats();
 initSearch();
+updateModelIndicator();
+setInterval(updateModelIndicator, 10000);
+
+async function updateModelIndicator() {
+    const nameLabel = document.getElementById('activeModelName');
+    const statusDot = document.getElementById('modelStatusDot');
+    if (!nameLabel || !statusDot) return;
+
+    try {
+        // 1. Get our local config
+        const configRes = await fetch('/api/config');
+        if (!configRes.ok) return;
+        const config = await configRes.json();
+        const activeModel = config.visionModel || "qwen2.5-vl-7b-instruct";
+        
+        nameLabel.textContent = activeModel;
+        nameLabel.title = activeModel;
+
+        // 2. Get LM Studio's current loaded models
+        const statusRes = await fetch('/api/proxy/models');
+        if (!statusRes.ok) {
+            statusDot.style.background = '#ff4444'; // Red for error/offline
+            return;
+        }
+        
+        const data = await statusRes.json();
+        const loadedModels = data.data || [];
+        const isLoaded = loadedModels.some(m => m.id === activeModel);
+
+        if (isLoaded) {
+            statusDot.style.background = '#00ff00'; // Pure Green for Loaded
+            statusDot.title = 'Model is loaded in memory';
+        } else {
+            statusDot.style.background = '#666666'; // Gray for Available (Standby)
+            statusDot.title = 'Model on standby (will JIT load)';
+        }
+
+    } catch (e) {
+        console.warn('Failed to update model indicator:', e);
+        statusDot.style.background = '#ff4444';
+    }
+}
 
 // Check for URL parameters (e.g. from Tags page)
 const urlParams = new URLSearchParams(window.location.search);

@@ -13,15 +13,75 @@ console.log(`Contents of images.db being processed...`);
 
 // Helper function (same as in server.js)
 function deduplicateTags(analysis) {
-    if (analysis && analysis.tags && analysis.objects && Array.isArray(analysis.tags) && Array.isArray(analysis.objects)) {
-        const objectSet = new Set(analysis.objects.map(o => o.toLowerCase()));
-        const originalCount = analysis.tags.length;
-        // Filter out tags that are present in objects (case-insensitive)
-        analysis.tags = analysis.tags.filter(tag => !objectSet.has(tag.toLowerCase()));
+    if (!analysis) return 0;
+    
+    // Helper: Normalize by removing plurals, brackets, and extra spaces
+    const normalize = (s) => String(s).trim().toLowerCase().replace(/[\[\]\(\)\{\}]/g, '').replace(/\s+/g, ' ').trim().replace(/s$/, '');
 
-        return originalCount - analysis.tags.length;
+    let removed = 0;
+
+    if (Array.isArray(analysis.objects)) {
+        const originalObjects = [...analysis.objects];
+        // Initial cleaning
+        let objects = analysis.objects
+            .map(o => String(o).trim())
+            .filter(o => o.length > 0 && o.length < 100 && o.split(/\s+/).length <= 8);
+
+        // Case-insensitive distinct
+        const seen = new Set();
+        analysis.objects = objects.filter(o => {
+            const norm = normalize(o);
+            if (seen.has(norm)) return false;
+            seen.add(norm);
+            return true;
+        });
+        removed += (originalObjects.length - analysis.objects.length);
     }
-    return 0;
+    
+    if (Array.isArray(analysis.tags)) {
+        const originalTags = [...analysis.tags];
+        // 1. Initial cleaning (Length and Word Count limits)
+        let tags = analysis.tags
+            .map(t => String(t).trim())
+            .filter(t => t.length > 0 && t.length < 120 && t.split(/\s+/).length <= 10);
+
+        // 2. Case-insensitive and Plural-insensitive deduplication
+        const seen = new Set();
+        tags = tags.filter(t => {
+            const norm = normalize(t);
+            if (seen.has(norm)) return false;
+            seen.add(norm);
+            return true;
+        });
+
+        // 3. Substring / Recursive pruning:
+        tags.sort((a, b) => a.length - b.length); 
+
+        const finalTags = [];
+        for (const tag of tags) {
+            const normTag = normalize(tag);
+            const isRedundant = finalTags.some(existing => {
+                const normExisting = normalize(existing);
+                if (normTag.length > 5 && normExisting.length > 5) {
+                    if (normTag.includes(normExisting) || normExisting.includes(normTag)) return true;
+                }
+                return false;
+            });
+            if (!isRedundant) finalTags.push(tag);
+        }
+
+        analysis.tags = finalTags;
+
+        // 4. Remove tags that are already represented as objects
+        if (Array.isArray(analysis.objects)) {
+            const objectNorms = new Set(analysis.objects.map(normalize));
+            analysis.tags = analysis.tags.filter(tag => !objectNorms.has(normalize(tag)));
+        }
+
+        removed += (originalTags.length - analysis.tags.length);
+    }
+
+    return removed;
 }
 
 try {

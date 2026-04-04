@@ -10,7 +10,7 @@ import sharp from 'sharp';
 import Fuse from 'fuse.js';
 
 import crypto from 'crypto';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import util from 'util';
 
 
@@ -255,6 +255,270 @@ try {
     console.error('[PROMPTS] Error loading prompts:', err);
 }
 
+// ============================================================================
+// IMAGE ANALYSIS HELPERS
+// ============================================================================
+
+/**
+ * Attempts to repair a truncated JSON string from an LLM.
+ * Closes unclosed braces/brackets and ensures strings are terminated.
+ */
+function repairTruncatedJson(str) {
+    if (!str || typeof str !== 'string') return '{}';
+    
+    let trimmed = str.trim();
+    if (trimmed.endsWith('}')) return trimmed; // Probably fine
+
+    console.log('[REPAIR] Attempting to fix truncated JSON...');
+    
+    // 1. Basic string termination
+    // If we're inside a string (odd number of quotes), close it
+    const quoteCount = (trimmed.match(/"/g) || []).length;
+    if (quoteCount % 2 !== 0) {
+        trimmed += '"';
+    }
+
+    // 2. Close open brackets and braces
+    const stack = [];
+    for (let i = 0; i < trimmed.length; i++) {
+        if (trimmed[i] === '{' || trimmed[i] === '[') {
+            stack.push(trimmed[i]);
+        } else if (trimmed[i] === '}' || trimmed[i] === ']') {
+            const last = stack.pop();
+            // Mismatch handling (basic)
+            if ((trimmed[i] === '}' && last !== '{') || (trimmed[i] === ']' && last !== '[')) {
+                // If it's a mismatch, we might have truncated in a way that makes the stack invalid
+                // but for simple truncation, the stack should stay valid or empty.
+            }
+        }
+    }
+
+    // Close in reverse order
+    while (stack.length > 0) {
+        const last = stack.pop();
+        if (last === '{') trimmed += '}';
+        else if (last === '[') trimmed += ']';
+    }
+
+    // 3. Final cleanup - remove trailing commas before closing braces/brackets
+    trimmed = trimmed.replace(/,\s*([\]}])/g, '$1');
+
+    try {
+        JSON.parse(trimmed);
+        console.log('[REPAIR] Success!');
+        return trimmed;
+    } catch (e) {
+        console.warn('[REPAIR] Failed to fully repair JSON:', e.message);
+        // If it still fails, find the last successful closing brace and cut there
+        const lastBrace = trimmed.lastIndexOf('}');
+        if (lastBrace !== -1) {
+            return trimmed.substring(0, lastBrace + 1);
+        }
+        return '{}';
+    }
+}
+
+/**
+ * Deduplicates tags and objects in the analysis result.
+ */
+function deduplicateTags(analysis) {
+    if (!analysis) return;
+    
+    // Helper: Normalize by removing plurals, brackets, and extra spaces
+    const normalize = (s) => String(s).trim().toLowerCase().replace(/[\[\]\(\)\{\}]/g, '').replace(/\s+/g, ' ').trim().replace(/s$/, '');
+
+    if (Array.isArray(analysis.objects)) {
+        // Initial cleaning
+        let objects = analysis.objects
+            .map(o => String(o).trim())
+            .filter(o => o.length > 0 && o.length < 100 && o.split(/\s+/).length <= 8);
+
+        // Case-insensitive distinct
+        const seen = new Set();
+        analysis.objects = objects.filter(o => {
+            const norm = normalize(o);
+            if (seen.has(norm)) return false;
+            seen.add(norm);
+            return true;
+        });
+    }
+    
+    if (Array.isArray(analysis.tags)) {
+        // 1. Initial cleaning (Length and Word Count limits)
+        let tags = analysis.tags
+            .map(t => String(t).trim())
+            .filter(t => t.length > 0 && t.length < 120 && t.split(/\s+/).length <= 10);
+
+        // 2. Case-insensitive and Plural-insensitive deduplication
+        const seen = new Set();
+        tags = tags.filter(t => {
+            const norm = normalize(t);
+            if (seen.has(norm)) return false;
+            seen.add(norm);
+            return true;
+        });
+
+        // 3. Substring / Recursive pruning:
+        // Sort by length (descending) so we can check if shorter tags are contained in longer ones
+        // Actually, usually we want to prune the LONG ones if they are just extensions of existing short ones.
+        tags.sort((a, b) => a.length - b.length); 
+
+        const finalTags = [];
+        for (const tag of tags) {
+            const normTag = normalize(tag);
+            // Check if this tag is a major subset of an already added tag, or vice-versa
+            const isRedundant = finalTags.some(existing => {
+                const normExisting = normalize(existing);
+                // If one contains the other entirely, and they are long-ish, prune.
+                if (normTag.length > 5 && normExisting.length > 5) {
+                    if (normTag.includes(normExisting) || normExisting.includes(normTag)) return true;
+                }
+                return false;
+            });
+            if (!isRedundant) finalTags.push(tag);
+        }
+
+        analysis.tags = finalTags;
+
+        // 4. Remove tags that are already represented as objects
+        if (Array.isArray(analysis.objects)) {
+            const objectNorms = new Set(analysis.objects.map(normalize));
+            analysis.tags = analysis.tags.filter(tag => !objectNorms.has(normalize(tag)));
+        }
+    }
+}
+
+/**
+ * Shared logic for performing image analysis via LM Studio.
+ */
+async function performImageAnalysis(imageData, promptType) {
+    // Get the selected model from config
+    const config = getConfig();
+    const activeModel = config.visionModel || "qwen2.5-vl-7b-instruct";
+    const isQwen = activeModel.toLowerCase().includes('qwen');
+
+    // Select System Prompt
+    const selectedKey = promptType || 'Detailed Description';
+    let basePrompt = qwenPrompts[selectedKey] || qwenPrompts['Detailed Description'] || Object.values(qwenPrompts)[0];
+    let systemPrompt;
+
+    if (isQwen) {
+        // Qwen handles mixed prose+JSON prompts well
+        systemPrompt = "You are an expert image analyst. Analyze the image and extract: 1. A detailed summary. 2. A list of objects. 3. A list of descriptive tags. 4. The scene type. Return JSON.";
+        if (basePrompt) {
+            if (selectedKey !== 'Detailed Analysis') {
+                systemPrompt = `${basePrompt}\n\nIMPORTANT: extract: 1. A list of objects. 2. A list of descriptive tags. 3. The scene type. Format the response as valid JSON with keys: 'summary', 'objects', 'tags', 'scene_type'.`;
+            } else {
+                systemPrompt = basePrompt;
+            }
+        }
+    } else {
+        // For Gemma and other models: use a purely extractive, JSON-only prompt.
+        // These models loop when given mixed "write prose" + "return JSON" instructions.
+        systemPrompt = `You are an image analysis tool. You MUST output ONLY a valid JSON object with exactly these keys:
+- "summary": A 2-4 sentence description of the image. Do NOT repeat yourself.
+- "objects": An array of up to 15 distinct objects visible in the image. Use short labels (1-3 words each). No duplicates.
+- "tags": An array of up to 20 descriptive tags about the image (style, mood, colors, setting). Use single words or 2-word phrases. No duplicates. No overlap with objects.
+- "scene_type": A single word or short phrase classifying the scene (e.g., "landscape", "portrait", "macro", "abstract").
+
+Rules:
+- Output ONLY the JSON object. No other text before or after it.
+- Do NOT repeat words or phrases.
+- Do NOT write long compound phrases with "and".
+- Keep every array item short and unique.`;
+    }
+
+    const jsonSchema = {
+        name: "image_analysis",
+        strict: true,
+        schema: {
+            type: "object",
+            properties: {
+                summary: { type: "string" },
+                objects: { type: "array", items: { type: "string" } },
+                tags: { type: "array", items: { type: "string" } },
+                scene_type: { type: "string" }
+            },
+            required: ["summary", "objects", "tags", "scene_type"],
+            additionalProperties: false
+        }
+    };
+
+    // Model-specific parameters
+    const modelParams = isQwen
+        ? { temperature: 0.2, repetition_penalty: 1.2, frequency_penalty: 1.0 }
+        : { temperature: 0.1, repetition_penalty: 1.5, frequency_penalty: 1.5 };
+
+    const payload = {
+        model: activeModel,
+        messages: [
+            { role: "system", content: systemPrompt },
+            {
+                role: "user",
+                content: [
+                    { type: "text", text: isQwen ? "Analyze this image." : "Analyze this image. Return JSON only." },
+                    { type: "image_url", image_url: { url: imageData } }
+                ]
+            }
+        ],
+        max_tokens: 2048,
+        ...modelParams,
+        response_format: {
+            type: "json_schema",
+            json_schema: jsonSchema
+        }
+    };
+
+    console.log(`[ANALYZE] Using model: ${activeModel} (${isQwen ? 'Qwen-optimized' : 'Generic'} prompt)`);
+
+    const lmResponse = await fetch(LM_STUDIO_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+
+    if (!lmResponse.ok) {
+        throw new Error(`LM Studio API Error: ${lmResponse.statusText}`);
+    }
+
+    const lmData = await lmResponse.json();
+    let content = lmData.choices[0].message.content;
+
+    // Sanitize
+    content = content.replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
+    
+    // Find outermost braces
+    const firstOpen = content.indexOf('{');
+    const lastClose = content.lastIndexOf('}');
+    
+    let analysisStr = content;
+    if (firstOpen !== -1) {
+        analysisStr = content.substring(firstOpen, lastClose !== -1 ? lastClose + 1 : content.length);
+    }
+
+    let analysis;
+    try {
+        analysis = JSON.parse(analysisStr);
+    } catch (e) {
+        console.warn('[ANALYZE] Initial parse failed, attempting repair...');
+        const repaired = repairTruncatedJson(analysisStr);
+        try {
+            analysis = JSON.parse(repaired);
+        } catch (e2) {
+            console.error('[ANALYZE] Critical: Failed to parse even repaired JSON');
+            analysis = {
+                summary: content,
+                objects: [],
+                tags: [],
+                scene_type: 'unknown'
+            };
+        }
+    }
+
+    deduplicateTags(analysis);
+    return analysis;
+}
+
 // Analyze image endpoint
 app.post('/analyze', async (req, res) => {
     console.log('[ANALYZE] Request received');
@@ -266,168 +530,33 @@ app.post('/analyze', async (req, res) => {
             return res.status(400).json({ error: 'No image data provided' });
         }
 
-        // Convert base64 to buffer for EXIF (keep this)
         const base64Data = imageData.replace(/^data:image\/\w+;base64,/, '');
         const buffer = Buffer.from(base64Data, 'base64');
 
-        console.log(`[ANALYZE] Buffer size: ${buffer.length} bytes`);
-
-        // Parse EXIF data using exifr (more robust than exif-parser)
+        // Metadata extraction (Keep existing logic)
         let metadata = {};
         try {
-            // Enable all metadata segments
             metadata = await exifr.parse(buffer, {
-                tiff: true,
-                xmp: true,
-                icc: true,
-                iptc: true,
-                jfif: true,
-                ihdr: true, // For PNG dimensions
-                mergeOutput: true
+                tiff: true, xmp: true, icc: true, iptc: true,
+                jfif: true, ihdr: true, mergeOutput: true
             }) || {};
-            console.log('[ANALYZE] EXIF extracted:', Object.keys(metadata).length, 'fields');
-        } catch (exifError) {
-            console.log('[ANALYZE] No EXIF data or error parsing:', exifError.message);
-        }
+        } catch (e) { /* ignore */ }
 
-        // FALLBACK: Use Sharp for basic metadata (Width, Height, Format) - Critical for GIFs/WebP
         try {
             const sharpMeta = await sharp(buffer).metadata();
-            // Merge sharp metadata if missing in exifr
             if (!metadata.ImageWidth && sharpMeta.width) metadata.ImageWidth = sharpMeta.width;
             if (!metadata.ImageHeight && sharpMeta.height) metadata.ImageHeight = sharpMeta.height;
             if (!metadata.format) metadata.format = sharpMeta.format;
-            console.log(`[ANALYZE] Sharp metadata merged: ${sharpMeta.width}x${sharpMeta.height} (${sharpMeta.format})`);
-        } catch (err) {
-            console.error('[ANALYZE] Sharp metadata extraction failed:', err);
-        }
+        } catch (e) { /* ignore */ }
 
-        // Special handling for ComfyUI metadata (prompt/workflow are JSON strings)
-        if (metadata.prompt) {
-            try {
-                // Keep it as an object if possible, or string?
-                // Actually the DB expects metadata to be logged.
-                // The frontend display logic might need checking.
-                // For now just pass it through.
-                console.log('[ANALYZE] Found ComfyUI prompt data');
-            } catch (e) {
-                console.warn('[ANALYZE] Error parsing Comfy prompt');
-            }
-        }
-
-        if (metadata.workflow) {
-            console.log('[ANALYZE] Found ComfyUI workflow data');
-        }
-
-        // --- LM Studio Analysis ---
-        // Standardize to JPEG for vision model compatibility (avoids errors with AVIF/WebP)
-        const standardizedBuffer = await sharp(buffer)
-            .jpeg({ quality: 80 })
-            .toBuffer();
-        const standardizedImageData = `data:image/jpeg;base64,${standardizedBuffer.toString('base64')}`;
-
-        // Select System Prompt
-        let systemPrompt = "You are an expert image analyst. Analyze the image and extract: 1. A detailed summary. 2. A list of objects. 3. A list of descriptive tags. 4. The scene type. Return JSON.";
-
-        // Use prompt from file if available
-        const selectedKey = promptType || 'Detailed Description'; // Default changed per user request
-        let basePrompt = qwenPrompts[selectedKey] || qwenPrompts['Detailed Description'] || Object.values(qwenPrompts)[0];
-
-        if (basePrompt) {
-            // Combined Strategy: Append metadata extraction instructions to ANY selected prompt
-            // unless it's the "Detailed Analysis" which already has it.
-            if (selectedKey !== 'Detailed Analysis') {
-                systemPrompt = `${basePrompt}\n\nIMPORTANT: regardless of the above, ALSO extract: 1. A list of objects (visible items). 2. A list of descriptive tags (visual style, colors, mood). 3. The scene type. Format the response as valid JSON with keys: 'summary' (containing your main generated text), 'objects', 'tags', 'scene_type'.`;
-            } else {
-                systemPrompt = basePrompt;
-            }
-            console.log(`[ANALYZE] Using prompt: "${selectedKey}"`);
-        } else {
-            console.log(`[ANALYZE] Requested prompt "${promptType}" not found. Using default.`);
-        }
-
-        // Always use Full Schema
-        const jsonSchema = {
-            name: "image_analysis",
-            strict: true,
-            schema: {
-                type: "object",
-                properties: {
-                    summary: { type: "string" },
-                    objects: { type: "array", items: { type: "string" } },
-                    tags: { type: "array", items: { type: "string" } },
-                    scene_type: { type: "string" }
-                },
-                required: ["summary", "objects", "tags", "scene_type"],
-                additionalProperties: false
-            }
-        };
-
-        const payload = {
-            model: "qwen2.5-vl-7b-instruct",
-            messages: [
-                {
-                    role: "system",
-                    content: systemPrompt
-                },
-                {
-                    role: "user",
-                    content: [
-                        { type: "text", text: "Analyze this image." },
-                        { type: "image_url", image_url: { url: standardizedImageData } }
-                    ]
-                }
-            ],
-            max_tokens: 1000,
-            response_format: {
-                type: "json_schema",
-                json_schema: jsonSchema
-            }
-        };
-
-        const lmResponse = await fetch(LM_STUDIO_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-
-        if (!lmResponse.ok) {
-            throw new Error(`LM Studio API Error: ${lmResponse.statusText}`);
-        }
-
-        const lmData = await lmResponse.json();
-        let analysisContent = lmData.choices[0].message.content;
-
-        // Sanitize markdown fences
-        analysisContent = analysisContent.replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
-
-        // Robust Parsing: Find outermost braces
-        const firstOpen = analysisContent.indexOf('{');
-        const lastClose = analysisContent.lastIndexOf('}');
-        if (firstOpen !== -1 && lastClose !== -1) {
-            analysisContent = analysisContent.substring(firstOpen, lastClose + 1);
-        }
-
-        let analysis;
-        try {
-            analysis = JSON.parse(analysisContent);
-            deduplicateTags(analysis); // <--- Deduplicate
-        } catch (parseError) {
-            console.warn('[ANALYZE] JSON Parsing failed. Raw content:', analysisContent);
-            // Fallback: Use raw content as summary
-            analysis = {
-                summary: analysisContent, // raw string
-                objects: [],
-                tags: [],
-                scene_type: 'unknown'
-            };
-        }
+        // Use shared analysis helper
+        const analysis = await performImageAnalysis(imageData, promptType);
 
         res.json({ analysis, metadata });
 
     } catch (error) {
         console.error('[ANALYZE] Error:', error);
-        res.status(500).json({ error: 'Image analysis failed' });
+        res.status(500).json({ error: 'Image analysis failed: ' + error.message });
     }
 });
 
@@ -470,15 +599,11 @@ app.post('/batch-analyze', async (req, res) => {
     }
 
     const results = {
-        total: ids.length,
-        processed: 0,
-        success: 0,
-        failed: 0,
-        errors: [],
-        updatedImages: []
+        total: ids.length, processed: 0,
+        success: 0, failed: 0,
+        errors: [], updatedImages: []
     };
 
-    // We process sequentially to avoid overwhelming LM Studio
     for (const id of ids) {
         try {
             const img = db.prepare('SELECT * FROM images WHERE id = ?').get(id);
@@ -490,119 +615,26 @@ app.post('/batch-analyze', async (req, res) => {
 
             console.log(`[BATCH] Processing ${img.filename} (${results.processed + 1}/${results.total})`);
 
-            // Read and standarize image
             const buffer = fs.readFileSync(img.path);
             const fileStats = fs.statSync(img.path);
-            const metadata = await sharp(buffer).metadata(); // Get correct dimensions
+            const sharpMeta = await sharp(buffer).metadata();
 
-            const standardizedBuffer = await sharp(buffer)
-                .jpeg({ quality: 80 })
-                .toBuffer();
+            const standardizedBuffer = await sharp(buffer).jpeg({ quality: 80 }).toBuffer();
             const imageData = `data:image/jpeg;base64,${standardizedBuffer.toString('base64')}`;
 
-            // Reuse logic? Ideally refactor into a helper function, but for now duplicate the fetch logic for isolation.
-            // Select System Prompt (Same Logic as /analyze)
-            const selectedKey = promptType || 'Detailed Description'; // Default changed per user request
-            let basePrompt = qwenPrompts[selectedKey] || qwenPrompts['Detailed Description'] || Object.values(qwenPrompts)[0];
-            let systemPrompt = "You are an expert image analyst...";
+            // Use shared analysis helper
+            const analysis = await performImageAnalysis(imageData, promptType);
 
-            if (basePrompt) {
-                if (selectedKey !== 'Detailed Analysis') {
-                    systemPrompt = `${basePrompt}\n\nIMPORTANT: regardless of the above, ALSO extract: 1. A list of objects. 2. A list of descriptive tags. 3. The scene type. Format the response as valid JSON with keys: 'summary', 'objects', 'tags', 'scene_type'.`;
-                } else {
-                    systemPrompt = basePrompt;
-                }
-            }
-
-            const payload = {
-                model: "qwen2.5-vl-7b-instruct",
-                messages: [
-                    { role: "system", content: systemPrompt },
-                    {
-                        role: "user",
-                        content: [
-                            { type: "text", text: "Analyze this image." },
-                            { type: "image_url", image_url: { url: imageData } }
-                        ]
-                    }
-                ],
-                max_tokens: 1800,
-                temperature: 0.7,
-                repetition_penalty: 1.1,
-                response_format: {
-                    type: "json_schema",
-                    json_schema: {
-                        name: "image_analysis",
-                        strict: true,
-                        schema: {
-                            type: "object",
-                            properties: {
-                                summary: { type: "string" },
-                                objects: { type: "array", items: { type: "string" } },
-                                tags: { type: "array", items: { type: "string" } },
-                                scene_type: { type: "string" }
-                            },
-                            required: ["summary", "objects", "tags", "scene_type"],
-                            additionalProperties: false
-                        }
-                    }
-                }
-            };
-
-            const lmResponse = await fetch(LM_STUDIO_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-
-            if (!lmResponse.ok) throw new Error(lmResponse.statusText);
-
-            const lmData = await lmResponse.json();
-            let analysisContent = lmData.choices[0].message.content;
-
-            // Sanitize markdown fences
-            analysisContent = analysisContent.replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
-
-            // Robust Parsing: Find outermost braces
-            const firstOpen = analysisContent.indexOf('{');
-            const lastClose = analysisContent.lastIndexOf('}');
-            if (firstOpen !== -1 && lastClose !== -1) {
-                analysisContent = analysisContent.substring(firstOpen, lastClose + 1);
-            }
-
-            let analysis;
-            try {
-                analysis = JSON.parse(analysisContent);
-                deduplicateTags(analysis); // <--- Deduplicate
-            } catch (pErr) {
-                console.warn(`[BATCH] JSON Parsing failed for ${id}. Content:`, analysisContent);
-                analysis = {
-                    summary: analysisContent,
-                    objects: [],
-                    tags: [], // Could try to extract list items if failed?
-                    scene_type: 'unknown'
-                };
-            }
-
-            // Update DB with Analysis AND Metadata
-            // Update DB with Analysis AND Metadata
             const updatedAt = new Date().toISOString();
-            const newWidth = metadata.width || null;
-            const newHeight = metadata.height || null;
-            const newSize = fileStats.size || null;
+            const width = sharpMeta.width || null;
+            const height = sharpMeta.height || null;
+            const size = fileStats.size || null;
 
             db.prepare(`UPDATE images SET analysis = ?, width = ?, height = ?, size = ?, updated_at = ? WHERE id = ?`)
-                .run(JSON.stringify(analysis), newWidth, newHeight, newSize, updatedAt, id);
+                .run(JSON.stringify(analysis), width, height, size, updatedAt, id);
 
             results.success++;
-            results.updatedImages.push({
-                id,
-                analysis,
-                width: newWidth,
-                height: newHeight,
-                size: newSize,
-                updated_at: updatedAt
-            });
+            results.updatedImages.push({ id, analysis, width, height, size, updated_at: updatedAt });
 
         } catch (err) {
             console.error(`[BATCH] Error on ID ${id}:`, err.message);
@@ -614,8 +646,80 @@ app.post('/batch-analyze', async (req, res) => {
     }
 
     if (results.success > 0) generateSearchIndex();
-
     res.json(results);
+});
+
+// Reparse Broken Analysis Endpoint
+app.post('/reparse-analysis', (req, res) => {
+    const { id } = req.body;
+    try {
+        const img = db.prepare('SELECT analysis FROM images WHERE id = ?').get(id);
+        if (!img) return res.status(404).json({ error: 'Image not found' });
+
+        let analysis = JSON.parse(img.analysis);
+        let rawContent = analysis.summary;
+
+        // If summary doesn't look like JSON, nothing to reparse
+        if (!rawContent.trim().startsWith('{')) {
+            return res.json({ success: false, message: 'Summary is not a detectable JSON structure.' });
+        }
+
+        console.log(`[REVERSE-PARS] Attempting to reparse content for ID ${id}`);
+        const repaired = repairTruncatedJson(rawContent);
+        
+        try {
+            const newAnalysis = JSON.parse(repaired);
+            deduplicateTags(newAnalysis);
+
+            // Update DB
+            db.prepare('UPDATE images SET analysis = ? WHERE id = ?')
+                .run(JSON.stringify(newAnalysis), id);
+
+            res.json({ success: true, analysis: newAnalysis });
+        } catch (e) {
+            res.json({ success: false, message: 'Could not recover valid JSON даже with repair.' });
+        }
+    } catch (error) {
+        console.error('[REPARSE] Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Full Re-Analyze Image Endpoint (Calls LM Studio)
+app.post('/re-analyze', async (req, res) => {
+    const { id } = req.body;
+    try {
+        const img = db.prepare('SELECT * FROM images WHERE id = ?').get(id);
+        if (!img || !fs.existsSync(img.path)) {
+            return res.status(404).json({ error: 'Image file not found' });
+        }
+
+        console.log(`[RE-ANALYZE] Triggering full analysis for ID ${id}`);
+
+        // Read and standarize image
+        const buffer = fs.readFileSync(img.path);
+        const standardizedBuffer = await sharp(buffer)
+            .jpeg({ quality: 80 })
+            .toBuffer();
+        const standardizedImageData = `data:image/jpeg;base64,${standardizedBuffer.toString('base64')}`;
+
+        // Perform analysis using shared logic
+        const analysis = await performImageAnalysis(standardizedImageData, null); // Use default prompt
+        
+        // Update DB
+        const updatedAt = new Date().toISOString();
+        db.prepare(`UPDATE images SET analysis = ?, updated_at = ? WHERE id = ?`)
+            .run(JSON.stringify(analysis), updatedAt, id);
+
+        // Update Search Index
+        generateSearchIndex();
+
+        res.json({ success: true, analysis, updated_at: updatedAt });
+
+    } catch (error) {
+        console.error('[RE-ANALYZE] Error:', error);
+        res.status(500).json({ error: 'Re-analysis failed: ' + error.message });
+    }
 });
 
 
@@ -1398,19 +1502,7 @@ app.post('/api/embed', async (req, res) => {
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
-function deduplicateTags(analysis) {
-    if (analysis && analysis.tags && analysis.objects && Array.isArray(analysis.tags) && Array.isArray(analysis.objects)) {
-        const objectSet = new Set(analysis.objects.map(o => o.toLowerCase()));
-        const originalCount = analysis.tags.length;
-        // Filter out tags that are present in objects (case-insensitive)
-        analysis.tags = analysis.tags.filter(tag => !objectSet.has(tag.toLowerCase()));
 
-        if (analysis.tags.length < originalCount) {
-            // console.log(`[DEDUPE] Removed ${originalCount - analysis.tags.length} duplicate tags`);
-        }
-    }
-    return analysis;
-}
 
 // ============================================================================
 // CONFIGURATION & SETTINGS
@@ -1546,6 +1638,37 @@ Config Path:     ${CONFIG_PATH}
 // ============================================================================
 // MAINTENANCE ENDPOINTS
 // ============================================================================
+
+// Run EVoC + UMAP Pipeline (Streaming)
+app.post('/api/maintenance/run-evoc', (req, res) => {
+    console.log('[MAINTENANCE] Running EVoC + UMAP Pipeline...');
+
+    res.setHeader('Content-Type', 'text/plain');
+    res.setHeader('Transfer-Encoding', 'chunked');
+
+    const scriptPath = path.join(__dirname, 'scripts', 'evoc_pipeline.py');
+    const dbPath = path.join(__dirname, 'images.db');
+    const embeddingsPath = path.join(__dirname, 'public', 'search-embeddings.json');
+
+    // Run the python script
+    const pythonProcess = spawn('python', [scriptPath, '--db', dbPath, '--embeddings', embeddingsPath]);
+
+    pythonProcess.stdout.on('data', (data) => {
+        res.write(data.toString());
+        process.stdout.write(`[PY-STDOUT] ${data}`);
+    });
+
+    pythonProcess.stderr.on('data', (data) => {
+        res.write(`ERROR: ${data.toString()}`);
+        process.stderr.write(`[PY-STDERR] ${data}`);
+    });
+
+    pythonProcess.on('close', (code) => {
+        res.write(`\n[PROCESS COMPLETED WITH CODE ${code}]\n`);
+        res.end();
+    });
+});
+
 // Generate Embeddings (Streaming)
 app.post('/maintenance/generate-embeddings', async (req, res) => {
     console.log('[MAINTENANCE] Generating embeddings...');
