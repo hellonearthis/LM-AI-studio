@@ -430,7 +430,6 @@ Rules:
 
     const jsonSchema = {
         name: "image_analysis",
-        strict: true,
         schema: {
             type: "object",
             properties: {
@@ -1211,6 +1210,9 @@ app.post('/validate-database', async (req, res) => {
                         .avif({ quality: 50 })
                         .toFile(thumbPath);
                     results.fixedThumbnails++;
+                    
+                    const updateTime = new Date().toISOString();
+                    db.prepare('UPDATE images SET updated_at = ? WHERE id = ?').run(updateTime, img.id);
                 } catch (err) {
                     console.error(`[VALIDATE] Failed to regenerate thumbnail for ${filePath}:`, err.message);
                     results.errors.push(`Thumbnail error: ${img.filename}`);
@@ -1541,6 +1543,38 @@ app.get('/api/proxy/models', async (req, res) => {
         res.json(data);
     } catch (e) {
         res.status(502).json({ error: 'Failed to fetch models from LM Studio' });
+    }
+});
+
+app.post('/api/proxy/load', async (req, res) => {
+    try {
+        console.log('[PROXY] Requesting model load:', req.body.model_identifier);
+        const response = await fetch('http://127.0.0.1:1234/api/v1/models/load', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(req.body)
+        });
+        const data = await response.json();
+        res.status(response.status).json(data);
+    } catch (e) {
+        console.error('[PROXY] Load error:', e.message);
+        res.status(502).json({ error: 'Failed to trigger model load in LM Studio' });
+    }
+});
+
+app.post('/api/proxy/unload', async (req, res) => {
+    try {
+        console.log('[PROXY] Requesting model unload:', req.body.model_identifier);
+        const response = await fetch('http://127.0.0.1:1234/api/v1/models/unload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(req.body)
+        });
+        const data = await response.json();
+        res.status(response.status).json(data);
+    } catch (e) {
+        console.error('[PROXY] Unload error:', e.message);
+        res.status(502).json({ error: 'Failed to trigger model unload in LM Studio' });
     }
 });
 
@@ -1904,6 +1938,115 @@ app.post('/rename', (req, res) => {
 
     } catch (err) {
         console.error('[RENAME] Error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Bulk Rename Endpoint
+// Takes an array of selected IDs and a user-provided baseName, then renames all selected items
+// sequentially (e.g. holiday_0001.jpg, holiday_0002.jpg). Checks for existing files to prevent overrides.
+app.post('/bulk-rename', (req, res) => {
+    const { ids, baseName } = req.body;
+    if (!ids || !Array.isArray(ids) || ids.length === 0 || !baseName) {
+        return res.status(400).json({ error: 'Missing IDs array or base name' });
+    }
+
+    // Sanitize base name to prevent illegal characters in filenames
+    const sanitizedBase = baseName.replace(/[<>:"/\\|?*]+/g, '').trim();
+    if (!sanitizedBase) {
+        return res.status(400).json({ error: 'Invalid base name after sanitization' });
+    }
+
+    const results = {
+        successCount: 0,
+        failedCount: 0,
+        errors: []
+    };
+
+    try {
+        const thumbDir = path.join(__dirname, 'public/thumbnails');
+        
+        // Prepare the update statement once for performance
+        const updateStmt = db.prepare('UPDATE images SET filename = ?, path = ?, mtime = ? WHERE id = ?');
+
+        // Loop through all provided IDs to rename them
+        for (const id of ids) {
+            try {
+                // Find the original image record
+                const image = db.prepare('SELECT * FROM images WHERE id = ?').get(id);
+                if (!image) {
+                    results.failedCount++;
+                    results.errors.push(`ID ${id} not found locally.`);
+                    continue; // Skip to next image
+                }
+
+                const oldPath = image.path;
+                if (!fs.existsSync(oldPath)) {
+                    results.failedCount++;
+                    results.errors.push(`File missing on disk: ${image.filename}`);
+                    continue; // Skip to next image
+                }
+
+                const dir = path.dirname(oldPath);
+                const ext = path.extname(oldPath); // Includes the dot, e.g. '.jpg'
+                
+                let newFilename = '';
+                let newPath = '';
+                let index = 1;
+
+                // Sequential Generation logic: Loop until we find a combination that does not already exist
+                // This prevents accidentally overriding a file named holiday_0001.jpg if it exists
+                while (true) {
+                    // Format the sequence number to 4 digits (e.g. 0001)
+                    const sequenceStr = String(index).padStart(4, '0');
+                    newFilename = `${sanitizedBase}_${sequenceStr}${ext}`;
+                    newPath = path.join(dir, newFilename);
+
+                    if (!fs.existsSync(newPath)) {
+                        break; // Safety verified: The file name is not taken.
+                    }
+                    index++; // If taken, try the next number.
+                }
+
+                // 1. Rename the primary image on the disk
+                fs.renameSync(oldPath, newPath);
+
+                // 2. Best effort rename of the thumbnail cache file
+                const oldBase = path.parse(oldPath).name; // Filename without extension
+                const newBase = path.parse(newFilename).name; 
+                try {
+                    const oldThumbPath = path.join(thumbDir, oldBase + '.avif');
+                    const newThumbPath = path.join(thumbDir, newBase + '.avif');
+                    if (fs.existsSync(oldThumbPath)) {
+                        fs.renameSync(oldThumbPath, newThumbPath);
+                    }
+                } catch (thumbErr) {
+                    // Failing to rename the thumbnail isn't critical enough to stop the operation
+                    console.warn(`[BULK RENAME] Failed to rename thumbnail for ${newFilename}:`, thumbErr);
+                }
+
+                // 3. Keep the sqlite database completely perfectly synced
+                updateStmt.run(newFilename, newPath, new Date().toISOString(), id);
+                
+                results.successCount++;
+
+            } catch (innerErr) {
+                // If a single frame fails, log it but don't crash the whole batch process
+                console.error(`[BULK RENAME] Failed to rename ID ${id}:`, innerErr);
+                results.failedCount++;
+                results.errors.push(`ID ${id}: ${innerErr.message}`);
+            }
+        }
+
+        // Return a summary payload back to the browser
+        res.json({ 
+            success: true, 
+            message: `Renamed ${results.successCount} files securely.`,
+            ...results
+        });
+
+    } catch (err) {
+        console.error('[BULK RENAME] Top-level error:', err);
         res.status(500).json({ error: err.message });
     }
 });

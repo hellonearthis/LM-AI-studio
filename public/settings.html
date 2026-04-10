@@ -63,7 +63,37 @@
                         <option value="">Auto-detect (Recommended)</option>
                     </select>
                     <p class="form-helper">Used for describing images. Must have vision capabilities (e.g., Qwen-VL,
-                        Llava).</p>
+                        Gemma-4).</p>
+
+                    <div id="advancedToggle" class="advanced-settings-toggle">
+                        <span id="toggleIcon">▶</span> Advanced Model Performance
+                    </div>
+
+                    <div id="advancedContent" class="advanced-settings-content">
+                        <div class="vram-warning">
+                            <strong>⚠️ VRAM Performance Notice</strong>
+                            Larger models (Gemma-4, etc.) at maximum GPU offload may consume significant memory. 
+                            Ensure your GPU has enough VRAM (12GB-24GB recommended for large models) to avoid crashes.
+                        </div>
+
+                        <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+                            <div style="flex: 1;">
+                                <label class="form-label" for="gpuLayers">GPU Offload Layers</label>
+                                <input type="text" id="gpuLayers" class="styled-input" placeholder="max" style="width: 100%;" value="max">
+                                <p class="form-helper">Number of layers or 'max'</p>
+                            </div>
+                            <div style="flex: 1;">
+                                <label class="form-label" for="contextLength">Context Length</label>
+                                <input type="number" id="contextLength" class="styled-input" placeholder="8192" style="width: 100%;" value="8192">
+                                <p class="form-helper">Min 2048 for Vision</p>
+                            </div>
+                        </div>
+
+                        <button id="loadModelBtn" class="load-model-btn">
+                            🚀 Load into GPU
+                        </button>
+                        <div id="loadStatus" class="load-status"></div>
+                    </div>
                 </div>
 
                 <div class="form-group">

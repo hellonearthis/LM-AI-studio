@@ -430,19 +430,17 @@ function renderBatch() {
     // Pre-measure summary heights with pretext if available
     let summaryHeights = new Map();
     if (window.PretextLayout && window.PretextLayout.ready) {
-        // Estimate summary container width from the results grid.
-        // Card padding ~24px, thumbnail 80px, gap 16px, copy btn ~50px, other padding ~30px.
-        const gridWidth = searchResults.offsetWidth;
-        const cardWidth = gridWidth > 0
-            ? Math.min(gridWidth, 400) - 200
-            : 180;
+        const gridWidth = searchResults.offsetWidth > 0 ? searchResults.offsetWidth : 1000;
+        const colCount = Math.max(1, Math.floor((gridWidth + 16) / (320 + 16)));
+        const actualCardWidth = (gridWidth - (colCount - 1) * 16) / colCount;
+        const textWidth = actualCardWidth - 24; // Full width minus 0.75rem*2 padding
 
         const items = batch.map(img => {
             const analysis = img.analysis || {};
             return { id: img.id, text: analysis.summary || '' };
         });
 
-        summaryHeights = window.PretextLayout.measureBatch(items, cardWidth, 'search');
+        summaryHeights = window.PretextLayout.measureBatch(items, textWidth, 'search');
     }
 
     // Safely render batch
@@ -468,9 +466,17 @@ function measureSingleCardHeight(img, context = 'search') {
     const summaryText = analysis.summary || '';
     if (!summaryText) return undefined;
 
-    const gridWidth = searchResults.offsetWidth;
-    const cardWidth = gridWidth > 0 ? Math.min(gridWidth, 400) - 200 : 180;
-    const result = window.PretextLayout.measureText(summaryText, cardWidth, context);
+    let textWidth = 296; // Safe default
+    const existingCard = document.querySelector(`.card[data-id="${img.id}"]`);
+    if (existingCard && existingCard.clientWidth > 0) {
+        textWidth = existingCard.clientWidth - 24;
+    } else {
+        const gridWidth = searchResults.offsetWidth > 0 ? searchResults.offsetWidth : 1000;
+        const colCount = Math.max(1, Math.floor((gridWidth + 16) / (320 + 16)));
+        const actualCardWidth = (gridWidth - (colCount - 1) * 16) / colCount;
+        textWidth = actualCardWidth - 24;
+    }
+    const result = window.PretextLayout.measureText(summaryText, textWidth, context);
     return result.height;
 }
 
@@ -491,7 +497,8 @@ function createResultHtml(img, summaryHeight) {
     // Thumbnail path logic
     const filename = img.filename || 'unknown.png';
     const filenameBase = filename.substring(0, filename.lastIndexOf('.')) || filename;
-    const displayPath = `thumbnails/${filenameBase}.avif`;
+    const timeStamp = img.updated_at ? new Date(img.updated_at).getTime() : (img.created_at ? new Date(img.created_at).getTime() : '');
+    const displayPath = `thumbnails/${filenameBase}.avif${timeStamp ? '?t=' + timeStamp : ''}`;
 
     const analysis = img.analysis || {};
     const objects = analysis.objects || [];
@@ -1286,6 +1293,100 @@ function showAlertModal(message, title = 'Notification', onOk = null) {
     document.addEventListener('keydown', keyHandler);
 }
 
+// Custom Bulk Rename Modal
+function showBulkRenameModal(selectedIdsSet, imagesArray) {
+    return new Promise((resolve) => {
+        const modal = document.createElement('div');
+        modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;';
+
+        // Get filenames for selected items
+        const selectedFiles = Array.from(selectedIdsSet).map(id => {
+            const img = imagesArray.find(i => String(i.id) === id);
+            return img ? img.filename : `ID: ${id}`;
+        });
+
+        // Create the list HTML
+        const listHtml = selectedFiles.slice(0, 100).map(name => `
+            <li style="padding: 0.25rem 0; border-bottom: 1px solid rgba(255,255,255,0.05); color: var(--text-secondary); font-size: 0.85rem; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                📄 ${name}
+            </li>
+        `).join('');
+        
+        const overflowMsg = selectedFiles.length > 100 ? `<li style="padding: 0.25rem 0; color: var(--accent); font-size: 0.8rem; text-align: center;">...and ${selectedFiles.length - 100} more</li>` : '';
+
+        modal.innerHTML = `
+            <div style="background: var(--card-bg); padding: 2rem; border-radius: 12px; border: 1px solid var(--border); max-width: 450px; width: 90%; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,0.5);">
+                <h3 style="margin: 0 0 0.5rem 0; color: var(--text-primary); font-size: 1.25rem;">Bulk Rename</h3>
+                <p style="margin: 0 0 1rem 0; color: var(--text-secondary); font-size: 0.9rem;">You are renaming ${selectedIdsSet.size} file(s).</p>
+                
+                <div style="background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem; margin-bottom: 1.5rem; max-height: 150px; overflow-y: auto;">
+                    <ul style="list-style: none; padding: 0; margin: 0;">
+                        ${listHtml}
+                        ${overflowMsg}
+                    </ul>
+                </div>
+
+                <div style="margin-bottom: 1.5rem; text-align: left;">
+                    <label style="display: block; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.5rem;">Base Name (e.g. "coffee")</label>
+                    <input type="text" id="renameBaseInput" placeholder="Enter base name..." style="width: 100%; padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-color); color: var(--text-primary); font-size: 1rem; outline: none;">
+                    <p style="margin: 0.5rem 0 0 0; color: var(--text-secondary); font-size: 0.75rem;">Files will be renamed sequentially: coffee_0001, coffee_0002, etc.</p>
+                </div>
+
+                <div style="display: flex; gap: 1rem; justify-content: flex-end;">
+                    <button id="cancelRenameBtn" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.5rem 1.5rem; border-radius: 6px; cursor: pointer; transition: all 0.2s;">Cancel</button>
+                    <button id="goRenameBtn" style="background: var(--accent); border: none; color: white; padding: 0.5rem 1.5rem; border-radius: 6px; cursor: pointer; font-weight: 500; transition: background 0.2s;">Go</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        const input = modal.querySelector('#renameBaseInput');
+        const goBtn = modal.querySelector('#goRenameBtn');
+        const cancelBtn = modal.querySelector('#cancelRenameBtn');
+
+        // Focus input
+        setTimeout(() => input.focus(), 50);
+
+        const cleanup = () => {
+            document.removeEventListener('keydown', keyHandler);
+            modal.remove();
+        };
+
+        const submit = () => {
+            const val = input.value.trim();
+            if (val) {
+                cleanup();
+                resolve(val);
+            } else {
+                input.style.border = '1px solid #ef4444';
+                setTimeout(() => input.style.border = '1px solid var(--border)', 1000);
+            }
+        };
+
+        goBtn.onclick = submit;
+        cancelBtn.onclick = () => { cleanup(); resolve(null); };
+
+        const keyHandler = (e) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                cleanup();
+                resolve(null);
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                submit();
+            }
+        };
+
+        document.addEventListener('keydown', keyHandler);
+        
+        cancelBtn.onmouseover = () => cancelBtn.style.background = 'rgba(255,255,255,0.05)';
+        cancelBtn.onmouseout = () => cancelBtn.style.background = 'transparent';
+        goBtn.onmouseover = () => goBtn.style.filter = 'brightness(1.1)';
+        goBtn.onmouseout = () => goBtn.style.filter = 'brightness(1)';
+    });
+}
+
 // Update Tag Backend Call
 async function updateTag(id, type, oldTag, newTag, action) {
     try {
@@ -1645,9 +1746,60 @@ function updateProcessButton() {
         processSelectedBtn.disabled = count === 0;
         processSelectedBtn.style.opacity = count === 0 ? '0.5' : '1';
     }
+    
+    const bulkRenameBtn = document.getElementById('bulkRenameBtn');
+    if (bulkRenameBtn) {
+        bulkRenameBtn.disabled = count === 0;
+        bulkRenameBtn.style.opacity = count === 0 ? '0.5' : '1';
+    }
+
     if (unselectAllBtn) {
         unselectAllBtn.style.display = count > 0 ? 'block' : 'none';
     }
+}
+
+// 0.5 Bulk Rename
+const bulkRenameBtn = document.getElementById('bulkRenameBtn');
+if (bulkRenameBtn) {
+    bulkRenameBtn.addEventListener('click', async () => {
+        if (selectedIds.size === 0) return;
+
+        // In search.js we use the new custom modal, passing allImages for name lookups
+        const baseName = await showBulkRenameModal(selectedIds, allImages);
+        if (!baseName || !baseName.trim()) return;
+
+        bulkRenameBtn.disabled = true;
+        const originalText = bulkRenameBtn.textContent;
+        bulkRenameBtn.textContent = 'Renaming...';
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/bulk-rename`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ids: Array.from(selectedIds),
+                    baseName: baseName.trim()
+                })
+            });
+
+            const data = await response.json();
+            
+            if (response.ok && data.success) {
+                showAlertModal(data.message || 'Successfully renamed files', 'Rename Complete');
+                selectedIds.clear();
+                updateProcessButton();
+                await refreshData();
+            } else {
+                showAlertModal(data.error || 'Failed to bulk rename', 'Rename Error');
+            }
+        } catch (err) {
+            console.error('Bulk rename failed:', err);
+            showAlertModal('Error communicating with server.', 'Error');
+        } finally {
+            bulkRenameBtn.disabled = false;
+            bulkRenameBtn.textContent = originalText;
+        }
+    });
 }
 
 // 1. Select Missing

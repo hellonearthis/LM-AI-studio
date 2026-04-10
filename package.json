@@ -1,31 +1,55 @@
 {
-    "name": "image-analysis-studio",
-    "version": "1.0.0",
-    "description": "AI-powered image analysis tool with Electron",
-    "main": "main.js",
-    "type": "module",
-    "scripts": {
-        "start": "electron .",
-        "dev": "electron . --dev",
-        "ls:sync": ".\\venv\\Scripts\\python scripts/sync_ls.py",
-        "ls:serve": "scripts\\serve_ls.bat"
+  "name": "image-analysis-studio",
+  "version": "1.0.0",
+  "description": "AI-powered image analysis tool with Electron",
+  "main": "main.js",
+  "type": "module",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "ls:sync": ".\\venv\\Scripts\\python scripts/sync_ls.py",
+    "ls:serve": "scripts\\serve_ls.bat",
+    "build": "electron-builder"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@chenglou/pretext": "^0.0.3",
+    "@duckdb/duckdb-wasm": "^1.30.0",
+    "@google/generative-ai": "^0.21.0",
+    "better-sqlite3": "^12.6.2",
+    "d3": "^7.9.0",
+    "dotenv": "^16.4.7",
+    "electron": "^33.2.1",
+    "exif-parser": "^0.1.12",
+    "exifr": "^7.1.3",
+    "express": "^4.21.1",
+    "fuse.js": "^7.1.0",
+    "multer": "^2.0.2",
+    "sharp": "^0.33.5"
+  },
+  "devDependencies": {
+    "electron-builder": "^26.8.1"
+  },
+  "build": {
+    "appId": "com.lmaistudio.app",
+    "productName": "LM AI Studio",
+    "win": {
+      "target": "nsis",
+      "icon": "public/favicon.ico"
     },
-    "keywords": [],
-    "author": "",
-    "license": "ISC",
-    "dependencies": {
-        "@chenglou/pretext": "^0.0.3",
-        "@duckdb/duckdb-wasm": "^1.30.0",
-        "@google/generative-ai": "^0.21.0",
-        "better-sqlite3": "^12.6.2",
-        "d3": "^7.9.0",
-        "dotenv": "^16.4.7",
-        "electron": "^33.2.1",
-        "exif-parser": "^0.1.12",
-        "exifr": "^7.1.3",
-        "express": "^4.21.1",
-        "fuse.js": "^7.1.0",
-        "multer": "^2.0.2",
-        "sharp": "^0.33.5"
-    }
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*",
+      "!test/**",
+      "!venv/**",
+      "!dist/**"
+    ],
+    "asarUnpack": [
+      "**/*.node"
+    ]
+  }
 }

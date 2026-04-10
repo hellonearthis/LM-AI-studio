@@ -2,10 +2,26 @@ const API_BASE_URL = 'http://localhost:3000'; // Adjust if needed
 
 const visionSelect = document.getElementById('visionModelSelect');
 const embeddingSelect = document.getElementById('embeddingModelSelect');
+const gpuLayersInput = document.getElementById('gpuLayers');
+const contextLengthInput = document.getElementById('contextLength');
+const advancedToggle = document.getElementById('advancedToggle');
+const advancedContent = document.getElementById('advancedContent');
+const toggleIcon = document.getElementById('toggleIcon');
+const loadModelBtn = document.getElementById('loadModelBtn');
+const loadStatus = document.getElementById('loadStatus');
+
 const refreshBtn = document.getElementById('refreshModelsBtn');
 const saveBtn = document.getElementById('saveConfigBtn');
 const saveStatus = document.getElementById('saveStatus');
 const diagnosticsOutput = document.getElementById('diagnosticsOutput');
+
+// Advanced Toggle Logic
+if (advancedToggle) {
+    advancedToggle.addEventListener('click', () => {
+        advancedContent.classList.toggle('open');
+        toggleIcon.textContent = advancedContent.classList.contains('open') ? '▼' : '▶';
+    });
+}
 
 // Initial Load
 document.addEventListener('DOMContentLoaded', async () => {
@@ -24,7 +40,9 @@ refreshBtn.addEventListener('click', async () => {
 saveBtn.addEventListener('click', async () => {
     const config = {
         visionModel: visionSelect.value,
-        embeddingModel: embeddingSelect.value
+        embeddingModel: embeddingSelect.value,
+        gpuLayers: gpuLayersInput ? gpuLayersInput.value : 'max',
+        contextLength: parseInt(contextLengthInput ? contextLengthInput.value : '8192', 10) || 8192
     };
 
     try {
@@ -46,6 +64,57 @@ saveBtn.addEventListener('click', async () => {
         alert('Error saving configuration');
     }
 });
+
+if (loadModelBtn) {
+    loadModelBtn.addEventListener('click', async () => {
+        const modelId = visionSelect.value;
+        if (!modelId) {
+            alert('Please select a Vision model first.');
+            return;
+        }
+
+        const gpuLayers = gpuLayersInput ? gpuLayersInput.value : 'max';
+        const contextLength = parseInt(contextLengthInput ? contextLengthInput.value : '8192', 10) || 8192;
+
+        loadModelBtn.disabled = true;
+        loadModelBtn.textContent = '⏳ Loading Model...';
+        loadStatus.textContent = 'Initiating load in LM Studio...';
+        loadStatus.style.color = 'var(--accent)';
+
+        try {
+            const response = await fetch('/api/proxy/load', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model_identifier: modelId,
+                    config: {
+                        gpu_offload: gpuLayers,
+                        context_length: contextLength
+                    }
+                })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                loadStatus.textContent = '✅ Model Loaded Successfully!';
+                loadStatus.style.color = '#4ade80';
+                updateDiagnostics();
+            } else {
+                loadStatus.textContent = '❌ Load Failed: ' + (data.error || 'Check LM Studio');
+                loadStatus.style.color = '#ef4444';
+            }
+        } catch (err) {
+            console.error(err);
+            loadStatus.textContent = '❌ Connection Error';
+            loadStatus.style.color = '#ef4444';
+        } finally {
+            loadModelBtn.disabled = false;
+            loadModelBtn.textContent = '🚀 Load into GPU';
+            setTimeout(() => { if (loadStatus.textContent && loadStatus.textContent.includes('Success')) loadStatus.textContent = ''; }, 5000);
+        }
+    });
+}
 
 async function refreshModels() {
     try {
@@ -109,6 +178,8 @@ async function loadConfig() {
                 visionSelect.value = config.visionModel;
             }
             if (config.embeddingModel) embeddingSelect.value = config.embeddingModel;
+            if (config.gpuLayers && gpuLayersInput) gpuLayersInput.value = config.gpuLayers;
+            if (config.contextLength && contextLengthInput) contextLengthInput.value = config.contextLength;
         }
     } catch (e) {
         console.error('Error loading config:', e);

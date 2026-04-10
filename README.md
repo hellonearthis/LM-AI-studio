@@ -187,6 +187,18 @@ You can configure models via the **Settings UI** or by creating a `.env` file (a
 
 ---
 
+## 📦 Building for Windows
+
+Lumina is configured with `electron-builder` to package the app into a standalone Windows installer (`.exe`). This process handles natively compiling dependencies like `sqlite3` and `sharp` so they run outside of the development environment.
+
+To generate the setup file:
+```bash
+npm run build
+```
+Once complete, the installer will be located in the automatically created `dist/` folder.
+
+---
+
 ## 📝 License
 
 ISC
