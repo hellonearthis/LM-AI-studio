@@ -9,7 +9,8 @@
     "dev": "electron . --dev",
     "ls:sync": ".\\venv\\Scripts\\python scripts/sync_ls.py",
     "ls:serve": "scripts\\serve_ls.bat",
-    "build": "electron-builder"
+    "build": "electron-builder",
+    "postinstall": "node scripts/sync_libs.js"
   },
   "keywords": [],
   "author": "",
