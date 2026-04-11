@@ -465,8 +465,11 @@ function processUrlParams() {
         const urlType = urlParams.get('type'); // 'tag' or 'object'
         console.log(`[MAIN] Pre-populating query: ${decoded}, type: ${urlType}`);
 
-        if (urlType === 'tag' || urlType === 'object') {
-            addTagFilter(decoded, urlType);
+        // If 'tag' parameter is present but 'type' is missing, assume it's a tag filter
+        const effectiveType = urlType || (initialTag ? 'tag' : null);
+
+        if (effectiveType === 'tag' || effectiveType === 'object') {
+            addTagFilter(decoded, effectiveType);
         } else {
             searchQuery.value = decoded;
         }
@@ -2014,6 +2017,23 @@ async function findSimilar(imageId) {
         }
         showAlertModal('Image data not found. Try searching first.', 'Find Similar');
         return;
+    }
+
+    // ENSURE DATA IS PARSED (Server returns stringified JSON)
+    if (typeof source.analysis === 'string') {
+        try {
+            source.analysis = JSON.parse(source.analysis || '{}');
+        } catch (e) {
+            console.error('[FIND-SIMILAR] Failed to parse analysis JSON:', e);
+            source.analysis = {};
+        }
+    }
+    if (typeof source.metadata === 'string') {
+        try {
+            source.metadata = JSON.parse(source.metadata || '{}');
+        } catch (e) {
+            source.metadata = {};
+        }
     }
 
     const analysis = source.analysis || {};

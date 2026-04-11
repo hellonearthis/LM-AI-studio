@@ -117,8 +117,10 @@ function renderCloud(data) {
         const color = currentTab === 'objects' ? 'var(--accent-secondary, #34d399)' : 'var(--accent)';
         const opacity = 0.7 + ((size - minSize) / (maxSize - minSize)) * 0.3; // More frequent = more opaque
 
+        const type = currentTab === 'objects' ? 'object' : 'tag';
+
         return `
-            <a href="search.html?tag=${encodeURIComponent(item.name)}" 
+            <a href="search.html?tag=${encodeURIComponent(item.name)}&type=${type}" 
                class="tag-cloud-item" 
                style="font-size: ${size}rem; opacity: ${opacity}; color: ${color};">
                ${item.name}
@@ -176,7 +178,7 @@ function renderList(data) {
                                 <span class="badge">${item.count} images</span>
                             </div>
                             <div style="margin-top: 0.5rem; display: flex; justify-content: flex-end;">
-                                <a href="search.html?tag=${encodeURIComponent(item.name)}" class="btn-sm">View Images →</a>
+                                <a href="search.html?tag=${encodeURIComponent(item.name)}&type=${currentTab === 'objects' ? 'object' : 'tag'}" class="btn-sm">View Images →</a>
                             </div>
                         </div>
                     `).join('')}
