@@ -644,43 +644,54 @@ function showModal(title, message, isConfirm = false) {
     });
 }
 
-// Helper: Custom Bulk Rename Modal
+/**
+ * @function showBulkRenameModal
+ * @description Creates and manages a custom HTML overlay for bulk renaming files.
+ * Why a custom modal? Modern Electron environments often block native prompt() for security.
+ * A custom UI also allows us to show the user exactly which files are targeted.
+ * 
+ * @param {Set} selectedIdsSet - A set of Image IDs currently selected in the UI.
+ * @param {Array} imagesArray - The full local cache of image objects to pull filenames from.
+ */
 function showBulkRenameModal(selectedIdsSet, imagesArray) {
     return new Promise((resolve) => {
-        const modal = document.createElement('div');
-        modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;';
+        // Create the dim background overlay
+        const modalOverlay = document.createElement('div');
+        modalOverlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;';
 
-        // Get filenames for selected items
-        const selectedFiles = Array.from(selectedIdsSet).map(id => {
-            const img = imagesArray.find(i => String(i.id) === id);
-            return img ? img.filename : `ID: ${id}`;
+        // Map IDs to human-readable filenames so the user can verify their selection
+        const targetFilenames = Array.from(selectedIdsSet).map(id => {
+            const foundImage = imagesArray.find(img => String(img.id) === id);
+            return foundImage ? foundImage.filename : `Record ID: ${id}`;
         });
 
-        // Create the list HTML
-        const listHtml = selectedFiles.slice(0, 100).map(name => `
+        // Generate the scrollable list of files to be renamed
+        const previewListHtml = targetFilenames.slice(0, 100).map(name => `
             <li style="padding: 0.25rem 0; border-bottom: 1px solid rgba(255,255,255,0.05); color: var(--text-secondary); font-size: 0.85rem; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                 📄 ${name}
             </li>
         `).join('');
         
-        const overflowMsg = selectedFiles.length > 100 ? `<li style="padding: 0.25rem 0; color: var(--accent); font-size: 0.8rem; text-align: center;">...and ${selectedFiles.length - 100} more</li>` : '';
+        // If there are more than 100 files, we truncate the preview to keep the UI snappy
+        const overflowIndicator = targetFilenames.length > 100 ? `<li style="padding: 0.25rem 0; color: var(--accent); font-size: 0.8rem; text-align: center;">...and ${targetFilenames.length - 100} more</li>` : '';
 
-        modal.innerHTML = `
+        // Construct the modal HTML structure
+        modalOverlay.innerHTML = `
             <div style="background: var(--card-bg); padding: 2rem; border-radius: 12px; border: 1px solid var(--border); max-width: 450px; width: 90%; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,0.5);">
                 <h3 style="margin: 0 0 0.5rem 0; color: var(--text-primary); font-size: 1.25rem;">Bulk Rename</h3>
-                <p style="margin: 0 0 1rem 0; color: var(--text-secondary); font-size: 0.9rem;">You are renaming ${selectedIdsSet.size} file(s).</p>
+                <p style="margin: 0 0 1rem 0; color: var(--text-secondary); font-size: 0.9rem;">You are renaming ${selectedIdsSet.size} file(s) in this batch.</p>
                 
                 <div style="background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem; margin-bottom: 1.5rem; max-height: 150px; overflow-y: auto;">
                     <ul style="list-style: none; padding: 0; margin: 0;">
-                        ${listHtml}
-                        ${overflowMsg}
+                        ${previewListHtml}
+                        ${overflowIndicator}
                     </ul>
                 </div>
 
                 <div style="margin-bottom: 1.5rem; text-align: left;">
-                    <label style="display: block; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.5rem;">Base Name (e.g. "coffee")</label>
+                    <label style="display: block; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.5rem;">New Base Name (e.g. "holiday")</label>
                     <input type="text" id="renameBaseInput" placeholder="Enter base name..." style="width: 100%; padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-color); color: var(--text-primary); font-size: 1rem; outline: none;">
-                    <p style="margin: 0.5rem 0 0 0; color: var(--text-secondary); font-size: 0.75rem;">Files will be renamed sequentially: coffee_0001, coffee_0002, etc.</p>
+                    <p style="margin: 0.5rem 0 0 0; color: var(--text-secondary); font-size: 0.75rem;">Sequence logic: holiday_001, holiday_002, etc.</p>
                 </div>
 
                 <div style="display: flex; gap: 1rem; justify-content: flex-end;">
@@ -690,54 +701,60 @@ function showBulkRenameModal(selectedIdsSet, imagesArray) {
             </div>
         `;
 
-        document.body.appendChild(modal);
+        document.body.appendChild(modalOverlay);
 
-        const input = modal.querySelector('#renameBaseInput');
-        const goBtn = modal.querySelector('#goRenameBtn');
-        const cancelBtn = modal.querySelector('#cancelRenameBtn');
+        // Grab internal elements for event handling
+        const nameInputField = modalOverlay.querySelector('#renameBaseInput');
+        const submitButton = modalOverlay.querySelector('#goRenameBtn');
+        const closeButton = modalOverlay.querySelector('#cancelRenameBtn');
 
-        // Focus input
-        setTimeout(() => input.focus(), 50);
+        // Auto-focus the input so the user can start typing immediately
+        setTimeout(() => nameInputField.focus(), 50);
 
-        const cleanup = () => {
-            document.removeEventListener('keydown', keyHandler);
-            modal.remove();
+        // Cleanup function to remove the modal from the DOM
+        const hideModal = () => {
+            document.removeEventListener('keydown', handleKeyEvents);
+            modalOverlay.remove();
         };
 
-        const submit = () => {
-            const val = input.value.trim();
-            if (val) {
-                cleanup();
-                resolve(val);
+        const handleSubmission = () => {
+            const trimmedValue = nameInputField.value.trim();
+            if (trimmedValue) {
+                hideModal();
+                resolve(trimmedValue); // Return the name to the caller
             } else {
-                // Shake effect for empty input
-                input.style.border = '1px solid #ef4444';
-                setTimeout(() => input.style.border = '1px solid var(--border)', 1000);
+                // Flash the border red if they try to submit an empty name
+                nameInputField.style.border = '1px solid #ef4444';
+                setTimeout(() => nameInputField.style.border = '1px solid var(--border)', 1000);
             }
         };
 
-        goBtn.onclick = submit;
-        cancelBtn.onclick = () => { cleanup(); resolve(null); };
+        submitButton.onclick = handleSubmission;
+        closeButton.onclick = () => { hideModal(); resolve(null); };
 
-        const keyHandler = (e) => {
-            // Only capture Escape if we are inside the modal to prevent conflicts
+        /**
+         * KEYBOARD ACCESSIBILITY
+         * Enter = Submit
+         * Escape = Cancel
+         */
+        const handleKeyEvents = (e) => {
             if (e.key === 'Escape') {
                 e.preventDefault();
-                cleanup();
+                hideModal();
                 resolve(null);
             } else if (e.key === 'Enter') {
                 e.preventDefault();
-                submit();
+                handleSubmission();
             }
         };
 
-        document.addEventListener('keydown', keyHandler);
+        document.addEventListener('keydown', handleKeyEvents);
         
-        // Let hover effects work via JS
-        cancelBtn.onmouseover = () => cancelBtn.style.background = 'rgba(255,255,255,0.05)';
-        cancelBtn.onmouseout = () => cancelBtn.style.background = 'transparent';
-        goBtn.onmouseover = () => goBtn.style.filter = 'brightness(1.1)';
-        goBtn.onmouseout = () => goBtn.style.filter = 'brightness(1)';
+        // Add subtle hover interactions manually via JS
+        closeButton.onmouseover = () => closeButton.style.background = 'rgba(255,255,255,0.05)';
+        closeButton.onmouseout = () => closeButton.style.background = 'transparent';
+        submitButton.onmouseover = () => submitButton.style.filter = 'brightness(1.1)';
+        submitButton.onmouseout = () => submitButton.style.filter = 'brightness(1)';
     });
 }
 
@@ -821,51 +838,78 @@ function updateProcessButton() {
     }
 }
 
-// 4. Bulk Rename Selected
+// ============================================================================
+// BULK RENAME HANDLER
+// ============================================================================
+/**
+ * Attached to the "Bulk Rename" button. This triggers the multi-file rename
+ * workflow using our custom modal to collect the base name from the user.
+ * 
+ * Flow:
+ * 1. Collect Base Name (UI Modal)
+ * 2. Send IDs + BaseName to Server (/bulk-rename)
+ * 3. Clearing selection and refreshing view on success.
+ */
 const bulkRenameBtn = document.getElementById('bulkRenameBtn');
 if (bulkRenameBtn) {
     bulkRenameBtn.addEventListener('click', async () => {
+        // Guard: Don't do anything if no files are selected
         if (selectedIds.size === 0) return;
 
-        // Use the new custom modal
-        const baseName = await showBulkRenameModal(selectedIds, imagesData);
+        /**
+         * STEP 1: UI INTERACTION
+         * We trigger our custom modal to ask for the naming prefix (e.g. "beach")
+         */
+        const selectedBaseName = await showBulkRenameModal(selectedIds, imagesData);
         
-        if (!baseName || !baseName.trim()) {
-            // User cancelled or entered blank
+        // If the user cancelled the modal or entered an empty string, we exit
+        if (!selectedBaseName || !selectedBaseName.trim()) {
             return; 
         }
 
+        // Disable button during network request to prevent double-clicks
         bulkRenameBtn.disabled = true;
-        const originalText = bulkRenameBtn.textContent;
-        bulkRenameBtn.textContent = 'Renaming...';
+        const previousButtonLabel = bulkRenameBtn.textContent;
+        bulkRenameBtn.textContent = 'Renaming Files...';
 
         try {
-            const response = await fetch(`${API_BASE_URL}/bulk-rename`, {
+            /**
+             * STEP 2: SERVER COMMUNICATION
+             * We send the Array of selected IDs and the sanitized name to our Express backend.
+             */
+            const renameRequest = await fetch(`${API_BASE_URL}/bulk-rename`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     ids: Array.from(selectedIds),
-                    baseName: baseName.trim()
+                    baseName: selectedBaseName.trim()
                 })
             });
 
-            const data = await response.json();
+            const renameResponseData = await renameRequest.json();
             
-            if (response.ok && data.success) {
-                showToast(data.message || 'Successfully renamed files', 'success');
-                // Reload the DB view to show new names instantly
-                selectedIds.clear();
-                updateProcessButton();
-                initDatabase();
+            if (renameRequest.ok && renameResponseData.success) {
+                /**
+                 * STEP 3: SUCCESS FEEDBACK
+                 * Notify user, clear selection, and trigger a full database reload
+                 * so the UI immediately reflects the new filenames.
+                 */
+                showToast(renameResponseData.message || 'Successfully renamed files', 'success');
+                
+                selectedIds.clear(); // Important: Deselect everything after the batch move
+                updateProcessButton(); // Reset sidebar state
+                initDatabase(); // Reload the whole grid (uses local cache + fetch)
             } else {
-                showToast(data.error || 'Failed to bulk rename', 'error');
+                // Specific error from backend logic (e.g. file collision)
+                showToast(renameResponseData.error || 'Failed to bulk rename', 'error');
             }
-        } catch (err) {
-            console.error('Bulk rename failed:', err);
-            showToast('Error communicating with server.', 'error');
+        } catch (commError) {
+            console.error('Bulk rename network failure:', commError);
+            showToast('Unable to reach the server for renaming.', 'error');
         } finally {
+            // Restore button state
             bulkRenameBtn.disabled = false;
-            bulkRenameBtn.textContent = originalText;
+            bulkRenameBtn.textContent = previousButtonLabel;
         }
     });
 }

@@ -31,6 +31,7 @@ An Electron-based desktop application that uses local AI (via LM Studio) to anal
 - **Advanced Fuzzy Search**: Typos? No problem. Find images instantly with weighted fuzzy matching.
 - **Smart Filtering**: Filter search results by **Scene Type** (Indoor, Outdoor, Portrait, etc.) and **Date Range**.
 - **Batch Processing**: Select multiple images to analyze efficiently. Use **"Select Missing"** to target unanalyzed content.
+- **Bulk Rename & Re-Indexing**: Select a batch of files and rename them using a shared base name (e.g., `coffee`). The system automatically fills gaps in existing sequences (Option A) and ensures no numerical collisions across different file extensions.
 - **Configuration UI**: Easily manage your AI model preferences (Vision & Embeddings) directly from the new **Settings** page.
 - **Automated Database Repair**: Prune missing records, regenerate deleted thumbnails, and heal broken data.
 - **Inline Tag Management**: Edit, delete, and add tags directly from search results or the database browser via right-click.
@@ -111,7 +112,9 @@ Navigate to the **Settings ⚙️** page to select your AI models.
 2.  Browse all analyzed images with thumbnails.
 3.  **Batch Actions**: Use the sidebar to select images and run batch analysis (e.g., "Select Missing" -> "Process").
 4.  **Validate Database**: Click the 🛠️ button to scan for integrity issues (deduplication, missing metadata, regeneration).
-5.  **Rename Files**: Right-click any filename to rename it directly on disk and in the database.
+5.  **Rename Files**: Right-click any filename to rename it directly on disk, or use the **"Bulk Rename"** button to re-index an entire selection.
+    - **Gap Filling**: If your folder has `img_001` and `img_003`, the renamer will automatically find and fill `img_002` first.
+    - **Cross-Extension Safety**: The system prevents number collisions even if you mix `.jpg`, `.png`, and `.webp` files.
 
 ### Searching
 

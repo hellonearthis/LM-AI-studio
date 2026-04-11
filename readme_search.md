@@ -151,6 +151,7 @@ The `search-worker.js` acts as a pipeline that chains strict filters *after* the
 - [x] **Negative Search**: Support `-card` to exclude results.
 - [x] **Tag-Click Filtering**: Clicking a tag in a result card adds it to search.
 - [x] **Sort Options**: Allow sorting by "Relevance" vs "Date".
+- [x] **Bulk Rename Results**: Select any number of search results and rename them sequentially on disk and in the DB.
 
 #### Phase 2: Hybrid Search (Completed)
 - [x] **Web Worker**: Fuse.js and Vector logic moved to `search-worker.js` for non-blocking UI.

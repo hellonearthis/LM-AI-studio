@@ -1,0 +1,11 @@
+Look at using gemma 4 or qwen 3.5 for the ai work.
+
+Add more image clustering and vector database for that.
+
+Use Evog and Latent space
+
+https://github.com/bradAGI/GraphMemory
+
+https://github.com/TutteInstitute/toponymy
+
+https://github.com/TutteInstitute/evoc

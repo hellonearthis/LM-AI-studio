@@ -1293,43 +1293,57 @@ function showAlertModal(message, title = 'Notification', onOk = null) {
     document.addEventListener('keydown', keyHandler);
 }
 
-// Custom Bulk Rename Modal
+/**
+ * @function showBulkRenameModal
+ * @description Creates an interactive HTML overlay for renaming search results.
+ * 
+ * DESIGN RATIONALE:
+ * - Uses modern CSS for a premium "dark mode" aesthetic.
+ * - Provides a scrollable preview of targeted files for user confidence.
+ * - Handles 'Enter' and 'Escape' keys for efficiency.
+ * 
+ * @param {Set} selectedIdsSet - The unique IDs of the checked images.
+ * @param {Array} imagesArray - The master list of image metadata.
+ * @returns {Promise<string|null>} Resolves with the new base name or null if aborted.
+ */
 function showBulkRenameModal(selectedIdsSet, imagesArray) {
     return new Promise((resolve) => {
-        const modal = document.createElement('div');
-        modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;';
+        // Create the dark background backdrop
+        const modalBackdrop = document.createElement('div');
+        modalBackdrop.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;';
 
-        // Get filenames for selected items
-        const selectedFiles = Array.from(selectedIdsSet).map(id => {
-            const img = imagesArray.find(i => String(i.id) === id);
-            return img ? img.filename : `ID: ${id}`;
+        // Convert the set of IDs into human-readable filenames for the preview
+        const fileNamesToRename = Array.from(selectedIdsSet).map(id => {
+            const matchedImage = imagesArray.find(img => String(img.id) === id);
+            return matchedImage ? matchedImage.filename : `Image #${id}`;
         });
 
-        // Create the list HTML
-        const listHtml = selectedFiles.slice(0, 100).map(name => `
+        // Build the preview list (limited to 100 entries for performance)
+        const listItemsHtml = fileNamesToRename.slice(0, 100).map(name => `
             <li style="padding: 0.25rem 0; border-bottom: 1px solid rgba(255,255,255,0.05); color: var(--text-secondary); font-size: 0.85rem; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                 📄 ${name}
             </li>
         `).join('');
         
-        const overflowMsg = selectedFiles.length > 100 ? `<li style="padding: 0.25rem 0; color: var(--accent); font-size: 0.8rem; text-align: center;">...and ${selectedFiles.length - 100} more</li>` : '';
+        // Show an indicator if the list is truncated
+        const listOverflowHtml = fileNamesToRename.length > 100 ? `<li style="padding: 0.25rem 0; color: var(--accent); font-size: 0.8rem; text-align: center;">...and ${fileNamesToRename.length - 100} more</li>` : '';
 
-        modal.innerHTML = `
+        modalBackdrop.innerHTML = `
             <div style="background: var(--card-bg); padding: 2rem; border-radius: 12px; border: 1px solid var(--border); max-width: 450px; width: 90%; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,0.5);">
-                <h3 style="margin: 0 0 0.5rem 0; color: var(--text-primary); font-size: 1.25rem;">Bulk Rename</h3>
-                <p style="margin: 0 0 1rem 0; color: var(--text-secondary); font-size: 0.9rem;">You are renaming ${selectedIdsSet.size} file(s).</p>
+                <h3 style="margin: 0 0 0.5rem 0; color: var(--text-primary); font-size: 1.25rem;">Bulk Rename Results</h3>
+                <p style="margin: 0 0 1rem 0; color: var(--text-secondary); font-size: 0.9rem;">Targeting ${selectedIdsSet.size} selected image(s).</p>
                 
                 <div style="background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem; margin-bottom: 1.5rem; max-height: 150px; overflow-y: auto;">
                     <ul style="list-style: none; padding: 0; margin: 0;">
-                        ${listHtml}
-                        ${overflowMsg}
+                        ${listItemsHtml}
+                        ${listOverflowHtml}
                     </ul>
                 </div>
 
                 <div style="margin-bottom: 1.5rem; text-align: left;">
-                    <label style="display: block; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.5rem;">Base Name (e.g. "coffee")</label>
+                    <label style="display: block; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.5rem;">New Base Name (e.g. "coffee")</label>
                     <input type="text" id="renameBaseInput" placeholder="Enter base name..." style="width: 100%; padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-color); color: var(--text-primary); font-size: 1rem; outline: none;">
-                    <p style="margin: 0.5rem 0 0 0; color: var(--text-secondary); font-size: 0.75rem;">Files will be renamed sequentially: coffee_0001, coffee_0002, etc.</p>
+                    <p style="margin: 0.5rem 0 0 0; color: var(--text-secondary); font-size: 0.75rem;">Fills gaps in sequence automatically: coffee_001, etc.</p>
                 </div>
 
                 <div style="display: flex; gap: 1rem; justify-content: flex-end;">
@@ -1339,51 +1353,53 @@ function showBulkRenameModal(selectedIdsSet, imagesArray) {
             </div>
         `;
 
-        document.body.appendChild(modal);
+        document.body.appendChild(modalBackdrop);
 
-        const input = modal.querySelector('#renameBaseInput');
-        const goBtn = modal.querySelector('#goRenameBtn');
-        const cancelBtn = modal.querySelector('#cancelRenameBtn');
+        // Binding DOM elements for logic
+        const baseInput = modalBackdrop.querySelector('#renameBaseInput');
+        const confirmBtn = modalBackdrop.querySelector('#goRenameBtn');
+        const abortBtn = modalBackdrop.querySelector('#cancelRenameBtn');
 
-        // Focus input
-        setTimeout(() => input.focus(), 50);
+        // Focus the text field immediately for a better UX
+        setTimeout(() => baseInput.focus(), 50);
 
-        const cleanup = () => {
-            document.removeEventListener('keydown', keyHandler);
-            modal.remove();
+        const closeAndResolve = (result) => {
+            document.removeEventListener('keydown', handleKeyInput);
+            modalBackdrop.remove();
+            resolve(result);
         };
 
-        const submit = () => {
-            const val = input.value.trim();
-            if (val) {
-                cleanup();
-                resolve(val);
+        const onConfirm = () => {
+            const value = baseInput.value.trim();
+            if (value) {
+                closeAndResolve(value);
             } else {
-                input.style.border = '1px solid #ef4444';
-                setTimeout(() => input.style.border = '1px solid var(--border)', 1000);
+                // UI feedback for empty input
+                baseInput.style.border = '1px solid #ef4444';
+                setTimeout(() => baseInput.style.border = '1px solid var(--border)', 1000);
             }
         };
 
-        goBtn.onclick = submit;
-        cancelBtn.onclick = () => { cleanup(); resolve(null); };
+        confirmBtn.onclick = onConfirm;
+        abortBtn.onclick = () => closeAndResolve(null);
 
-        const keyHandler = (e) => {
+        const handleKeyInput = (e) => {
             if (e.key === 'Escape') {
                 e.preventDefault();
-                cleanup();
-                resolve(null);
+                closeAndResolve(null);
             } else if (e.key === 'Enter') {
                 e.preventDefault();
-                submit();
+                onConfirm();
             }
         };
 
-        document.addEventListener('keydown', keyHandler);
+        document.addEventListener('keydown', handleKeyInput);
         
-        cancelBtn.onmouseover = () => cancelBtn.style.background = 'rgba(255,255,255,0.05)';
-        cancelBtn.onmouseout = () => cancelBtn.style.background = 'transparent';
-        goBtn.onmouseover = () => goBtn.style.filter = 'brightness(1.1)';
-        goBtn.onmouseout = () => goBtn.style.filter = 'brightness(1)';
+        // Manual hover bindings to maintain consistent styling with other pages
+        abortBtn.onmouseover = () => abortBtn.style.background = 'rgba(255,255,255,0.05)';
+        abortBtn.onmouseout = () => abortBtn.style.background = 'transparent';
+        confirmBtn.onmouseover = () => confirmBtn.style.filter = 'brightness(1.1)';
+        confirmBtn.onmouseout = () => confirmBtn.style.filter = 'brightness(1)';
     });
 }
 

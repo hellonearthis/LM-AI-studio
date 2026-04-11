@@ -1942,112 +1942,208 @@ app.post('/rename', (req, res) => {
     }
 });
 
-// Bulk Rename Endpoint
-// Takes an array of selected IDs and a user-provided baseName, then renames all selected items
-// sequentially (e.g. holiday_0001.jpg, holiday_0002.jpg). Checks for existing files to prevent overrides.
+/**
+ * ============================================================================
+ * BULK RENAME SYSTEM (Option A: Gap-Filling)
+ * ============================================================================
+ * 
+ * This endpoint handles mass-renaming of files selected in the UI. 
+ * It is designed with several safety and organizational guardrails:
+ * 
+ * 1. SANITIZATION: Prevents illegal characters from breaking the filesystem.
+ * 2. ALPHABETICAL ORDERING: Renames files in their original display order.
+ * 3. GAP FILLING (Option A): If "coffee_001" and "coffee_003" exist, it fills "coffee_002" first.
+ * 4. COLLISION SAFETY: Checks both the disk and the current batch to prevent accidental overrides.
+ * 5. ATOMIC UPDATES: Synchronizes the Disk, the Thumbnails, and the Database together.
+ */
 app.post('/bulk-rename', (req, res) => {
+    // Extract parameters from the request body
     const { ids, baseName } = req.body;
+
+    // Validation: Ensure we actually have work to do
     if (!ids || !Array.isArray(ids) || ids.length === 0 || !baseName) {
-        return res.status(400).json({ error: 'Missing IDs array or base name' });
+        return res.status(400).json({ error: 'Missing image IDs array or a valid base name' });
     }
 
-    // Sanitize base name to prevent illegal characters in filenames
+    /**
+     * STEP 1: SANITIZATION
+     * We strip out characters that are illegal in Windows/Linux filenames (<>:"/\\|?*)
+     * to prevent the fs.renameSync call from throwing a system-level error.
+     */
     const sanitizedBase = baseName.replace(/[<>:"/\\|?*]+/g, '').trim();
     if (!sanitizedBase) {
-        return res.status(400).json({ error: 'Invalid base name after sanitization' });
+        return res.status(400).json({ error: 'The provided base name contains only illegal characters.' });
     }
 
-    const results = {
+    // Initialize a results tracker to report back to the frontend
+    const processResults = {
         successCount: 0,
         failedCount: 0,
         errors: []
     };
 
     try {
-        const thumbDir = path.join(__dirname, 'public/thumbnails');
+        const thumbnailDirectory = path.join(__dirname, 'public/thumbnails');
         
-        // Prepare the update statement once for performance
-        const updateStmt = db.prepare('UPDATE images SET filename = ?, path = ?, mtime = ? WHERE id = ?');
+        /**
+         * STEP 2: DATABASE PREPARATION
+         * We prepare the SQL statement once for performance improvement, 
+         * as we will be running it in a loop for every selected image.
+         */
+        const updateDatabaseStmt = db.prepare('UPDATE images SET filename = ?, path = ?, mtime = ? WHERE id = ?');
 
-        // Loop through all provided IDs to rename them
+        /**
+         * STEP 3: BATCH PREPARATION & SORTING
+         * Why sort? If a user selects 5 files at random, they usually expect them 
+         * to be numbered based on their current names. Without sorting, the order 
+         * would be based on internal DB IDs, which is confusing.
+         */
+        const imagesToRename = [];
         for (const id of ids) {
+            const imageData = db.prepare('SELECT * FROM images WHERE id = ?').get(id);
+            if (imageData) {
+                imagesToRename.push(imageData);
+            } else {
+                processResults.failedCount++;
+                processResults.errors.push(`Database record for ID ${id} was not found.`);
+            }
+        }
+        
+        // Sort the batch by their existing file path to maintain a logical visual sequence
+        imagesToRename.sort((fileA, fileB) => fileA.path.localeCompare(fileB.path));
+
+        /**
+         * STEP 4: INDEX TRACKING & CACHING
+         * To implement "Option A" (Gap Filling), we start our counter at 1.
+         * We also cache directory listings so we don't have to hit the hard drive
+         * for expensive 'readdir' calls repeatedly inside the loop.
+         */
+        let currentSequenceIndex = 1;
+        const assignedInBatch = new Set(); // Tracks indices we've assigned in THIS request
+        const directoryCache = new Map();  // Stores 'occupied numbers' per folder
+        
+        // Main processing loop for the sorted batch
+        for (const image of imagesToRename) {
+            const imageId = image.id;
             try {
-                // Find the original image record
-                const image = db.prepare('SELECT * FROM images WHERE id = ?').get(id);
-                if (!image) {
-                    results.failedCount++;
-                    results.errors.push(`ID ${id} not found locally.`);
-                    continue; // Skip to next image
+                const originalFilePath = image.path;
+
+                // Basic integrity check: If the file was deleted/moved since the last sync, skip it.
+                if (!fs.existsSync(originalFilePath)) {
+                    processResults.failedCount++;
+                    processResults.errors.push(`File missing on disk: ${image.filename}`);
+                    continue; 
                 }
 
-                const oldPath = image.path;
-                if (!fs.existsSync(oldPath)) {
-                    results.failedCount++;
-                    results.errors.push(`File missing on disk: ${image.filename}`);
-                    continue; // Skip to next image
-                }
-
-                const dir = path.dirname(oldPath);
-                const ext = path.extname(oldPath); // Includes the dot, e.g. '.jpg'
+                const targetDirectory = path.dirname(originalFilePath);
+                const originalExtension = path.extname(originalFilePath);
                 
-                let newFilename = '';
-                let newPath = '';
-                let index = 1;
+                /**
+                 * STEP 5: DIRECTORY SCANNING (Cross-Extension Safety)
+                 * We need to know which numbers (001, 002...) are already taken in the target folder.
+                 * Crucially, we ignore extensions. If 'coffee_001.png' exists, we should NOT 
+                 * name our new file 'coffee_001.jpg', as that makes searching for 001 very messy.
+                 */
+                if (!directoryCache.has(targetDirectory)) {
+                    try {
+                        const existingFiles = fs.readdirSync(targetDirectory);
+                        const occupiedIndices = new Set();
+                        
+                        // Create a Regex that matches the base name exactly + digits + any extension
+                        const escapedPrefix = sanitizedBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                        const sequenceRegex = new RegExp(`^${escapedPrefix}_(\\d+)\\.`, 'i');
+                        
+                        for (const fileName of existingFiles) {
+                            const match = fileName.match(sequenceRegex);
+                            if (match) {
+                                occupiedIndices.add(parseInt(match[1], 10)); 
+                            }
+                        }
+                        directoryCache.set(targetDirectory, occupiedIndices);
+                    } catch (cacheErr) {
+                        directoryCache.set(targetDirectory, new Set()); 
+                    }
+                }
+                
+                const occupiedInTargetDir = directoryCache.get(targetDirectory);
+                let finalNewFilename = '';
+                let finalNewPath = '';
 
-                // Sequential Generation logic: Loop until we find a combination that does not already exist
-                // This prevents accidentally overriding a file named holiday_0001.jpg if it exists
+                /**
+                 * STEP 6: SEQUENCE GENERATION (The "Gap Filler")
+                 * We keep incrementing 'currentSequenceIndex' until we find a number 
+                 * that is not in the directory AND hasn't been used by a previous image 
+                 * in this specific batch.
+                 */
                 while (true) {
-                    // Format the sequence number to 4 digits (e.g. 0001)
-                    const sequenceStr = String(index).padStart(4, '0');
-                    newFilename = `${sanitizedBase}_${sequenceStr}${ext}`;
-                    newPath = path.join(dir, newFilename);
+                    const isTakenOnDisk = occupiedInTargetDir.has(currentSequenceIndex);
+                    const isTakenInBatch = assignedInBatch.has(currentSequenceIndex);
 
-                    if (!fs.existsSync(newPath)) {
-                        break; // Safety verified: The file name is not taken.
+                    if (isTakenOnDisk || isTakenInBatch) {
+                        currentSequenceIndex++;
+                        continue;
                     }
-                    index++; // If taken, try the next number.
-                }
 
-                // 1. Rename the primary image on the disk
-                fs.renameSync(oldPath, newPath);
+                    // Format with 3-digit padding: 1 becomes "001"
+                    const formattedIndex = String(currentSequenceIndex).padStart(3, '0');
+                    finalNewFilename = `${sanitizedBase}_${formattedIndex}${originalExtension}`;
+                    finalNewPath = path.join(targetDirectory, finalNewFilename);
 
-                // 2. Best effort rename of the thumbnail cache file
-                const oldBase = path.parse(oldPath).name; // Filename without extension
-                const newBase = path.parse(newFilename).name; 
-                try {
-                    const oldThumbPath = path.join(thumbDir, oldBase + '.avif');
-                    const newThumbPath = path.join(thumbDir, newBase + '.avif');
-                    if (fs.existsSync(oldThumbPath)) {
-                        fs.renameSync(oldThumbPath, newThumbPath);
+                    // Final disk-level safety check
+                    if (fs.existsSync(finalNewPath)) {
+                        occupiedInTargetDir.add(currentSequenceIndex);
+                        currentSequenceIndex++;
+                        continue;
                     }
-                } catch (thumbErr) {
-                    // Failing to rename the thumbnail isn't critical enough to stop the operation
-                    console.warn(`[BULK RENAME] Failed to rename thumbnail for ${newFilename}:`, thumbErr);
+                    
+                    break; // Number is available!
                 }
-
-                // 3. Keep the sqlite database completely perfectly synced
-                updateStmt.run(newFilename, newPath, new Date().toISOString(), id);
                 
-                results.successCount++;
+                // Record that we've claimed this number
+                assignedInBatch.add(currentSequenceIndex);
+                occupiedInTargetDir.add(currentSequenceIndex);
 
-            } catch (innerErr) {
-                // If a single frame fails, log it but don't crash the whole batch process
-                console.error(`[BULK RENAME] Failed to rename ID ${id}:`, innerErr);
-                results.failedCount++;
-                results.errors.push(`ID ${id}: ${innerErr.message}`);
+                /**
+                 * STEP 7: EXECUTION (Disk & DB)
+                 * Now we perform the actual rename. We also attempt to rename
+                 * the corresponding thumbnail in background to preserve caching.
+                 */
+                fs.renameSync(originalFilePath, finalNewPath);
+
+                const oldFilenameNoExt = path.parse(originalFilePath).name; 
+                const newFilenameNoExt = path.parse(finalNewFilename).name; 
+                try {
+                    const oldThumb = path.join(thumbnailDirectory, oldFilenameNoExt + '.avif');
+                    const newThumb = path.join(thumbnailDirectory, newFilenameNoExt + '.avif');
+                    if (fs.existsSync(oldThumb)) {
+                        fs.renameSync(oldThumb, newThumb);
+                    }
+                } catch (thumbRenameErr) {
+                    console.warn(`[RENAME] Non-critical error renaming thumbnail for ${finalNewFilename}`);
+                }
+
+                // Final step: Sync the SQLite database to point to the new location
+                updateDatabaseStmt.run(finalNewFilename, finalNewPath, new Date().toISOString(), imageId);
+                
+                processResults.successCount++;
+
+            } catch (innerProcessErr) {
+                console.error(`[BULK RENAME] Error processing image:`, innerProcessErr);
+                processResults.failedCount++;
+                processResults.errors.push(`Error on image ${image.filename}: ${innerProcessErr.message}`);
             }
         }
 
-        // Return a summary payload back to the browser
+        // Send the final result summary back to the user
         res.json({ 
             success: true, 
-            message: `Renamed ${results.successCount} files securely.`,
-            ...results
+            message: `Successfully renamed ${processResults.successCount} images.`,
+            ...processResults
         });
 
-    } catch (err) {
-        console.error('[BULK RENAME] Top-level error:', err);
-        res.status(500).json({ error: err.message });
+    } catch (topLevelErr) {
+        console.error('[BULK RENAME] Top-level failure:', topLevelErr);
+        res.status(500).json({ error: topLevelErr.message });
     }
 });
 
