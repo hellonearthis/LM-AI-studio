@@ -83,6 +83,11 @@ npm run ls:serve
 
 > **Note**: Start LM Studio (Port 1234) *before* asking Lumina to analyze or embed images.
 
+## ⚙️ How it Works (Automation)
+The project uses a custom automation system to keep the frontend high-performance and lightweight:
+- **Dependency Sync**: Instead of manually managing frontend libraries, the app uses a `postinstall` script (`scripts/sync_libs.js`) to automatically copy required vendor files (Fuse.js, D3, etc.) from `node_modules` into `public/libs` every time you run `npm install`.
+- **Zero-Bundler Design**: This ensures the Electron app remains simple and human-readable while still benefiting from modern NPM version management.
+
 ---
 
 ## 📖 Usage
@@ -156,20 +161,23 @@ LM-AI-studio/
 ├── preload.cjs             # Electron preload script
 ├── server.js               # Express backend + SQLite database
 ├── qwen_vl3_prompts.json   # Config file for custom AI analysis prompts
-├── config.json             # (New) User preferences for models
+├── config.json             # User preferences for models
 ├── public/
 │   ├── index.html          # Analysis page
 │   ├── database.html       # Database browser
 │   ├── search.html         # Search interface
-│   ├── settings.html       # (New) Configuration UI
+│   ├── settings.html       # Configuration UI
 │   ├── app.js              # Main application logic
 │   ├── search.js           # Search page logic
-│   ├── search-worker.js    # (New) Worker for search & embeddings
-│   ├── settings.js         # (New) Settings logic
-│   ├── pretext-layout.js   # (New) Pretext measurement wrapper
-│   ├── libs/               # Third-party libraries (Fuse.js, Pretext, etc.)
+│   ├── search-worker.js    # Worker for search & embeddings
+│   ├── settings.js         # Settings logic
+│   ├── pretext-layout.js   # Pretext measurement wrapper
+│   ├── libs/               # Auto-generated third-party libraries (sync via npm)
 │   ├── style.css           # Global styles
 │   └── thumbnails/         # Generated AVIF thumbnails
+├── scripts/
+│   ├── sync_libs.js        # Automated script to sync NPM libs to public/libs
+│   └── serve_ls.bat        # Helper to launch Latent Scope
 ├── images.db               # SQLite database (auto-created)
 └── package.json
 ```
