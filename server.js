@@ -722,20 +722,18 @@ app.post('/re-analyze', async (req, res) => {
 });
 
 
-// Create Thumbnail Endpoint
+// Create Thumbnail Endpoint (Deprecated/Updated to use ID)
 app.post('/create-thumbnail', async (req, res) => {
-    console.log('[THUMB] Create request received');
     try {
-        const { imageData, filename } = req.body;
-        if (!imageData || !filename) {
-            return res.status(400).json({ error: 'Missing image data or filename' });
+        const { imageData, id } = req.body;
+        if (!imageData || !id) {
+            return res.status(400).json({ error: 'Missing image data or image ID' });
         }
 
         const base64Data = imageData.replace(/^data:image\/\w+;base64,/, '');
         const buffer = Buffer.from(base64Data, 'base64');
 
-        const filenameBase = filename.substring(0, filename.lastIndexOf('.')) || filename;
-        const thumbPath = path.join(__dirname, 'public', 'thumbnails', `${filenameBase}.avif`);
+        const thumbPath = path.join(__dirname, 'public', 'thumbnails', `id_${id}.avif`);
 
         await sharp(buffer)
             .resize(100, 100, {
@@ -746,7 +744,7 @@ app.post('/create-thumbnail', async (req, res) => {
             .toFile(thumbPath);
 
         console.log(`[THUMB] Created: ${thumbPath}`);
-        res.json({ success: true, path: `thumbnails/${filenameBase}.avif` });
+        res.json({ success: true, path: `thumbnails/id_${id}.avif` });
 
     } catch (err) {
         console.error('[THUMB] Creation Error:', err);
@@ -869,9 +867,27 @@ app.post('/save', async (req, res) => {
         // 3. New Insert
         const insertSql = `INSERT INTO images (filename, path, file_hash, metadata, analysis, created_at, mtime, width, height, size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
         const info = db.prepare(insertSql).run(filename, path, file_hash, JSON.stringify(metadata), JSON.stringify(analysis), created_at, mtime || null, width, height, size);
-        console.log(`[SAVE] Success. New ID: ${info.lastInsertRowid}`);
+        const newId = info.lastInsertRowid;
+        console.log(`[SAVE] Success. New ID: ${newId}`);
+
+        // OPTIONAL: Auto-generate thumbnail if imageData provided
+        if (req.body.imageData) {
+            try {
+                const base64Data = req.body.imageData.replace(/^data:image\/\w+;base64,/, '');
+                const buffer = Buffer.from(base64Data, 'base64');
+                const thumbPath = path.join(__dirname, 'public', 'thumbnails', `id_${newId}.avif`);
+                await sharp(buffer)
+                    .resize(100, 100, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+                    .avif({ quality: 50 })
+                    .toFile(thumbPath);
+                console.log(`[SAVE] Auto-generated thumbnail for ID: ${newId}`);
+            } catch (te) {
+                console.warn('[SAVE] Failed to auto-generate thumbnail:', te.message);
+            }
+        }
+
         generateSearchIndex(); // Update index
-        res.json({ message: 'Saved successfully', id: info.lastInsertRowid, new: true });
+        res.json({ message: 'Saved successfully', id: newId, new: true, thumbPath: `thumbnails/id_${newId}.avif` });
     } catch (err) {
         console.error('[SAVE] Error:', err);
         // Helper to extract SQLite error code
@@ -1096,17 +1112,40 @@ app.post('/search', (req, res) => {
  */
 app.post('/validate-database', async (req, res) => {
     console.log('[VALIDATE] Request received');
-    const { reanalyze } = req.body;
+    const options = req.body.options || { 
+        removeMissing: true, 
+        repairMetadata: true, 
+        regenThumbnails: true, 
+        purgeThumbnails: false,
+        reanalyze: req.body.reanalyze || false
+    };
+
     const results = {
         total: 0,
         missing: 0,
         fixedThumbnails: 0,
         reanalyzed: 0,
+        metadataRepaired: 0,
         duplicatesRemoved: 0,
+        purged: 0,
         errors: []
     };
 
     try {
+        // 0. Purge Old Thumbnails if requested
+        if (options.purgeThumbnails) {
+            console.log('[VALIDATE] Purging all thumbnails...');
+            const thumbDir = path.join(__dirname, 'public', 'thumbnails');
+            if (fs.existsSync(thumbDir)) {
+                const files = fs.readdirSync(thumbDir);
+                for (const file of files) {
+                    if (file.endsWith('.avif')) {
+                        try { fs.unlinkSync(path.join(thumbDir, file)); results.purged++; } catch (e) { }
+                    }
+                }
+            }
+        }
+
         // 0. De-duplicate (Prioritize entries with metadata/analysis)
         const allImages = db.prepare('SELECT * FROM images').all();
         const pathMap = new Map();
@@ -1170,23 +1209,25 @@ app.post('/validate-database', async (req, res) => {
 
             // 1. Check if file exists on disk
             if (!fs.existsSync(filePath)) {
-                console.log(`[VALIDATE] File missing, removing from DB: ${filePath}`);
-                db.prepare(`DELETE FROM images WHERE id = ?`).run(img.id);
-                results.missing++;
+                if (options.removeMissing) {
+                    console.log(`[VALIDATE] File missing, removing from DB: ${filePath}`);
+                    db.prepare(`DELETE FROM images WHERE id = ?`).run(img.id);
+                    results.missing++;
 
-                // Try to delete thumbnail too
-                const filenameBase = img.filename.substring(0, img.filename.lastIndexOf('.')) || img.filename;
-                const thumbPath = path.join(__dirname, 'public', 'thumbnails', `${filenameBase}.avif`);
-                if (fs.existsSync(thumbPath)) {
-                    try { fs.unlinkSync(thumbPath); } catch (e) { }
+                    // Try to delete thumbnail too
+                    const thumbPath = path.join(__dirname, 'public', 'thumbnails', `id_${img.id}.avif`);
+                    if (fs.existsSync(thumbPath)) {
+                        try { fs.unlinkSync(thumbPath); } catch (e) { }
+                    }
+                    continue;
+                } else {
+                    console.warn(`[VALIDATE] File missing but "Remove Missing" is disabled: ${filePath}`);
                 }
-                continue;
             }
 
             // 2. Check for missing thumbnail
-            const filenameBase = img.filename.substring(0, img.filename.lastIndexOf('.')) || img.filename;
             let thumbValid = false;
-            const thumbPath = path.join(__dirname, 'public', 'thumbnails', `${filenameBase}.avif`);
+            const thumbPath = path.join(__dirname, 'public', 'thumbnails', `id_${img.id}.avif`);
 
             if (fs.existsSync(thumbPath) && fs.statSync(thumbPath).size > 0) {
                 try {
@@ -1194,13 +1235,13 @@ app.post('/validate-database', async (req, res) => {
                     await sharp(thumbPath).metadata();
                     thumbValid = true;
                 } catch (e) {
-                    console.warn(`[VALIDATE] Corrupted thumbnail detected for ${img.filename}, deleting.`);
+                    console.warn(`[VALIDATE] Corrupted thumbnail detected for ID ${img.id}, deleting.`);
                     try { fs.unlinkSync(thumbPath); } catch (err) { }
                 }
             }
 
-            if (!thumbValid) {
-                console.log(`[VALIDATE] Thumbnail missing/invalid, generating: ${filePath}`);
+            if (!thumbValid && options.regenThumbnails !== false) {
+                console.log(`[VALIDATE] Thumbnail missing/invalid, generating for ID ${img.id}`);
                 try {
                     await sharp(filePath)
                         .resize(100, 100, {
@@ -1210,82 +1251,62 @@ app.post('/validate-database', async (req, res) => {
                         .avif({ quality: 50 })
                         .toFile(thumbPath);
                     results.fixedThumbnails++;
-                    
-                    const updateTime = new Date().toISOString();
-                    db.prepare('UPDATE images SET updated_at = ? WHERE id = ?').run(updateTime, img.id);
                 } catch (err) {
                     console.error(`[VALIDATE] Failed to regenerate thumbnail for ${filePath}:`, err.message);
                     results.errors.push(`Thumbnail error: ${img.filename}`);
                 }
             }
 
-            // 3. Check for filename mismatch (Corruption repair)
-            // Use regex to handle both forward and backslashes safely
-            const correctFilename = (img.path || '').split(/[/\\]/).pop();
+            // 3. Metadata & Repair (ONLY if requested)
+            if (options.repairMetadata) {
+                // Check for filename mismatch (Corruption repair)
+                const correctFilename = (img.path || '').split(/[/\\]/).pop();
+                const isSuspicious = img.filename.trim().startsWith('{') || img.filename.includes('Lite Graph');
 
-            // formatting check: If current filename looks like JSON or metadata, forcing update
-            const isSuspicious = img.filename.trim().startsWith('{') || img.filename.includes('Lite Graph');
-
-            if ((correctFilename && img.filename !== correctFilename) || isSuspicious) {
-                console.log(`[VALIDATE] Fixing corrupted filename for ID ${img.id}`);
-                console.log(`   Old: "${img.filename.substring(0, 50)}..."`);
-                console.log(`   New: "${correctFilename}"`);
-
-                if (correctFilename) {
-                    db.prepare('UPDATE images SET filename = ? WHERE id = ?').run(correctFilename, img.id);
-                    results.errors.push(`Fixed filename: ${correctFilename}`);
+                if ((correctFilename && img.filename !== correctFilename) || isSuspicious) {
+                    console.log(`[VALIDATE] Fixing corrupted filename for ID ${img.id}`);
+                    if (correctFilename) {
+                        db.prepare('UPDATE images SET filename = ? WHERE id = ?').run(correctFilename, img.id);
+                        results.metadataRepaired++;
+                    }
                 }
-            }
 
-            // 4. Check for missing metadata (dimensions)
-            if (!img.width || !img.height) {
-                // Try from stored metadata first
-                let metaObj = {};
-                try {
-                    metaObj = typeof img.metadata === 'string' ? JSON.parse(img.metadata) : (img.metadata || {});
-                } catch (e) { }
+                // Check for missing metadata (dimensions)
+                if (!img.width || !img.height) {
+                    let metaObj = {};
+                    try { metaObj = JSON.parse(img.metadata || '{}'); } catch (e) { }
+                    
+                    const metaH = metaObj.ImageHeight || metaObj.ExifImageHeight || metaObj.PixelYDimension || metaObj.height;
+                    const metaW = metaObj.ImageWidth || metaObj.ExifImageWidth || metaObj.PixelXDimension || metaObj.width;
 
-                const metaH = metaObj.ImageHeight || metaObj.ExifImageHeight || metaObj.PixelYDimension || metaObj.height;
-                const metaW = metaObj.ImageWidth || metaObj.ExifImageWidth || metaObj.PixelXDimension || metaObj.width;
+                    if (metaW && metaH) {
+                        db.prepare('UPDATE images SET width = ?, height = ? WHERE id = ?').run(metaW, metaH, img.id);
+                        results.metadataRepaired++;
+                    } else {
+                        try {
+                            const metadata = await sharp(img.path).metadata();
+                            if (metadata.width && metadata.height) {
+                                db.prepare('UPDATE images SET width = ?, height = ? WHERE id = ?').run(metadata.width, metadata.height, img.id);
+                                results.metadataRepaired++;
+                            }
+                        } catch (err) { }
+                    }
+                }
 
-                if (metaW && metaH) {
-                    console.log(`[VALIDATE] Restoring dimensions from metadata for ${img.filename}`);
-                    db.prepare('UPDATE images SET width = ?, height = ? WHERE id = ?')
-                        .run(metaW, metaH, img.id);
-                    results.metadataRepaired = (results.metadataRepaired || 0) + 1;
-                } else {
-                    // Fallback to file scan
-                    console.log(`[VALIDATE] Missing dimensions for ${img.filename}, scanning file...`);
+                // Check for missing size
+                if (!img.size) {
                     try {
-                        const metadata = await sharp(img.path).metadata();
-                        if (metadata.width && metadata.height) {
-                            db.prepare('UPDATE images SET width = ?, height = ? WHERE id = ?')
-                                .run(metadata.width, metadata.height, img.id);
-                            results.metadataRepaired = (results.metadataRepaired || 0) + 1;
-                            console.log(`[VALIDATE] Repaired dimensions: ${metadata.width}x${metadata.height}`);
+                        const stats = fs.statSync(img.path);
+                        if (stats.size) {
+                            db.prepare('UPDATE images SET size = ? WHERE id = ?').run(stats.size, img.id);
+                            results.metadataRepaired++;
                         }
-                    } catch (err) {
-                        console.error(`[VALIDATE] Failed to repair metadata for ${img.filename}:`, err.message);
-                    }
+                    } catch (e) { }
                 }
             }
 
-            // 5. Check for missing size
-            if (!img.size) {
-                try {
-                    const stats = fs.statSync(img.path);
-                    if (stats.size) {
-                        db.prepare('UPDATE images SET size = ? WHERE id = ?').run(stats.size, img.id);
-                        results.metadataRepaired = (results.metadataRepaired || 0) + 1;
-                        console.log(`[VALIDATE] Repaired size for ${img.filename}: ${stats.size}`);
-                    }
-                } catch (e) {
-                    console.warn(`[VALIDATE] Failed to get size for ${img.path}:`, e.message);
-                }
-            }
-
-            // 3. Check for missing AI analysis data (ONLY if requested)
-            if (reanalyze) {
+            // 4. Check for missing AI analysis data (ONLY if requested)
+            if (options.reanalyze) {
                 let analysis = {};
                 try {
                     analysis = typeof img.analysis === 'string' ? JSON.parse(img.analysis || '{}') : (img.analysis || {});
@@ -1418,10 +1439,9 @@ app.post('/regenerate-thumbnail', async (req, res) => {
             return res.status(404).json({ error: 'Source file no longer exists' });
         }
 
-        const filenameBase = img.filename.substring(0, img.filename.lastIndexOf('.')) || img.filename;
-        const thumbPath = path.join(__dirname, 'public', 'thumbnails', `${filenameBase}.avif`);
+        const thumbPath = path.join(__dirname, 'public', 'thumbnails', `id_${id}.avif`);
 
-        console.log(`[THUMB] Manual regeneration: ${filePath}`);
+        console.log(`[THUMB] Manual regeneration for ID ${id}: ${filePath}`);
 
         const buffer = fs.readFileSync(filePath);
         await sharp(buffer)
@@ -1432,7 +1452,7 @@ app.post('/regenerate-thumbnail', async (req, res) => {
             .avif({ quality: 50 })
             .toFile(thumbPath);
 
-        res.json({ success: true, thumbPath: `thumbnails/${filenameBase}.avif` });
+        res.json({ success: true, thumbPath: `thumbnails/id_${id}.avif` });
 
     } catch (err) {
         console.error('[THUMB] Regeneration Error:', err);
@@ -1588,7 +1608,8 @@ app.get('/api/scope/db-data', (req, res) => {
                 cl.cluster_label as cluster, 
                 null as label, 
                 i.path, 
-                i.filename
+                i.filename,
+                i.id
             FROM image_coordinates c
             JOIN image_clusters cl ON c.image_id = cl.image_id
             JOIN images i ON c.image_id = i.id
@@ -1904,8 +1925,16 @@ app.post('/rename', (req, res) => {
         if (!image) return res.status(404).json({ error: 'Image not found' });
 
         const oldPath = image.path;
+        const oldExt = path.extname(oldPath); // e.g. '.jpg'
         const dir = path.dirname(oldPath);
-        const newPath = path.join(dir, newFilename);
+
+        // Safety: If the user didn't provide an extension, auto-append the old one
+        let finalNewFilename = newFilename;
+        if (!path.extname(newFilename) && oldExt) {
+            finalNewFilename += oldExt;
+        }
+
+        const newPath = path.join(dir, finalNewFilename);
 
         // Security / Validation
         if (fs.existsSync(newPath)) {
@@ -1915,29 +1944,14 @@ app.post('/rename', (req, res) => {
         // Rename on Disk
         fs.renameSync(oldPath, newPath);
 
-        // Best effort thumbnail rename
-        const thumbDir = path.join(__dirname, 'public/thumbnails');
-        const oldBase = path.parse(oldPath).name; // e.g. 'foo'
-        const newBase = path.parse(newFilename).name; // e.g. 'bar'
-
-        try {
-            const oldThumbPath = path.join(thumbDir, oldBase + '.avif');
-            const newThumbPath = path.join(thumbDir, newBase + '.avif');
-            if (fs.existsSync(oldThumbPath)) {
-                fs.renameSync(oldThumbPath, newThumbPath);
-            }
-        } catch (e) {
-            console.warn('[RENAME] Failed to rename thumbnail:', e);
-        }
-
         // Update Database
         db.prepare('UPDATE images SET filename = ?, path = ?, mtime = ? WHERE id = ?')
-            .run(newFilename, newPath, new Date().toISOString(), id);
+            .run(finalNewFilename, newPath, new Date().toISOString(), id);
 
         // Update Search Index
         generateSearchIndex();
 
-        res.json({ success: true, newPath, newFilename });
+        res.json({ success: true, newPath, newFilename: finalNewFilename });
 
     } catch (err) {
         console.error('[RENAME] Error:', err);
@@ -2108,22 +2122,9 @@ app.post('/bulk-rename', (req, res) => {
 
                 /**
                  * STEP 7: EXECUTION (Disk & DB)
-                 * Now we perform the actual rename. We also attempt to rename
-                 * the corresponding thumbnail in background to preserve caching.
+                 * Now we perform the actual rename.
                  */
                 fs.renameSync(originalFilePath, finalNewPath);
-
-                const oldFilenameNoExt = path.parse(originalFilePath).name; 
-                const newFilenameNoExt = path.parse(finalNewFilename).name; 
-                try {
-                    const oldThumb = path.join(thumbnailDirectory, oldFilenameNoExt + '.avif');
-                    const newThumb = path.join(thumbnailDirectory, newFilenameNoExt + '.avif');
-                    if (fs.existsSync(oldThumb)) {
-                        fs.renameSync(oldThumb, newThumb);
-                    }
-                } catch (thumbRenameErr) {
-                    console.warn(`[RENAME] Non-critical error renaming thumbnail for ${finalNewFilename}`);
-                }
 
                 // Final step: Sync the SQLite database to point to the new location
                 updateDatabaseStmt.run(finalNewFilename, finalNewPath, new Date().toISOString(), imageId);

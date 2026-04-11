@@ -110,7 +110,7 @@ async function loadDataAndRender(source) {
         const query = `
             SELECT 
                 s.x, s.y, s.cluster, s.label,
-                i.path, i.filename
+                i.path, i.filename, i.id
             FROM 'scopes.parquet' s
             JOIN 'input.parquet' i ON s.ls_index = i.id
             WHERE s.deleted = false
@@ -406,10 +406,10 @@ function showTooltip(point, px, py) {
   // Set the text label for the tooltip.
   txt.textContent = point.label || point.filename;
 
-  // Construct the thumbnail URL by replacing the original extension with .avif
-  const thumbName =
-    point.filename.substring(0, point.filename.lastIndexOf(".")) + ".avif";
-  img.src = `http://localhost:3000/thumbnails/${thumbName}`;
+  // Construct the thumbnail URL using the unique ID
+  // Check both 'id' (DB) and 'db_id' (alias) or just 'id'
+  const thumbId = point.id;
+  img.src = `http://localhost:3000/thumbnails/id_${thumbId}.avif`;
 
   // Make the tooltip visible so its dimensions can be measured
   tooltip.style.display = "flex";

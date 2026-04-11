@@ -181,8 +181,7 @@ async function processSingleFile(filePath, fileName, fileBuffer, base64Data) {
             showStatus(`File already in database. Checking thumbnail...`, 'info');
 
             // Check if thumbnail exists, generate if missing
-            const filenameBase = fileName.substring(0, fileName.lastIndexOf('.')) || fileName;
-            const thumbnailPath = `thumbnails/${filenameBase}.avif`;
+            const thumbnailPath = `thumbnails/id_${checkResult.id}.avif`;
 
             try {
                 // Try to fetch the thumbnail to check existence
@@ -196,7 +195,7 @@ async function processSingleFile(filePath, fileName, fileBuffer, base64Data) {
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             imageData: base64Data,
-                            filename: fileName
+                            id: checkResult.id
                         })
                     });
                     showStatus('Thumbnail generated for existing record.', 'success');
@@ -211,7 +210,7 @@ async function processSingleFile(filePath, fileName, fileBuffer, base64Data) {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         imageData: base64Data,
-                        filename: fileName
+                        id: checkResult.id
                     })
                 });
             }
@@ -262,7 +261,8 @@ async function processSingleFile(filePath, fileName, fileBuffer, base64Data) {
             analysis: result.analysis,
             created_at: fileCreationDate,
             mtime: fileStats.mtime,
-            size: fileStats.size
+            size: fileStats.size,
+            imageData: base64Data // Pass this so the server auto-generates the ID-based thumbnail
         });
         console.log('[APP] Final Save Result:', finalSaveResult);
 
@@ -420,7 +420,8 @@ async function processBatch(files) {
                 analysis: analysisResult.analysis,
                 created_at: fileCreationDate,
                 mtime: fileData.mtime,
-                size: fileData.size
+                size: fileData.size,
+                imageData: base64Data // Server now auto-generates ID-based thumbnails during save
             });
 
             if (saveResult.new) {
@@ -436,16 +437,6 @@ async function processBatch(files) {
                 addedCount++;
                 statAdded.textContent = addedCount;
             }
-
-            // Generate Thumbnail
-            await fetch(`${API_BASE_URL}/create-thumbnail`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    imageData: base64Data,
-                    filename: filename
-                })
-            });
 
         } catch (error) {
             console.error(`Error processing ${filename}:`, error);

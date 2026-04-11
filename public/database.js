@@ -256,10 +256,9 @@ function createCardHtml(img, summaryHeight) {
         .map(([key, val]) => `${key}: ${val}`)
         .join('\n');
 
-    // Thumbnail path logic
-    const filenameBase = img.filename.substring(0, img.filename.lastIndexOf('.')) || img.filename;
+    // Thumbnail path logic (ID-based)
     const timeStamp = img.updated_at ? new Date(img.updated_at).getTime() : (img.created_at ? new Date(img.created_at).getTime() : '');
-    const displayPath = `thumbnails/${filenameBase}.avif${timeStamp ? '?t=' + timeStamp : ''}`;
+    const displayPath = `thumbnails/id_${img.id}.avif${timeStamp ? '?t=' + timeStamp : ''}`;
 
     const fullPath = img.path;
     const isSelected = selectedIds.has(String(img.id));
@@ -533,48 +532,122 @@ const validationText = document.getElementById('validationText');
 const validationProgressBar = document.getElementById('validationProgressBar');
 const closeStatus = document.getElementById('closeStatus');
 
+async function showIntegrityCheckModal() {
+    return new Promise((resolve) => {
+        const modal = document.createElement('div');
+        modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; z-index: 10000; backdrop-filter: blur(4px);';
+
+        modal.innerHTML = `
+            <div style="background: var(--bg-secondary); padding: 2.5rem; border-radius: 16px; border: 1px solid var(--border); max-width: 450px; width: 90%; box-shadow: 0 20px 50px rgba(0,0,0,0.5);">
+                <h3 style="margin: 0 0 1.5rem 0; color: var(--accent); font-size: 1.5rem; display: flex; align-items: center; gap: 0.75rem;">
+                    <span>🛡️</span> Database Integrity Check
+                </h3>
+                
+                <p style="color: var(--text-secondary); margin-bottom: 2rem; font-size: 0.95rem; line-height: 1.5;">
+                    Select the tasks you would like to perform during the maintenance pass:
+                </p>
+
+                <div style="display: flex; flex-direction: column; gap: 1.25rem; margin-bottom: 2.5rem;">
+                    <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer; padding: 0.5rem; border-radius: 8px; transition: background 0.2s; hover: background: rgba(255,255,255,10.05);">
+                        <input type="checkbox" id="icRemoveMissing" checked style="width: 18px; height: 18px; accent-color: var(--accent);">
+                        <div>
+                            <div style="color: var(--text-primary); font-weight: 500;">Remove Missing Files</div>
+                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Delete database records for files no longer on disk.</div>
+                        </div>
+                    </label>
+
+                    <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer; padding: 0.5rem; border-radius: 8px; transition: background 0.2s;">
+                        <input type="checkbox" id="icRepairMetadata" checked style="width: 18px; height: 18px; accent-color: var(--accent);">
+                        <div>
+                            <div style="color: var(--text-primary); font-weight: 500;">Repair Metadata</div>
+                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Fix missing dimensions, resolution, and file size data.</div>
+                        </div>
+                    </label>
+
+                    <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer; padding: 0.5rem; border-radius: 8px; transition: background 0.2s;">
+                        <input type="checkbox" id="icRegenThumb" checked style="width: 18px; height: 18px; accent-color: var(--accent);">
+                        <div>
+                            <div style="color: var(--text-primary); font-weight: 500;">Regenerate Thumbnails</div>
+                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Rebuild missing thumbnails using the new unique ID scheme.</div>
+                        </div>
+                    </label>
+
+                    <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer; padding: 1rem; border-radius: 8px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2);">
+                        <input type="checkbox" id="icPurgeThumb" style="width: 18px; height: 18px; accent-color: #ef4444;">
+                        <div>
+                            <div style="color: #ef4444; font-weight: 600;">Purge Legacy Thumbnails</div>
+                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Wipe all old thumbnails to fix collisions. (Recommended)</div>
+                        </div>
+                    </label>
+                </div>
+
+                <div style="display: flex; gap: 1rem; justify-content: flex-end;">
+                    <button id="icCancelBtn" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.6rem 1.25rem; border-radius: 8px; cursor: pointer; font-weight: 500;">Cancel</button>
+                    <button id="icRunBtn" style="background: var(--accent); border: none; color: white; padding: 0.6rem 2rem; border-radius: 8px; cursor: pointer; font-weight: 600; box-shadow: 0 4px 12px var(--accent-glow);">Run Check</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        modal.querySelector('#icCancelBtn').onclick = () => {
+            modal.remove();
+            resolve(null);
+        };
+
+        modal.querySelector('#icRunBtn').onclick = () => {
+            const options = {
+                removeMissing: modal.querySelector('#icRemoveMissing').checked,
+                repairMetadata: modal.querySelector('#icRepairMetadata').checked,
+                regenThumbnails: modal.querySelector('#icRegenThumb').checked,
+                purgeThumbnails: modal.querySelector('#icPurgeThumb').checked
+            };
+            modal.remove();
+            resolve(options);
+        };
+    });
+}
+
 if (validateBtn) {
     validateBtn.addEventListener('click', async () => {
-        const confirmed = await showModal(
-            'Run Database Check?',
-            'This will:\n1. Remove entries for missing files\n2. Regenerate missing thumbnails\n3. Fix basic data issues',
-            true
-        );
-
-        if (!confirmed) return;
+        const options = await showIntegrityCheckModal();
+        if (!options) return;
 
         validateBtn.disabled = true;
         validationStatus.style.display = 'block';
-        validationText.textContent = 'Running integrity check...';
-        validationProgressBar.style.width = '30%'; // Fake progress start
+        validationText.textContent = 'Running database integrity check...';
+        validationProgressBar.style.width = '10%';
 
         try {
-            const response = await fetch(`${API_BASE_URL}/validate-database`, {
+            const res = await fetch(`${API_BASE_URL}/validate-database`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ reanalyze: false }) // Default to false for speed
+                body: JSON.stringify({ options, reanalyze: false })
             });
 
-            if (!response.ok) throw new Error('Validation failed');
+            if (!res.ok) throw new Error('Validation failed');
 
-            const data = await response.json();
-            const res = data.results;
+            const data = await res.json();
+            const r = data.results;
 
             validationProgressBar.style.width = '100%';
 
             let message = `<strong>Check Complete</strong><br>`;
-            if (res.missing > 0) message += `🗑️ Removed ${res.missing} missing files<br>`;
-            if (res.fixedThumbnails > 0) message += `🖼️ Fixed ${res.fixedThumbnails} thumbnails<br>`;
-            if (res.errors.length > 0) message += `⚠️ ${res.errors.length} errors occurred`;
+            if (r.purged > 0) message += `🔥 Purged ${r.purged} legacy thumbnails<br>`;
+            if (r.duplicatesRemoved > 0) message += `🧹 Removed ${r.duplicatesRemoved} duplicates<br>`;
+            if (r.metadataRepaired > 0) message += `🔧 Repaired ${r.metadataRepaired} metadata<br>`;
+            if (r.missing > 0) message += `🗑️ Removed ${r.missing} missing files<br>`;
+            if (r.fixedThumbnails > 0) message += `🖼️ Fixed ${r.fixedThumbnails} thumbnails<br>`;
+            if (r.errors.length > 0) message += `⚠️ ${r.errors.length} errors occurred`;
 
-            if (res.missing === 0 && res.fixedThumbnails === 0 && res.errors.length === 0) {
+            if (r.purged === 0 && r.duplicatesRemoved === 0 && r.metadataRepaired === 0 && r.missing === 0 && r.fixedThumbnails === 0 && r.errors.length === 0) {
                 message += "✅ Database is healthy!";
             }
 
             validationText.innerHTML = message;
 
             // Refresh grid if changes were made
-            if (res.missing > 0 || res.fixedThumbnails > 0) {
+            if (r.missing > 0 || r.fixedThumbnails > 0 || r.purged > 0) {
                 setTimeout(() => {
                     initDatabase(); // Reload current view
                 }, 1000);
@@ -1059,6 +1132,82 @@ document.addEventListener('click', async (e) => {
     }
 });
 
+async function showIntegrityCheckModal() {
+    return new Promise((resolve) => {
+        const modal = document.createElement('div');
+        modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; z-index: 10000; backdrop-filter: blur(4px);';
+
+        modal.innerHTML = `
+            <div style="background: var(--bg-secondary); padding: 2.5rem; border-radius: 16px; border: 1px solid var(--border); max-width: 450px; width: 90%; box-shadow: 0 20px 50px rgba(0,0,0,0.5);">
+                <h3 style="margin: 0 0 1.5rem 0; color: var(--accent); font-size: 1.5rem; display: flex; align-items: center; gap: 0.75rem;">
+                    <span>🛡️</span> Database Integrity Check
+                </h3>
+                
+                <p style="color: var(--text-secondary); margin-bottom: 2rem; font-size: 0.95rem; line-height: 1.5;">
+                    Select the tasks you would like to perform during the maintenance pass:
+                </p>
+
+                <div style="display: flex; flex-direction: column; gap: 1.25rem; margin-bottom: 2.5rem;">
+                    <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer; padding: 0.5rem; border-radius: 8px; transition: background 0.2s; hover: background: rgba(255,255,255,0.05);">
+                        <input type="checkbox" id="icRemoveMissing" checked style="width: 18px; height: 18px; accent-color: var(--accent);">
+                        <div>
+                            <div style="color: var(--text-primary); font-weight: 500;">Remove Missing Files</div>
+                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Delete database records for files no longer on disk.</div>
+                        </div>
+                    </label>
+
+                    <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer; padding: 0.5rem; border-radius: 8px; transition: background 0.2s;">
+                        <input type="checkbox" id="icRepairMetadata" checked style="width: 18px; height: 18px; accent-color: var(--accent);">
+                        <div>
+                            <div style="color: var(--text-primary); font-weight: 500;">Repair Metadata</div>
+                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Fix missing dimensions, resolution, and file size data.</div>
+                        </div>
+                    </label>
+
+                    <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer; padding: 0.5rem; border-radius: 8px; transition: background 0.2s;">
+                        <input type="checkbox" id="icRegenThumb" checked style="width: 18px; height: 18px; accent-color: var(--accent);">
+                        <div>
+                            <div style="color: var(--text-primary); font-weight: 500;">Regenerate Thumbnails</div>
+                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Rebuild missing thumbnails using the new unique ID scheme.</div>
+                        </div>
+                    </label>
+
+                    <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer; padding: 1rem; border-radius: 8px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2);">
+                        <input type="checkbox" id="icPurgeThumb" style="width: 18px; height: 18px; accent-color: #ef4444;">
+                        <div>
+                            <div style="color: #ef4444; font-weight: 600;">Purge Legacy Thumbnails</div>
+                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Wipe all old thumbnails to fix collisions. (Recommended)</div>
+                        </div>
+                    </label>
+                </div>
+
+                <div style="display: flex; gap: 1rem; justify-content: flex-end;">
+                    <button id="icCancelBtn" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.6rem 1.25rem; border-radius: 8px; cursor: pointer; font-weight: 500;">Cancel</button>
+                    <button id="icRunBtn" style="background: var(--accent); border: none; color: white; padding: 0.6rem 2rem; border-radius: 8px; cursor: pointer; font-weight: 600; box-shadow: 0 4px 12px var(--accent-glow);">Run Check</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        modal.querySelector('#icCancelBtn').onclick = () => {
+            modal.remove();
+            resolve(null);
+        };
+
+        modal.querySelector('#icRunBtn').onclick = () => {
+            const options = {
+                removeMissing: modal.querySelector('#icRemoveMissing').checked,
+                repairMetadata: modal.querySelector('#icRepairMetadata').checked,
+                regenThumbnails: modal.querySelector('#icRegenThumb').checked,
+                purgeThumbnails: modal.querySelector('#icPurgeThumb').checked
+            };
+            modal.remove();
+            resolve(options);
+        };
+    });
+}
+
 if (closeStatus) {
     closeStatus.addEventListener('click', () => {
         validationStatus.style.display = 'none';
@@ -1094,6 +1243,7 @@ function showContextMenu(e, id, type, tag = null, card = null) {
     const renameItem = document.getElementById('ctxRename');
 
     document.getElementById('ctxRegenThumb').style.display = type === 'thumbnail' ? 'block' : 'none';
+    document.getElementById('ctxSearch').style.display = type === 'tag' ? 'block' : 'none';
     document.getElementById('ctxEdit').style.display = type === 'tag' ? 'block' : 'none';
     document.getElementById('ctxDelete').style.display = type === 'tag' ? 'block' : 'none';
 
@@ -1147,6 +1297,21 @@ document.addEventListener('contextmenu', (e) => {
     hideContextMenu();
 });
 
+// Search Action
+const ctxSearch = document.getElementById('ctxSearch');
+if (ctxSearch) {
+    ctxSearch.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!ctxTarget || !ctxTarget.tag) return;
+        
+        const query = encodeURIComponent(ctxTarget.tag);
+        hideContextMenu();
+        
+        // Navigate to search page with the tag as a query parameter
+        window.location.href = `search.html?q=${query}`;
+    });
+}
+
 // Rename Action
 const ctxRename = document.getElementById('ctxRename');
 if (ctxRename) {
@@ -1156,8 +1321,11 @@ if (ctxRename) {
         const { id, tag: currentFilename } = ctxTarget;
         hideContextMenu();
 
-        showTagInputModal('Rename File', currentFilename, async (newName) => {
-            if (!newName || newName === currentFilename) return;
+        // Strip extension for easier renaming
+        const currentBase = currentFilename.substring(0, currentFilename.lastIndexOf('.')) || currentFilename;
+
+        showTagInputModal('Rename File', currentBase, async (newName) => {
+            if (!newName || newName === currentBase) return;
             if (newName.match(/[<>:"\/\\|?*]/)) {
                 alert('Invalid characters in filename.');
                 return;
