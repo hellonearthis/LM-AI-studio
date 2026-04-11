@@ -22,6 +22,22 @@ const searchResults = document.getElementById('searchResults');
 const resultsCount = document.getElementById('resultsCount');
 const API_BASE_URL = 'http://localhost:3000';
 
+// ============================================================================
+// TAG & OBJECT FILTER STATE
+// ============================================================================
+const tagFilterInput = document.getElementById('tagFilterInput');
+const tagAutocomplete = document.getElementById('tagAutocomplete');
+const tagFilterChips = document.getElementById('tagFilterChips');
+const similarBanner = document.getElementById('similarBanner');
+const similarBannerName = document.getElementById('similarBannerName');
+const clearSimilarBtn = document.getElementById('clearSimilarBtn');
+
+const selectedTagFilters = new Set();   // Exact tag names
+const selectedObjectFilters = new Set(); // Exact object names
+let allKnownTags = [];    // [{name, count, type:'tag'}, ...]
+let allKnownObjects = [];  // [{name, count, type:'object'}, ...]
+let acActiveIndex = -1;   // Keyboard nav index for autocomplete
+
 // Helper: Deduplicate tags and objects
 function deduplicateTags(analysis) {
     if (!analysis) return;
@@ -96,6 +112,7 @@ let isInitialized = false;
 // State for pagination
 let filteredImages = [];
 let currentIndex = 0;
+let isRendering = false; // Prevents concurrent batch rendering
 let selectedIds = new Set();
 const BATCH_SIZE = 50;
 let observer = null;
@@ -192,6 +209,9 @@ function initSearch() {
         window.PretextLayout.init();
     }
 
+    // INSTANT FEEDBACK: Check URL params before worker is even ready
+    processUrlParams();
+
     // Initialize Worker
     searchWorker = new Worker('search-worker.js');
 
@@ -208,15 +228,11 @@ function initSearch() {
                 if (!payload.hasEmbeddings && semanticToggle) {
                     semanticToggle.disabled = true;
                     semanticToggle.closest('.filter-group').title = "No embeddings found. Run 'generate_embeddings.js' on server.";
-                    // Disable it visually too if possible, but the attribute is enough
                 }
 
-                // CHECK FOR INITIAL QUERY (From Database page)
-                const urlParams = new URLSearchParams(window.location.search);
-                const initialQuery = urlParams.get('q');
-                if (initialQuery) {
-                    console.log(`[MAIN] Initial search query found: ${initialQuery}`);
-                    searchQuery.value = decodeURIComponent(initialQuery);
+                // Now that we are initialized, trigger the search if any filters were pre-populated
+                if (selectedTagFilters.size > 0 || selectedObjectFilters.size > 0 || searchQuery.value.trim() || urlParams.get('similar')) {
+                    console.log('[MAIN] Index ready, triggering pre-populated search');
                     performSearch();
                 }
                 break;
@@ -248,6 +264,7 @@ function handleWorkerResults(results) {
     // It's efficient enough to filter 5000 items in main thread if the heavy Fuse search is done.
 
     // 1. Store Search Matches
+    lastWorkerResults = results; // Store for Find Similar lookups
     let finalResults = results; // These are the Fuse matches (or all items if no query)
 
     // 2. Client-Side Filtering (Negative, Scene, Date, Sort)
@@ -285,6 +302,27 @@ function applyClientFilters(dataSet) {
     const negativeTerms = negQueryText ? negQueryText.toLowerCase().split(/\s+/).filter(t => t.length > 0) : [];
 
     let results = dataSet.filter(img => {
+        // Tag/Object Pre-Filter (exact match on whole tag strings)
+        if (selectedTagFilters.size > 0 || selectedObjectFilters.size > 0) {
+            const analysis = img.analysis || {};
+            const imgTags = (analysis.tags || []).map(t => t.toLowerCase());
+            const imgObjects = (analysis.objects || []).map(o => o.toLowerCase());
+            const allSelectedItems = [
+                ...Array.from(selectedTagFilters).map(t => ({ name: t.toLowerCase(), arr: imgTags })),
+                ...Array.from(selectedObjectFilters).map(o => ({ name: o.toLowerCase(), arr: imgObjects }))
+            ];
+
+            const tagLogic = document.querySelector('input[name="tagLogic"]:checked')?.value || 'AND';
+
+            if (tagLogic === 'AND') {
+                // ALL selected filters must match
+                if (!allSelectedItems.every(item => item.arr.includes(item.name))) return false;
+            } else {
+                // ANY selected filter must match
+                if (!allSelectedItems.some(item => item.arr.includes(item.name))) return false;
+            }
+        }
+
         // Negative Filter
         if (negativeTerms.length > 0) {
             const analysis = img.analysis || {};
@@ -395,13 +433,43 @@ async function performSearch() {
             searchBtn.disabled = false;
             searchBtn.textContent = 'Search Images';
         }
-
     } else {
+        // Only actually send the message if initialized
+        if (!isInitialized) return;
+
         // KEYWORD MODE (Default)
         searchWorker.postMessage({
             type: 'SEARCH',
             payload: { query: queryText }
         });
+    }
+}
+
+/**
+ * Instantly populates the UI from URL parameters (q, type, similar)
+ * Provides immediate visual feedback while the index loads.
+ */
+const urlParams = new URLSearchParams(window.location.search);
+
+function processUrlParams() {
+    const initialQuery = urlParams.get('q');
+    const initialSimilar = urlParams.get('similar');
+    const initialTag = urlParams.get('tag'); // Legacy support
+
+    if (initialSimilar) {
+        console.log(`[MAIN] Pre-populating 'similar' for ID: ${initialSimilar}`);
+        findSimilar(initialSimilar);
+    } else if (initialQuery || initialTag) {
+        const queryVal = initialQuery || initialTag;
+        const decoded = decodeURIComponent(queryVal);
+        const urlType = urlParams.get('type'); // 'tag' or 'object'
+        console.log(`[MAIN] Pre-populating query: ${decoded}, type: ${urlType}`);
+
+        if (urlType === 'tag' || urlType === 'object') {
+            addTagFilter(decoded, urlType);
+        } else {
+            searchQuery.value = decoded;
+        }
     }
 }
 
@@ -429,12 +497,15 @@ function setupIntersectionObserver() {
 }
 
 function renderBatch() {
-    if (currentIndex >= filteredImages.length) {
-        if (observer) observer.disconnect();
+    if (isRendering || currentIndex >= filteredImages.length) {
+        if (currentIndex >= filteredImages.length && observer) observer.disconnect();
         return;
     }
 
-    const batch = filteredImages.slice(currentIndex, currentIndex + BATCH_SIZE);
+    isRendering = true;
+    const start = currentIndex;
+    const batch = filteredImages.slice(start, start + BATCH_SIZE);
+    currentIndex += batch.length; // Update immediately to prevent duplicate triggers
 
     // Pre-measure summary heights with pretext if available
     let summaryHeights = new Map();
@@ -464,7 +535,7 @@ function renderBatch() {
     }
 
     searchResults.insertAdjacentHTML('beforeend', batchHtml);
-    currentIndex += batch.length;
+    isRendering = false;
 }
 
 // Factor out result HTML generation (similar to card creation in database.js)
@@ -612,18 +683,15 @@ searchResults.addEventListener('click', (e) => {
         if (fullPath) showImagePreview(fullPath);
     }
 
-    // Tag Click (Add to Search)
+    // Tag Click (Add to Filter)
     const tagEl = e.target.closest('.tag.editable');
     if (tagEl) {
         e.stopPropagation();
         const tagText = tagEl.dataset.tag;
+        const dataType = tagEl.dataset.type; // 'tags' or 'objects'
         if (tagText) {
-            // Check if tag is already in query to avoid duplicates
-            const currentQuery = searchQuery.value.trim();
-            if (!currentQuery.toLowerCase().includes(tagText.toLowerCase())) {
-                searchQuery.value = currentQuery ? `${currentQuery} ${tagText}` : tagText;
-                performSearch();
-            }
+            const filterType = dataType === 'objects' ? 'object' : 'tag';
+            addTagFilter(tagText, filterType);
         }
         return;
     }
@@ -954,6 +1022,17 @@ document.getElementById('ctxRegenThumb').addEventListener('click', async () => {
     hideContextMenu();
     await regenerateThumbnail(id, card);
 });
+
+// Find Similar Action
+const ctxFindSimilar = document.getElementById('ctxFindSimilar');
+if (ctxFindSimilar) {
+    ctxFindSimilar.addEventListener('click', () => {
+        if (!ctxTarget) return;
+        const { id } = ctxTarget;
+        hideContextMenu();
+        findSimilar(id);
+    });
+}
 
 // Context Menu Actions
 document.getElementById('ctxEdit').addEventListener('click', (e) => {
@@ -1667,14 +1746,21 @@ async function loadStats() {
 
         // Render Tags
         const topTagsList = document.getElementById('topTagsList');
+        // Store for autocomplete
+        allKnownTags = stats.tags || [];
+        allKnownObjects = stats.objects || [];
+
         if (stats.tags.length === 0) {
             topTagsList.innerHTML = '<span style="color: var(--text-secondary); font-size: 0.9rem;">No tags found</span>';
         } else {
-            topTagsList.innerHTML = stats.tags.slice(0, 20).map(tag => `
-                <span class="tag" style="cursor: pointer;" onclick="setSearchQuery('${tag.name}')">
-                    #${tag.name} <span style="opacity: 0.6; font-size: 0.8em;">(${tag.count})</span>
-                </span>
-            `).join('');
+            topTagsList.innerHTML = stats.tags.slice(0, 20).map(tag => {
+                const safeName = tag.name.replace(/'/g, "\\'");
+                return `
+                    <span class="tag" style="cursor: pointer;" onclick="setSearchQuery('${safeName}')">
+                        #${tag.name} <span style="opacity: 0.6; font-size: 0.8em;">(${tag.count})</span>
+                    </span>
+                `;
+            }).join('');
         }
 
         // Render Objects
@@ -1682,11 +1768,14 @@ async function loadStats() {
         if (stats.objects.length === 0) {
             topObjectsList.innerHTML = '<span style="color: var(--text-secondary); font-size: 0.9rem;">No objects found</span>';
         } else {
-            topObjectsList.innerHTML = stats.objects.slice(0, 20).map(obj => `
-                <span class="tag" style="background-color: rgba(16, 185, 129, 0.2); color: #34d399; cursor: pointer;" onclick="setSearchQuery('${obj.name}')">
-                    ${obj.name} <span style="opacity: 0.6; font-size: 0.8em;">(${obj.count})</span>
-                </span>
-            `).join('');
+            topObjectsList.innerHTML = stats.objects.slice(0, 20).map(obj => {
+                const safeName = obj.name.replace(/'/g, "\\'");
+                return `
+                    <span class="tag" style="background-color: rgba(16, 185, 129, 0.2); color: #34d399; cursor: pointer;" onclick="setObjectQuery('${safeName}')">
+                        ${obj.name} <span style="opacity: 0.6; font-size: 0.8em;">(${obj.count})</span>
+                    </span>
+                `;
+            }).join('');
         }
 
     } catch (error) {
@@ -1726,11 +1815,240 @@ async function regenerateThumbnail(id, cardElement) {
     }
 }
 
-// Helper to set search query from tag click
+// Helper: Add tag/object to filter from sidebar click
 window.setSearchQuery = (term) => {
-    searchQuery.value = term;
-    performSearch();
+    addTagFilter(term, 'tag');
 };
+
+window.setObjectQuery = (term) => {
+    addTagFilter(term, 'object');
+};
+
+// ============================================================================
+// TAG FILTER: AUTOCOMPLETE & CHIP MANAGEMENT
+// ============================================================================
+
+function addTagFilter(name, type) {
+    const targetSet = type === 'tag' ? selectedTagFilters : selectedObjectFilters;
+    if (targetSet.has(name)) return; // Already selected
+    targetSet.add(name);
+    renderFilterChips();
+    if (tagFilterInput) tagFilterInput.value = '';
+    hideAutocomplete();
+    performSearch();
+}
+
+function removeTagFilter(name, type) {
+    const targetSet = type === 'tag' ? selectedTagFilters : selectedObjectFilters;
+    targetSet.delete(name);
+    renderFilterChips();
+    performSearch();
+}
+
+function renderFilterChips() {
+    if (!tagFilterChips) return;
+    let html = '';
+    selectedTagFilters.forEach(tag => {
+        html += `<span class="filter-chip chip-tag">#${tag} <span class="chip-remove" data-name="${tag}" data-type="tag">&times;</span></span>`;
+    });
+    selectedObjectFilters.forEach(obj => {
+        html += `<span class="filter-chip chip-object">&boxbox; ${obj} <span class="chip-remove" data-name="${obj}" data-type="object">&times;</span></span>`;
+    });
+    tagFilterChips.innerHTML = html;
+
+    // Attach remove handlers
+    tagFilterChips.querySelectorAll('.chip-remove').forEach(btn => {
+        btn.addEventListener('click', () => {
+            removeTagFilter(btn.dataset.name, btn.dataset.type);
+        });
+    });
+}
+
+function showAutocomplete(query) {
+    if (!tagAutocomplete) return;
+    const q = query.toLowerCase();
+    const combined = [
+        ...allKnownTags.map(t => ({ ...t, type: 'tag' })),
+        ...allKnownObjects.map(o => ({ ...o, type: 'object' }))
+    ];
+
+    // Filter: match query, exclude already selected
+    const matches = combined.filter(item => {
+        if (item.type === 'tag' && selectedTagFilters.has(item.name)) return false;
+        if (item.type === 'object' && selectedObjectFilters.has(item.name)) return false;
+        return item.name.toLowerCase().includes(q);
+    }).slice(0, 15);
+
+    if (matches.length === 0) {
+        hideAutocomplete();
+        return;
+    }
+
+    tagAutocomplete.innerHTML = matches.map((item, i) => `
+        <div class="tag-autocomplete-item${i === acActiveIndex ? ' active' : ''}" data-name="${item.name}" data-type="${item.type}">
+            <span>
+                <span class="ac-type ${item.type === 'tag' ? 'ac-tag' : 'ac-obj'}">${item.type === 'tag' ? 'tag' : 'obj'}</span>
+                ${item.name}
+            </span>
+            <span class="ac-count">(${item.count})</span>
+        </div>
+    `).join('');
+
+    tagAutocomplete.style.display = 'block';
+
+    // Click handlers
+    tagAutocomplete.querySelectorAll('.tag-autocomplete-item').forEach(el => {
+        el.addEventListener('click', () => {
+            addTagFilter(el.dataset.name, el.dataset.type);
+        });
+    });
+}
+
+function hideAutocomplete() {
+    if (tagAutocomplete) {
+        tagAutocomplete.style.display = 'none';
+        tagAutocomplete.innerHTML = '';
+    }
+    acActiveIndex = -1;
+}
+
+// Wire up the filter input
+if (tagFilterInput) {
+    tagFilterInput.addEventListener('input', () => {
+        const val = tagFilterInput.value.trim();
+        acActiveIndex = -1;
+        if (val.length > 0) {
+            showAutocomplete(val);
+        } else {
+            hideAutocomplete();
+        }
+    });
+
+    tagFilterInput.addEventListener('keydown', (e) => {
+        const items = tagAutocomplete ? tagAutocomplete.querySelectorAll('.tag-autocomplete-item') : [];
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            acActiveIndex = Math.min(acActiveIndex + 1, items.length - 1);
+            items.forEach((el, i) => el.classList.toggle('active', i === acActiveIndex));
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            acActiveIndex = Math.max(acActiveIndex - 1, 0);
+            items.forEach((el, i) => el.classList.toggle('active', i === acActiveIndex));
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            if (acActiveIndex >= 0 && items[acActiveIndex]) {
+                const el = items[acActiveIndex];
+                addTagFilter(el.dataset.name, el.dataset.type);
+            }
+        } else if (e.key === 'Escape') {
+            hideAutocomplete();
+        }
+    });
+
+    // Close autocomplete when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!tagFilterInput.contains(e.target) && !tagAutocomplete.contains(e.target)) {
+            hideAutocomplete();
+        }
+    });
+}
+
+// AND/OR toggle triggers re-search
+document.querySelectorAll('input[name="tagLogic"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+        if (selectedTagFilters.size > 0 || selectedObjectFilters.size > 0) {
+            performSearch();
+        }
+    });
+});
+
+// ============================================================================
+// FIND SIMILAR
+// ============================================================================
+
+async function findSimilar(imageId) {
+    // 1. Try to find in lastWorkerResults
+    let allData = lastWorkerResults || [];
+    let source = allData.find(img => img.id == imageId);
+
+    // 2. If not found (e.g., initial load), fetch from server
+    if (!source) {
+        try {
+            const response = await fetch(`${API_BASE_URL}/images?id=${imageId}`);
+            if (response.ok) {
+                const data = await response.json();
+                source = data.image; // Assuming server returns { image: ... }
+            }
+        } catch (err) {
+            console.error('Failed to fetch similar source image:', err);
+        }
+    }
+
+    if (!source) {
+        // Fallback: If we still don't have it, perform a search once to populate results
+        if (allData.length === 0) {
+            await performSearch(); // This is async now but we don't have a promise yet...
+            // We'll just alert for now or retry once results are in.
+            setTimeout(() => findSimilar(imageId), 1000); 
+            return;
+        }
+        showAlertModal('Image data not found. Try searching first.', 'Find Similar');
+        return;
+    }
+
+    const analysis = source.analysis || {};
+    const tags = analysis.tags || [];
+    const objects = analysis.objects || [];
+    const summary = analysis.summary || '';
+
+    // Clear existing filters
+    selectedTagFilters.clear();
+    selectedObjectFilters.clear();
+
+    // Populate tag filters with source image's tags
+    tags.forEach(t => selectedTagFilters.add(t));
+    objects.forEach(o => selectedObjectFilters.add(o));
+
+    // Set logic to OR (we want images matching ANY of the tags)
+    const orRadio = document.querySelector('input[name="tagLogic"][value="OR"]');
+    if (orRadio) orRadio.checked = true;
+
+    // Put a truncated summary into the text search for additional context
+    const truncSummary = summary.split(/\s+/).slice(0, 6).join(' ');
+    searchQuery.value = truncSummary;
+
+    renderFilterChips();
+
+    // Show banner
+    if (similarBanner) {
+        similarBanner.style.display = 'flex';
+        similarBannerName.textContent = source.filename || `ID ${imageId}`;
+    }
+
+    performSearch();
+}
+
+function clearSimilarMode() {
+    selectedTagFilters.clear();
+    selectedObjectFilters.clear();
+    searchQuery.value = '';
+    renderFilterChips();
+
+    const andRadio = document.querySelector('input[name="tagLogic"][value="AND"]');
+    if (andRadio) andRadio.checked = true;
+
+    if (similarBanner) similarBanner.style.display = 'none';
+
+    performSearch();
+}
+
+if (clearSimilarBtn) {
+    clearSimilarBtn.addEventListener('click', clearSimilarMode);
+}
+
+// Store last worker results for findSimilar lookups
+let lastWorkerResults = [];
+
 
 // Event Listeners
 searchBtn.addEventListener('click', performSearch);
@@ -1786,14 +2104,7 @@ async function updateModelIndicator() {
     }
 }
 
-// Check for URL parameters (e.g. from Tags page)
-const urlParams = new URLSearchParams(window.location.search);
-const tagParam = urlParams.get('tag');
-
-if (tagParam) {
-    searchQuery.value = tagParam;
-    performSearch();
-}
+// URL parameters are now handled by processUrlParams() called during initSearch()
 
 // File Link Handler (Show in Folder)
 document.addEventListener("click", (e) => {
@@ -2039,8 +2350,7 @@ if (validateBtn) {
             } catch (e) {
                 showAlertModal('Check failed: ' + e.message, 'Integrity Check Error');
                 if (validationStatus) validationStatus.style.display = 'none';
-            }
-        }, 'Run Check', 'var(--accent)');
+        }
     });
 }
 

@@ -154,6 +154,27 @@
                             <input type="text" id="negativeQuery" class="negative-input"
                                 placeholder="Exclude terms (e.g. blurry, dark)...">
 
+                            <!-- Tag & Object Filter -->
+                            <div class="tag-filter-section">
+                                <div class="tag-filter-header">
+                                    <label class="filter-label" style="margin: 0;">Tag & Object Filter:</label>
+                                    <div class="tag-filter-logic">
+                                        <label class="tag-logic-option">
+                                            <input type="radio" name="tagLogic" value="AND" checked> AND
+                                        </label>
+                                        <label class="tag-logic-option">
+                                            <input type="radio" name="tagLogic" value="OR"> OR
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="tag-filter-input-wrap">
+                                    <input type="text" id="tagFilterInput" class="tag-filter-input"
+                                        placeholder="Type to search tags & objects..." autocomplete="off">
+                                    <div id="tagAutocomplete" class="tag-autocomplete-dropdown"></div>
+                                </div>
+                                <div id="tagFilterChips" class="tag-filter-chips"></div>
+                            </div>
+
                             <!-- Search Fuzziness Slider -->
                             <div class="fuzziness-container">
                                 <div class="fuzziness-header">
@@ -269,6 +290,10 @@
                             </div>
 
                             <!-- Results Area -->
+                            <div id="similarBanner" class="similar-banner" style="display: none;">
+                                <span>🔍 Showing images similar to: <strong id="similarBannerName"></strong></span>
+                                <button id="clearSimilarBtn" class="similar-banner-close" title="Clear">✕</button>
+                            </div>
                             <div class="results-header">
                                 <h3 class="results-title">Results</h3>
                                 <span id="resultsCount" class="results-count">0 results</span>
@@ -313,6 +338,9 @@
                     </div>
                     <div class="context-menu-item" id="ctxReparseSummary">
                         <span>🛠️</span> Reparse Description
+                    </div>
+                    <div class="context-menu-item" id="ctxFindSimilar">
+                        <span>🔎</span> Find Similar
                     </div>
                     <div class="context-menu-item" id="ctxReAnalyze">
                         <span>🔍</span> Re-analyze Image

@@ -306,3 +306,203 @@
     font-size: 0.8rem;
     color: var(--text-secondary);
 }
+
+/* ============================================================================
+   TAG & OBJECT FILTER
+   ============================================================================ */
+
+.tag-filter-section {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+}
+
+.tag-filter-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.tag-filter-logic {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+.tag-logic-option {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.tag-logic-option input[type="radio"] {
+    accent-color: var(--accent);
+}
+
+.tag-filter-input-wrap {
+    position: relative;
+}
+
+.tag-filter-input {
+    width: 100%;
+    padding: 0.6rem 0.75rem;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+}
+
+.tag-filter-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.tag-autocomplete-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    max-height: 220px;
+    overflow-y: auto;
+    background: var(--bg-secondary, #1e1e2e);
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    z-index: 1000;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.tag-autocomplete-item {
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    transition: background 0.15s;
+}
+
+.tag-autocomplete-item:hover,
+.tag-autocomplete-item.active {
+    background: rgba(99, 102, 241, 0.15);
+}
+
+.ac-type {
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    font-weight: 500;
+}
+
+.ac-type.ac-tag {
+    background: rgba(139, 92, 246, 0.2);
+    color: #a78bfa;
+}
+
+.ac-type.ac-obj {
+    background: rgba(16, 185, 129, 0.2);
+    color: #34d399;
+}
+
+.tag-autocomplete-item .ac-count {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-left: 0.5rem;
+}
+
+/* Filter Chips */
+.tag-filter-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+}
+
+.tag-filter-chips:empty {
+    display: none;
+}
+
+.filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: default;
+    animation: chipIn 0.2s ease-out;
+}
+
+@keyframes chipIn {
+    from { transform: scale(0.8); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+}
+
+.filter-chip.chip-tag {
+    background: rgba(139, 92, 246, 0.2);
+    color: #c4b5fd;
+    border: 1px solid rgba(139, 92, 246, 0.3);
+}
+
+.filter-chip.chip-object {
+    background: rgba(16, 185, 129, 0.2);
+    color: #6ee7b7;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.filter-chip .chip-remove {
+    cursor: pointer;
+    opacity: 0.6;
+    transition: opacity 0.15s;
+    font-size: 0.9rem;
+    line-height: 1;
+}
+
+.filter-chip .chip-remove:hover {
+    opacity: 1;
+}
+
+/* Similarity Banner */
+.similar-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    margin-top: 1rem;
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(139, 92, 246, 0.1) 100%);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    border-radius: 10px;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    animation: bannerSlideIn 0.3s ease-out;
+}
+
+@keyframes bannerSlideIn {
+    from { transform: translateY(-10px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+.similar-banner-close {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    transition: all 0.2s;
+}
+
+.similar-banner-close:hover {
+    background: rgba(239, 68, 68, 0.2);
+    border-color: #ef4444;
+    color: #ef4444;
+}

@@ -932,6 +932,13 @@ app.post('/update-tags', (req, res) => {
 app.get('/images', (req, res) => {
     console.log('[GET-IMAGES] Request received');
     try {
+        const id = req.query.id;
+        if (id) {
+            const image = db.prepare('SELECT * FROM images WHERE id = ?').get(id);
+            if (!image) return res.status(404).json({ error: 'Image not found' });
+            return res.json({ image });
+        }
+
         const page = parseInt(req.query.page);
         const limit = parseInt(req.query.limit);
         const sort = req.query.sort || 'recent_update';

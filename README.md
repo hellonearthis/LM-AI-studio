@@ -26,7 +26,9 @@ An Electron-based desktop application that uses local AI (via LM Studio) to anal
 - **Automatic Tag Cleaning**: System automatically strips brackets `[] () {}` and deduplicates tags/objects for a cleaner library.
 - **Model-Specific Optimization**: Automatically uses optimized prompt strategies for different model architectures (e.g., Qwen vs. Gemma-4) to prevent hallucinations and loops.
 - **ComfyUI Integration**: Automatically extracts and displays ComfyUI workflow and prompt data from PNG metadata.
-- **Improved Performance**: Infinite scroll and server-side pagination ensure fluid browsing even with thousands of images.
+- **Tag & Object Filter System**: A dedicated pre-filtering layer with autocomplete. Select multiple exact tags or objects as 'bubbles' to refine your search before keywords are even applied.
+- **Find Similar Discovery**: Right-click any image or tag to instantly find related content. Uses a specialized similarity engine to match tags, objects, and descriptions.
+- **Improved Performance**: High-speed initialization and optimized infinite scroll (with rendering locks) ensure fluid browsing and no duplicate images even with thousands of results.
 - **Semantic Search**: Go beyond keywords. Search for concepts ("peaceful morning", "cyberpunk vibe") using AI embeddings.
 - **Advanced Fuzzy Search**: Typos? No problem. Find images instantly with weighted fuzzy matching.
 - **Smart Filtering**: Filter search results by **Scene Type** (Indoor, Outdoor, Portrait, etc.) and **Date Range**.
@@ -120,20 +122,25 @@ Navigate to the **Settings ⚙️** page to select your AI models.
 5.  **Rename Files**: Right-click any filename to rename it directly on disk, or use the **"Bulk Rename"** button to re-index an entire selection.
     - **Gap Filling**: If your folder has `img_001` and `img_003`, the renamer will automatically find and fill `img_002` first.
     - **Cross-Extension Safety**: The system prevents number collisions even if you mix `.jpg`, `.png`, and `.webp` files.
+6.  **Find Similar**: Right-click any thumbnail or tag to launch a discovery search for visually and conceptually related images.
 
 ### Searching
 
 1.  Navigate to the **Search** page.
-2.  **Semantic Search**: Toggle "Semantic Search" to find images by concept (requires Embeddings).
+126. **Tag & Object Filters**: Use the specialized filter input to select exact tags or objects. 
+    - **Autocomplete**: Start typing to see suggestions from your entire library.
+    - **Filter Chips**: Selected items appear as removable bubbles.
+    - **Search Logic**: Toggle between **Match All (AND)** and **Match Any (OR)** to refine how multiple filters interact.
+127. **Find Similar**: Use the right-click menu to enter "Discovery Mode" for a specific image. Click the banner to reset the search.
+128. **Semantic Search**: Toggle "Semantic Search" to find images by concept (requires Embeddings).
     - If needed, click **"Generate Data"** to build embeddings for your library.
-3.  **Text Search**: Enter keywords to search descriptions, objects, and tags. **Fuzzy search** handles typos.
-4.  **Fuzziness Control**: Use the slider to adjust search strictness.
+129. **Text Search**: Enter keywords to search descriptions and filenames. This works *alongside* your active tag filters for multi-layered discovery.
+130. **Fuzziness Control**: Use the slider to adjust search strictness.
     -   **Exact (0.0)**: Use for precise keyword matching.
     -   **Loose (0.6)**: Use to find related terms or handle significant typos.
-5.  **Filters**:
+131. **Filters**:
     -   **Scene Type**: Filter by Indoor, Outdoor, Portrait, Landscape, Urban, Nature.
     -   **Date Range**: Restrict results to a specific timeframe.
-6.  **Search Logic**: Toggle between **Match All (AND)** and **Match Any (OR)** logic.
 7.  **Inline Tag Management**: Right-click any tag/object to edit or delete it. Click `+` to add new tags (supports comma-separated multiple tags).
 8.  **Results**: Results are automatically sorted by **Most Recently Updated** first.
 

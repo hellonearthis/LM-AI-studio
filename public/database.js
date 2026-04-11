@@ -1132,82 +1132,6 @@ document.addEventListener('click', async (e) => {
     }
 });
 
-async function showIntegrityCheckModal() {
-    return new Promise((resolve) => {
-        const modal = document.createElement('div');
-        modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; z-index: 10000; backdrop-filter: blur(4px);';
-
-        modal.innerHTML = `
-            <div style="background: var(--bg-secondary); padding: 2.5rem; border-radius: 16px; border: 1px solid var(--border); max-width: 450px; width: 90%; box-shadow: 0 20px 50px rgba(0,0,0,0.5);">
-                <h3 style="margin: 0 0 1.5rem 0; color: var(--accent); font-size: 1.5rem; display: flex; align-items: center; gap: 0.75rem;">
-                    <span>🛡️</span> Database Integrity Check
-                </h3>
-                
-                <p style="color: var(--text-secondary); margin-bottom: 2rem; font-size: 0.95rem; line-height: 1.5;">
-                    Select the tasks you would like to perform during the maintenance pass:
-                </p>
-
-                <div style="display: flex; flex-direction: column; gap: 1.25rem; margin-bottom: 2.5rem;">
-                    <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer; padding: 0.5rem; border-radius: 8px; transition: background 0.2s; hover: background: rgba(255,255,255,0.05);">
-                        <input type="checkbox" id="icRemoveMissing" checked style="width: 18px; height: 18px; accent-color: var(--accent);">
-                        <div>
-                            <div style="color: var(--text-primary); font-weight: 500;">Remove Missing Files</div>
-                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Delete database records for files no longer on disk.</div>
-                        </div>
-                    </label>
-
-                    <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer; padding: 0.5rem; border-radius: 8px; transition: background 0.2s;">
-                        <input type="checkbox" id="icRepairMetadata" checked style="width: 18px; height: 18px; accent-color: var(--accent);">
-                        <div>
-                            <div style="color: var(--text-primary); font-weight: 500;">Repair Metadata</div>
-                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Fix missing dimensions, resolution, and file size data.</div>
-                        </div>
-                    </label>
-
-                    <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer; padding: 0.5rem; border-radius: 8px; transition: background 0.2s;">
-                        <input type="checkbox" id="icRegenThumb" checked style="width: 18px; height: 18px; accent-color: var(--accent);">
-                        <div>
-                            <div style="color: var(--text-primary); font-weight: 500;">Regenerate Thumbnails</div>
-                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Rebuild missing thumbnails using the new unique ID scheme.</div>
-                        </div>
-                    </label>
-
-                    <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer; padding: 1rem; border-radius: 8px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2);">
-                        <input type="checkbox" id="icPurgeThumb" style="width: 18px; height: 18px; accent-color: #ef4444;">
-                        <div>
-                            <div style="color: #ef4444; font-weight: 600;">Purge Legacy Thumbnails</div>
-                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Wipe all old thumbnails to fix collisions. (Recommended)</div>
-                        </div>
-                    </label>
-                </div>
-
-                <div style="display: flex; gap: 1rem; justify-content: flex-end;">
-                    <button id="icCancelBtn" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.6rem 1.25rem; border-radius: 8px; cursor: pointer; font-weight: 500;">Cancel</button>
-                    <button id="icRunBtn" style="background: var(--accent); border: none; color: white; padding: 0.6rem 2rem; border-radius: 8px; cursor: pointer; font-weight: 600; box-shadow: 0 4px 12px var(--accent-glow);">Run Check</button>
-                </div>
-            </div>
-        `;
-
-        document.body.appendChild(modal);
-
-        modal.querySelector('#icCancelBtn').onclick = () => {
-            modal.remove();
-            resolve(null);
-        };
-
-        modal.querySelector('#icRunBtn').onclick = () => {
-            const options = {
-                removeMissing: modal.querySelector('#icRemoveMissing').checked,
-                repairMetadata: modal.querySelector('#icRepairMetadata').checked,
-                regenThumbnails: modal.querySelector('#icRegenThumb').checked,
-                purgeThumbnails: modal.querySelector('#icPurgeThumb').checked
-            };
-            modal.remove();
-            resolve(options);
-        };
-    });
-}
-
 if (closeStatus) {
     closeStatus.addEventListener('click', () => {
         validationStatus.style.display = 'none';
@@ -1222,8 +1146,8 @@ if (closeStatus) {
 const contextMenu = document.getElementById('contextMenu');
 let ctxTarget = null; // { id, tag, type, card }
 
-function showContextMenu(e, id, type, tag = null, card = null) {
-    ctxTarget = { id, type, tag, card };
+function showContextMenu(e, id, type, tag = null, card = null, dataType = null) {
+    ctxTarget = { id, type, tag, card, dataType };
     contextMenu.style.display = 'block';
 
     // Position menu
@@ -1243,6 +1167,7 @@ function showContextMenu(e, id, type, tag = null, card = null) {
     const renameItem = document.getElementById('ctxRename');
 
     document.getElementById('ctxRegenThumb').style.display = type === 'thumbnail' ? 'block' : 'none';
+    document.getElementById('ctxFindSimilar').style.display = (type === 'thumbnail' || type === 'tag') ? 'block' : 'none';
     document.getElementById('ctxSearch').style.display = type === 'tag' ? 'block' : 'none';
     document.getElementById('ctxEdit').style.display = type === 'tag' ? 'block' : 'none';
     document.getElementById('ctxDelete').style.display = type === 'tag' ? 'block' : 'none';
@@ -1253,7 +1178,7 @@ function showContextMenu(e, id, type, tag = null, card = null) {
     }
 
     const dividers = contextMenu.querySelectorAll('.context-menu-divider');
-    dividers.forEach(d => d.style.display = type === 'tag' ? 'block' : 'none');
+    dividers.forEach(d => d.style.display = (type === 'tag' || type === 'thumbnail') ? 'block' : 'none');
 }
 
 function hideContextMenu() {
@@ -1279,7 +1204,7 @@ document.addEventListener('contextmenu', (e) => {
     if (tagEl) {
         e.preventDefault();
         e.stopPropagation();
-        showContextMenu(e, tagEl.dataset.id, 'tag', tagEl.dataset.tag);
+        showContextMenu(e, tagEl.dataset.id, 'tag', tagEl.dataset.tag, null, tagEl.dataset.type);
         return;
     }
 
@@ -1297,20 +1222,7 @@ document.addEventListener('contextmenu', (e) => {
     hideContextMenu();
 });
 
-// Search Action
-const ctxSearch = document.getElementById('ctxSearch');
-if (ctxSearch) {
-    ctxSearch.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (!ctxTarget || !ctxTarget.tag) return;
-        
-        const query = encodeURIComponent(ctxTarget.tag);
-        hideContextMenu();
-        
-        // Navigate to search page with the tag as a query parameter
-        window.location.href = `search.html?q=${query}`;
-    });
-}
+// Context menu action listeners are located further down in the "Context Menu Actions" section.
 
 // Rename Action
 const ctxRename = document.getElementById('ctxRename');
@@ -1383,19 +1295,39 @@ document.getElementById('ctxRegenThumb').addEventListener('click', async () => {
     await regenerateThumbnail(id, card);
 });
 
+const ctxFindSimilar = document.getElementById('ctxFindSimilar');
+if (ctxFindSimilar) {
+    ctxFindSimilar.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!ctxTarget || !ctxTarget.id) return;
+        const targetId = ctxTarget.id;
+        hideContextMenu();
+        window.location.href = `search.html?similar=${targetId}`;
+    });
+}
+
+const ctxSearch = document.getElementById('ctxSearch');
+if (ctxSearch) {
+    ctxSearch.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!ctxTarget || !ctxTarget.tag) return;
+        
+        const query = encodeURIComponent(ctxTarget.tag);
+        const dataType = ctxTarget.dataType || 'tags';
+        const filterType = dataType === 'objects' ? 'object' : 'tag';
+        
+        hideContextMenu();
+
+        window.location.href = `search.html?q=${query}&type=${filterType}`;
+    });
+}
+
 document.getElementById('ctxEdit').addEventListener('click', () => {
     if (!ctxTarget || ctxTarget.type !== 'tag') return;
-    const { id, tag, type } = ctxTarget;
-    // Note: type here is 'tag' but we need 'tags' or 'objects'. 
-    // In search.js we used dataset.type which we've now added to createCardHtml.
-    // Wait, in showContextMenu above I pass 'tag' as the type of context. 
-    // I need to know if it's 'tags' or 'objects'.
-    // Let's refine showContextMenu to accept context_type too.
+    const { id, tag, dataType } = ctxTarget;
     hideContextMenu();
 
-    // Re-finding the element to get the specific type (tags/objects)
-    const tagEl = document.querySelector(`.tag.editable[data-id="${id}"][data-tag="${tag}"]`);
-    const realType = tagEl ? tagEl.dataset.type : 'tags';
+    const realType = dataType || 'tags';
 
     showTagInputModal(`Edit ${realType.slice(0, -1)}`, tag, (newTag) => {
         if (newTag && newTag.trim() && newTag.trim() !== tag) {
@@ -1406,11 +1338,10 @@ document.getElementById('ctxEdit').addEventListener('click', () => {
 
 document.getElementById('ctxDelete').addEventListener('click', () => {
     if (!ctxTarget || ctxTarget.type !== 'tag') return;
-    const { id, tag } = ctxTarget;
+    const { id, tag, dataType } = ctxTarget;
     hideContextMenu();
 
-    const tagEl = document.querySelector(`.tag.editable[data-id="${id}"][data-tag="${tag}"]`);
-    const realType = tagEl ? tagEl.dataset.type : 'tags';
+    const realType = dataType || 'tags';
 
     showConfirmModal(`Delete "${tag}"?`, () => {
         updateTag(id, realType, tag, null, 'delete');
