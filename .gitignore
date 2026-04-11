@@ -16,3 +16,5 @@ public/search-index.json
 config.json
 public/search-data.json
 public/search-embeddings.json
+images_clustered*.csv
+tmp/
