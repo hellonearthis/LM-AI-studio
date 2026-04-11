@@ -1934,6 +1934,9 @@ app.post('/rename', (req, res) => {
         db.prepare('UPDATE images SET filename = ?, path = ?, mtime = ? WHERE id = ?')
             .run(newFilename, newPath, new Date().toISOString(), id);
 
+        // Update Search Index
+        generateSearchIndex();
+
         res.json({ success: true, newPath, newFilename });
 
     } catch (err) {
@@ -2132,6 +2135,14 @@ app.post('/bulk-rename', (req, res) => {
                 processResults.failedCount++;
                 processResults.errors.push(`Error on image ${image.filename}: ${innerProcessErr.message}`);
             }
+        }
+
+        // STEP 8: RE-INDEXING
+        // Since we've changed filenames on disk and in the DB, the search index
+        // (search-index.json / search-data.json) is now out of date. We trigger
+        // a regeneration so the Search page shows the NEW names immediately.
+        if (processResults.successCount > 0) {
+            generateSearchIndex();
         }
 
         // Send the final result summary back to the user
