@@ -1507,6 +1507,26 @@ function showBulkRenameModal(selectedIdsSet, imagesArray) {
 
                 <div style="margin-bottom: 1.5rem; text-align: left;">
                     <label style="display: block; color: #a78bfa; font-size: 0.85rem; margin-bottom: 0.5rem;">New Base Name (e.g. "coffee")</label>
+                    
+                    ${(() => {
+                        const recent = getRecentRenames();
+                        if (recent.length === 0) return '';
+                        return `
+                            <div id="recentRenamesContainer" style="margin-bottom: 0.75rem; display: flex; flex-wrap: wrap; gap: 0.4rem; padding: 0.5rem; background: rgba(0,0,0,0.2); border-radius: 6px; border: 1px dashed rgba(167, 139, 250, 0.3);">
+                                <span style="font-size: 0.7rem; color: #8b5cf6; width: 100%; margin-bottom: 0.2rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Recent:</span>
+                                ${recent.map(name => `
+                                    <span class="recent-rename-chip" 
+                                          style="background: rgba(139, 92, 246, 0.15); border: 1px solid rgba(139, 92, 246, 0.3); color: #c4b5fd; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; cursor: pointer; transition: all 0.2s;"
+                                          onmouseover="this.style.background='rgba(139, 92, 246, 0.3)'; this.style.borderColor='#8b5cf6';"
+                                          onmouseout="this.style.background='rgba(139, 92, 246, 0.15)'; this.style.borderColor='rgba(139, 92, 246, 0.3)';"
+                                          onclick="document.getElementById('renameBaseInput').value = '${name.replace(/'/g, "\\'")}'; document.getElementById('renameBaseInput').focus();">
+                                        ${name}
+                                    </span>
+                                `).join('')}
+                            </div>
+                        `;
+                    })()}
+
                     <input type="text" id="renameBaseInput" placeholder="Enter base name..." style="width: 100%; padding: 0.75rem; border-radius: 6px; border: 1px solid #4c1d95; background: var(--bg-color); color: var(--text-primary); font-size: 1rem; outline: none; box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);">
                     <p style="margin: 0.5rem 0 0 0; color: #8b5cf6; font-size: 0.75rem;">Fills gaps in sequence automatically: coffee_001, etc.</p>
                 </div>
@@ -2198,6 +2218,7 @@ if (bulkRenameBtn) {
             const data = await response.json();
             
             if (response.ok && data.success) {
+                saveRecentRename(baseName.trim());
                 showAlertModal(data.message || 'Successfully renamed files', 'Rename Complete');
                 selectedIds.clear();
                 updateProcessButton();
@@ -2358,4 +2379,27 @@ if (closeStatus) {
     closeStatus.addEventListener('click', () => {
         validationStatus.style.display = 'none';
     });
+}
+// ============================================================================
+// STORAGE HELPERS
+// ============================================================================
+function getRecentRenames() {
+    try {
+        const stored = localStorage.getItem('recentRenames');
+        return stored ? JSON.parse(stored) : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function saveRecentRename(name) {
+    if (!name || !name.trim()) return;
+    const trimmed = name.trim();
+    let recent = getRecentRenames();
+    // Remove if already exists to move it to the top
+    recent = recent.filter(r => r !== trimmed);
+    recent.unshift(trimmed);
+    // Keep only last 10
+    recent = recent.slice(0, 10);
+    localStorage.setItem('recentRenames', JSON.stringify(recent));
 }
