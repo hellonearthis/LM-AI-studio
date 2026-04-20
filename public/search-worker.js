@@ -58,6 +58,10 @@ self.onmessage = async function (e) {
             performSemanticSearch(payload.vector);
             break;
 
+        case 'HYBRID_SEARCH':
+            performHybridSearch(payload.query, payload.vector);
+            break;
+
         case 'UPDATE_CONFIG':
             if (fuse && payload.fuzziness !== undefined) {
                 const options = {
@@ -198,5 +202,105 @@ function cosineSimilarity(vecA, vecB, magA) {
 
     if (magA === 0 || magB === 0) return 0;
     return dot / (magA * magB);
+}
+
+// ============================================================================
+// HYBRID SEARCH: RECIPROCAL RANK FUSION (RRF)
+// ============================================================================
+// Inspired by Exa's Canon search pipeline architecture.
+// RRF merges ranked lists from multiple retrieval systems (keyword + semantic)
+// into a single unified ranking. Formula: RRF(doc) = Σ 1/(k + rank_i)
+// k=60 is the standard constant from Cormack et al. (2009).
+
+const RRF_K = 60;
+
+/**
+ * Merge two ranked result lists using Reciprocal Rank Fusion.
+ * @param {Array} keywordResults - Results from Fuse.js fuzzy search (ordered by relevance)
+ * @param {Array} semanticResults - Results from cosine similarity search (ordered by similarity)
+ * @returns {Array} Merged results sorted by combined RRF score
+ */
+function reciprocalRankFusion(keywordResults, semanticResults) {
+    const scoreMap = new Map(); // id -> { item, score }
+
+    // Score keyword results
+    keywordResults.forEach((item, rank) => {
+        const id = String(item.id);
+        const rrfScore = 1 / (RRF_K + rank);
+        if (scoreMap.has(id)) {
+            scoreMap.get(id).score += rrfScore;
+        } else {
+            scoreMap.set(id, { item, score: rrfScore });
+        }
+    });
+
+    // Score semantic results
+    semanticResults.forEach((item, rank) => {
+        const id = String(item.id);
+        const rrfScore = 1 / (RRF_K + rank);
+        if (scoreMap.has(id)) {
+            scoreMap.get(id).score += rrfScore;
+        } else {
+            scoreMap.set(id, { item, score: rrfScore });
+        }
+    });
+
+    // Sort by combined RRF score (highest first)
+    const merged = Array.from(scoreMap.values());
+    merged.sort((a, b) => b.score - a.score);
+
+    return merged.map(entry => entry.item);
+}
+
+/**
+ * Hybrid search: runs both keyword (Fuse.js) and semantic (cosine similarity)
+ * searches in parallel, then merges using RRF.
+ */
+function performHybridSearch(query, queryVector) {
+    if (!isReady) return;
+
+    console.log('[WORKER] Hybrid Search: running keyword + semantic paths');
+
+    // --- Path 1: Keyword (Fuse.js) ---
+    let keywordResults = [];
+    if (fuse && query && query.trim() !== '') {
+        const fuseResults = fuse.search(query);
+        keywordResults = fuseResults.map(res => res.item);
+    }
+
+    // --- Path 2: Semantic (Cosine Similarity) ---
+    let semanticResults = [];
+    if (embeddingsMap && queryVector && queryVector.length > 0) {
+        const matches = [];
+        const queryMag = Math.sqrt(Math.sumPrecise(queryVector.map(val => val * val)));
+
+        for (const img of allImages) {
+            const imgVector = embeddingsMap[img.id];
+            if (imgVector) {
+                const sim = cosineSimilarity(queryVector, imgVector, queryMag);
+                matches.push({ item: img, score: sim });
+            }
+        }
+        matches.sort((a, b) => b.score - a.score);
+        semanticResults = matches.map(m => m.item);
+    }
+
+    // --- Fusion ---
+    let results;
+    if (keywordResults.length > 0 && semanticResults.length > 0) {
+        results = reciprocalRankFusion(keywordResults, semanticResults);
+        console.log(`[WORKER] RRF merged ${keywordResults.length} keyword + ${semanticResults.length} semantic → ${results.length} results`);
+    } else if (keywordResults.length > 0) {
+        results = keywordResults;
+        console.log(`[WORKER] Hybrid fallback: keyword only (${results.length} results)`);
+    } else if (semanticResults.length > 0) {
+        results = semanticResults;
+        console.log(`[WORKER] Hybrid fallback: semantic only (${results.length} results)`);
+    } else {
+        results = allImages;
+        console.log('[WORKER] Hybrid: no query, returning all');
+    }
+
+    self.postMessage({ type: 'RESULTS', payload: { results, isFullList: false } });
 }
 

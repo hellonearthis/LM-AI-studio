@@ -161,19 +161,25 @@
                                         style="font-size: 0.7rem; padding: 0.2rem 0.6rem; height: auto;"
                                         title="Generate embeddings from existing images">Generate Data</button>
                                 </div>
-                                <div class="mode-toggle-container"
-                                    style="display: flex; gap: 1rem; align-items: center; margin-top: 0.5rem;">
-                                    <label class="switch-label"
-                                        style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
-                                        <input type="checkbox" id="semanticToggle">
-                                        <span class="slider-round"></span>
-                                        <span style="font-size: 0.9rem; color: var(--text-primary);">Semantic
-                                            Search</span>
+                                <div class="search-mode-selector" style="margin-top: 0.5rem;">
+                                    <label class="mode-option">
+                                        <input type="radio" name="searchMode" value="keyword" checked>
+                                        <span class="mode-label">⌨️ Keyword</span>
+                                    </label>
+                                    <label class="mode-option">
+                                        <input type="radio" name="searchMode" value="hybrid">
+                                        <span class="mode-label">⚡ Hybrid</span>
+                                    </label>
+                                    <label class="mode-option">
+                                        <input type="radio" name="searchMode" value="semantic">
+                                        <span class="mode-label">🧠 Semantic</span>
                                     </label>
                                 </div>
-                                <p style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.25rem;">
-                                    Use AI to find concepts (e.g., "sad robot").
+                                <p id="searchModeHint" style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.4rem;">
+                                    Fuzzy keyword matching on summaries, tags, and objects.
                                 </p>
+                                <!-- Hidden checkbox kept for backward compat with search.js refs -->
+                                <input type="checkbox" id="semanticToggle" style="display: none;">
                                 <div id="genProgress"
                                     style="font-size: 0.7rem; color: var(--accent); margin-top: 0.25rem; white-space: pre-wrap; display: none;">
                                 </div>

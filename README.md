@@ -31,6 +31,7 @@ An Electron-based desktop application that uses local AI (via LM Studio) to anal
 - **Find Similar Discovery**: Right-click any image or tag to instantly find related content. Uses a specialized similarity engine to match tags, objects, and descriptions.
 - **Improved Performance**: High-speed initialization and optimized infinite scroll (with rendering locks) ensure fluid browsing and no duplicate images even with thousands of results.
 - **Semantic Search**: Go beyond keywords. Search for concepts ("peaceful morning", "cyberpunk vibe") using AI embeddings.
+- **Hybrid RRF Search**: Combines keyword and semantic results using **Reciprocal Rank Fusion** — inspired by [Exa's Canon architecture](https://exa.ai/blog/composing-a-search-engine). Best of both worlds: exact matches *and* conceptual understanding in a single ranked list.
 - **Advanced Fuzzy Search**: Typos? No problem. Find images instantly with weighted fuzzy matching.
 - **Smart Filtering**: Filter search results by **Scene Type** (Indoor, Outdoor, Portrait, etc.) and **Date Range**.
 - **Batch Processing**: Select multiple images to analyze efficiently. Use **"Select Missing"** to target unanalyzed content.
@@ -136,9 +137,10 @@ Navigate to the **Settings ⚙️** page to select your AI models.
     - **Filter Chips**: Selected items appear as removable bubbles.
     - **Search Logic**: Toggle between **Match All (AND)** and **Match Any (OR)** to refine how multiple filters interact.
 3.  **Find Similar**: Use the right-click menu to enter "Discovery Mode" for a specific image. Click the banner to reset the search.
-4.  **Semantic Search**: Toggle "Semantic Search" to find images by concept (requires Embeddings).
+4.  **Semantic Search**: Toggle "Semantic" to find images by concept (requires Embeddings).
     - If needed, click **"Generate Data"** to build embeddings for your library.
-5.  **Text Search**: Enter keywords to search descriptions and filenames. This works *alongside* your active tag filters for multi-layered discovery.
+5.  **Hybrid Search (⚡ New!)**: When embeddings are available, Hybrid mode is auto-selected. It runs keyword *and* semantic search simultaneously, then merges results using **Reciprocal Rank Fusion (RRF)** for the best of both worlds.
+6.  **Text Search**: Enter keywords to search descriptions and filenames. This works *alongside* your active tag filters for multi-layered discovery.
 6.  **Fuzziness Control**: Use the slider to adjust search strictness.
     -   **Exact (0.0)**: Use for precise keyword matching.
     -   **Loose (0.6)**: Use to find related terms or handle significant typos.

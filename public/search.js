@@ -119,10 +119,22 @@ let observer = null;
 const sentinel = document.getElementById('scroll-sentinel');
 
 // Toggle Label Update
-// Toggle Label Update
 const fuzzinessSlider = document.getElementById('fuzzinessSlider');
 const fuzzinessValue = document.getElementById('fuzzinessValue');
-const semanticToggle = document.getElementById('semanticToggle');
+const semanticToggle = document.getElementById('semanticToggle'); // Hidden compat checkbox
+const searchModeHint = document.getElementById('searchModeHint');
+
+// Search Mode Helper
+function getSearchMode() {
+    const checked = document.querySelector('input[name="searchMode"]:checked');
+    return checked ? checked.value : 'keyword';
+}
+
+const SEARCH_MODE_HINTS = {
+    keyword: 'Fuzzy keyword matching on summaries, tags, and objects.',
+    hybrid: '⚡ Combines keyword + semantic search via Reciprocal Rank Fusion.',
+    semantic: '🧠 AI concept search using embedding similarity.'
+};
 
 // Scope Elements
 const scopeAnalysis = document.getElementById('scopeAnalysis');
@@ -132,14 +144,14 @@ const scopeTags = document.getElementById('scopeTags');
 // Update Fuzziness Label
 const sortOrder = document.getElementById('sortOrder');
 
-// Update Fuzziness Label
 fuzzinessSlider.addEventListener('input', () => {
     fuzzinessValue.textContent = fuzzinessSlider.value;
 });
 
 // Update Search on Slider Change
 fuzzinessSlider.addEventListener('change', () => {
-    if (semanticToggle && semanticToggle.checked) return; // Ignore if semantic is on
+    const mode = getSearchMode();
+    if (mode === 'semantic') return; // Fuzziness not relevant for pure semantic
 
     if (searchWorker) {
         searchWorker.postMessage({
@@ -150,17 +162,26 @@ fuzzinessSlider.addEventListener('change', () => {
     }
 });
 
-// Update Search on Scope Change
-[scopeAnalysis, scopeObjects, scopeTags, sortOrder, negativeQuery, semanticToggle, document.getElementById('dataStatus')].forEach(el => {
+// Search Mode Radio Listeners
+document.querySelectorAll('input[name="searchMode"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+        // Sync hidden checkbox for backward compat
+        const mode = getSearchMode();
+        if (semanticToggle) semanticToggle.checked = (mode === 'semantic' || mode === 'hybrid');
+        toggleSearchModeUI();
+        performSearch();
+    });
+});
+
+// Update Search on Scope/Filter Change
+[scopeAnalysis, scopeObjects, scopeTags, sortOrder, negativeQuery, document.getElementById('dataStatus')].forEach(el => {
     if (el) {
         el.addEventListener('change', () => {
-            if (el === semanticToggle) {
-                toggleSearchModeUI();
-                performSearch();
-            } else if (el === sortOrder || el === negativeQuery) {
+            if (el === sortOrder || el === negativeQuery) {
                 performSearch();
             } else {
-                if (semanticToggle && !semanticToggle.checked) {
+                const mode = getSearchMode();
+                if (mode === 'keyword' || mode === 'hybrid') {
                     performSearch();
                 }
             }
@@ -169,21 +190,27 @@ fuzzinessSlider.addEventListener('change', () => {
 });
 
 function toggleSearchModeUI() {
-    const isSemantic = semanticToggle.checked;
+    const mode = getSearchMode();
+    const isPureSemantic = (mode === 'semantic');
 
-    // Disable/Dim Fuzziness & Scope (Not used in Semantic)
-    fuzzinessSlider.disabled = isSemantic;
-    scopeAnalysis.disabled = isSemantic;
-    scopeObjects.disabled = isSemantic;
-    scopeTags.disabled = isSemantic;
+    // Disable/Dim Fuzziness & Scope (Not used in pure Semantic)
+    fuzzinessSlider.disabled = isPureSemantic;
+    scopeAnalysis.disabled = isPureSemantic;
+    scopeObjects.disabled = isPureSemantic;
+    scopeTags.disabled = isPureSemantic;
 
     // Visual feedback
-    const opacity = isSemantic ? '0.5' : '1';
+    const opacity = isPureSemantic ? '0.5' : '1';
     document.querySelector('.fuzziness-container').style.opacity = opacity;
     document.querySelector('.scope-container').style.opacity = opacity;
 
-    // Force Sort to Relevance if Semantic turned on
-    if (isSemantic) {
+    // Update hint text
+    if (searchModeHint) {
+        searchModeHint.textContent = SEARCH_MODE_HINTS[mode] || '';
+    }
+
+    // Force Sort to Relevance if semantic or hybrid
+    if (mode === 'semantic' || mode === 'hybrid') {
         sortOrder.value = 'relevance';
     }
 }
@@ -225,9 +252,23 @@ function initSearch() {
                 searchBtn.disabled = false;
                 searchBtn.textContent = 'Search Images';
 
-                if (!payload.hasEmbeddings && semanticToggle) {
-                    semanticToggle.disabled = true;
-                    semanticToggle.closest('.filter-group').title = "No embeddings found. Run 'generate_embeddings.js' on server.";
+                if (!payload.hasEmbeddings) {
+                    // Disable Hybrid and Semantic radio buttons if no embeddings
+                    document.querySelectorAll('input[name="searchMode"]').forEach(radio => {
+                        if (radio.value === 'hybrid' || radio.value === 'semantic') {
+                            radio.disabled = true;
+                        }
+                    });
+                    const filterGroup = document.querySelector('.search-mode-selector')?.closest('.filter-group');
+                    if (filterGroup) filterGroup.title = "Hybrid & Semantic modes require embeddings. Click 'Generate Data' first.";
+                } else {
+                    // Embeddings available: auto-select Hybrid as default
+                    const hybridRadio = document.querySelector('input[name="searchMode"][value="hybrid"]');
+                    if (hybridRadio && !hybridRadio.disabled) {
+                        hybridRadio.checked = true;
+                        if (semanticToggle) semanticToggle.checked = true;
+                        toggleSearchModeUI();
+                    }
                 }
 
                 // Now that we are initialized, trigger the search if any filters were pre-populated
@@ -297,7 +338,8 @@ function applyClientFilters(dataSet) {
     const endFilter = endDate.value;
     const currentSort = sortOrder ? sortOrder.value : 'newest';
     const queryText = searchQuery.value.trim();
-    const isSemantic = semanticToggle && semanticToggle.checked;
+    const currentMode = getSearchMode();
+    const isSemantic = (currentMode === 'semantic' || currentMode === 'hybrid');
 
     const negativeTerms = negQueryText ? negQueryText.toLowerCase().split(/\s+/).filter(t => t.length > 0) : [];
 
@@ -404,12 +446,11 @@ async function performSearch() {
     searchBtn.innerHTML = '<div class="spinner"></div> Searching...';
 
     const queryText = searchQuery.value.trim();
-    const isSemantic = semanticToggle && semanticToggle.checked;
+    const mode = getSearchMode();
 
-    if (isSemantic && queryText) {
-        // SEMANTIC MODE
+    if (mode === 'hybrid' && queryText) {
+        // HYBRID MODE: Run keyword + semantic, merge with RRF
         try {
-            // 1. Get embedding for query from Server > LM Studio
             searchBtn.textContent = 'Embedding...';
             const res = await fetch('/api/embed', {
                 method: 'POST',
@@ -420,7 +461,34 @@ async function performSearch() {
             if (!res.ok) throw new Error('Failed to get embedding');
             const data = await res.json();
 
-            // 2. Send vector to worker
+            searchBtn.textContent = 'Fusing...';
+            searchWorker.postMessage({
+                type: 'HYBRID_SEARCH',
+                payload: { query: queryText, vector: data.embedding }
+            });
+
+        } catch (err) {
+            console.error('Hybrid Search Failed:', err);
+            // Fallback to keyword-only gracefully
+            console.warn('[MAIN] Falling back to keyword search');
+            searchWorker.postMessage({
+                type: 'SEARCH',
+                payload: { query: queryText }
+            });
+        }
+    } else if (mode === 'semantic' && queryText) {
+        // PURE SEMANTIC MODE
+        try {
+            searchBtn.textContent = 'Embedding...';
+            const res = await fetch('/api/embed', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: queryText })
+            });
+
+            if (!res.ok) throw new Error('Failed to get embedding');
+            const data = await res.json();
+
             searchBtn.textContent = 'Comparing...';
             searchWorker.postMessage({
                 type: 'SEMANTIC_SEARCH',
@@ -434,10 +502,8 @@ async function performSearch() {
             searchBtn.textContent = 'Search Images';
         }
     } else {
-        // Only actually send the message if initialized
-        if (!isInitialized) return;
-
         // KEYWORD MODE (Default)
+        if (!isInitialized) return;
         searchWorker.postMessage({
             type: 'SEARCH',
             payload: { query: queryText }
