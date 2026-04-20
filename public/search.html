@@ -52,7 +52,7 @@
 
             <div class="batch-actions-label">Batch Actions</div>
 
-            <select id="dbPromptType" class="sidebar-select">
+            <select id="dbPromptType" class="sidebar-select" title="Choose the AI analysis mode for batch processing. This controls how the vision model describes selected images.">
                 <option value="Detailed Analysis">Detailed Analysis</option>
                 <option value="Simple Description">Simple Description</option>
                 <option value="Detailed Description" selected>Detailed Description</option>
@@ -62,13 +62,13 @@
                 <option value="Short Story">Short Story</option>
             </select>
 
-            <button id="selectMissingBtn" class="sidebar-btn-secondary">Select Missing</button>
-            <button id="unselectAllBtn" class="sidebar-btn-neutral" style="display: none;">Unselect All</button>
-            <button id="processSelectedBtn" class="sidebar-btn-primary" disabled>Process (0)</button>
-            <button id="bulkRenameBtn" class="sidebar-btn-primary" disabled style="background: var(--bg-color); border: 1px solid var(--border); color: var(--text-primary); margin-top: 0.5rem; width: 100%;">Bulk Rename</button>
+            <button id="selectMissingBtn" class="sidebar-btn-secondary" title="Auto-select all visible images that are missing tags, objects, or a summary. Use with 'Process' to batch-analyze incomplete entries.">Select Missing</button>
+            <button id="unselectAllBtn" class="sidebar-btn-neutral" style="display: none;" title="Clear the current selection of images">Unselect All</button>
+            <button id="processSelectedBtn" class="sidebar-btn-primary" disabled title="Re-analyze all selected images using the chosen analysis mode. Each image will be sent to the AI vision model.">Process (0)</button>
+            <button id="bulkRenameBtn" class="sidebar-btn-primary" disabled style="background: var(--bg-color); border: 1px solid var(--border); color: var(--text-primary); margin-top: 0.5rem; width: 100%;" title="Rename all selected images using a shared base name (e.g. 'coffee_001.jpg'). Automatically fills gaps in existing sequences.">Bulk Rename</button>
 
             <div class="sidebar-actions-row">
-                <button id="validateBtn" title="Integrity Check" class="check-btn">🛠️ Check</button>
+                <button id="validateBtn" title="Run a database integrity check: detects duplicates, repairs metadata, removes missing files, and regenerates broken thumbnails" class="check-btn">🛠️ Check</button>
             </div>
 
             <!-- Active Model Status -->
@@ -107,33 +107,37 @@
                                     <label class="switch"
                                         style="position: relative; display: inline-block; width: 34px; height: 20px;">
                                         <input type="checkbox" id="searchLogicToggle"
-                                            style="opacity: 0; width: 0; height: 0;">
+                                            style="opacity: 0; width: 0; height: 0;"
+                                            title="Toggle between AND (match all terms) and OR (match any term) logic">
                                         <span class="slider round"> </span>
                                     </label>
                                 </span>
                             </div>
                             <input type="text" id="searchQuery" class="search-input"
-                                placeholder="Search descriptions, objects..." autofocus>
+                                placeholder="Search descriptions, objects..." autofocus
+                                title="Enter keywords to search across image descriptions, filenames, tags, and objects. Press Enter to search.">
 
                             <input type="text" id="negativeQuery" class="negative-input"
-                                placeholder="Exclude terms (e.g. blurry, dark)...">
+                                placeholder="Exclude terms (e.g. blurry, dark)..."
+                                title="Enter words to exclude from results. Images containing any of these terms will be filtered out.">
 
                             <!-- Tag & Object Filter -->
                             <div class="tag-filter-section">
                                 <div class="tag-filter-header">
                                     <label class="filter-label" style="margin: 0;">Tag & Object Filter:</label>
                                     <div class="tag-filter-logic">
-                                        <label class="tag-logic-option">
+                                        <label class="tag-logic-option" title="AND: results must match ALL selected tags and objects">
                                             <input type="radio" name="tagLogic" value="AND" checked> AND
                                         </label>
-                                        <label class="tag-logic-option">
+                                        <label class="tag-logic-option" title="OR: results can match ANY of the selected tags or objects">
                                             <input type="radio" name="tagLogic" value="OR"> OR
                                         </label>
                                     </div>
                                 </div>
                                 <div class="tag-filter-input-wrap">
                                     <input type="text" id="tagFilterInput" class="tag-filter-input"
-                                        placeholder="Type to search tags & objects..." autocomplete="off">
+                                        placeholder="Type to search tags & objects..." autocomplete="off"
+                                        title="Type a tag or object name to see autocomplete suggestions. Select items to add them as filter chips.">
                                     <div id="tagAutocomplete" class="tag-autocomplete-dropdown"></div>
                                 </div>
                                 <div id="tagFilterChips" class="tag-filter-chips"></div>
@@ -145,7 +149,8 @@
                                     <label class="fuzziness-label">Fuzziness: <span id="fuzzinessValue"
                                             class="fuzziness-value">0.2</span></label>
                                     <input type="range" id="fuzzinessSlider" class="fuzziness-range" min="0.0" max="0.6"
-                                        step="0.1" value="0.2">
+                                        step="0.1" value="0.2"
+                                        title="Controls how loosely keywords are matched. 0.0 = exact matches only. 0.6 = very loose, tolerates typos and partial matches.">
                                 </div>
                                 <div class="fuzziness-labels">
                                     <span>Exact</span>
@@ -159,18 +164,18 @@
                                     <label class="filter-label" style="margin: 0;">Search Mode</label>
                                     <button id="generateEmbeddingsBtn" class="action-btn"
                                         style="font-size: 0.7rem; padding: 0.2rem 0.6rem; height: auto;"
-                                        title="Generate embeddings from existing images">Generate Data</button>
+                                        title="Generate AI embeddings for all images in the database. Required for Hybrid and Semantic search modes. Uses the Embedding model configured in Settings.">Generate Data</button>
                                 </div>
                                 <div class="search-mode-selector" style="margin-top: 0.5rem;">
-                                    <label class="mode-option">
+                                    <label class="mode-option" title="Keyword: Uses Fuse.js fuzzy matching to search text in summaries, tags, and objects. Fuzziness slider controls match strictness.">
                                         <input type="radio" name="searchMode" value="keyword" checked>
                                         <span class="mode-label">⌨️ Keyword</span>
                                     </label>
-                                    <label class="mode-option">
+                                    <label class="mode-option" title="Hybrid: Runs both keyword and semantic search simultaneously, then merges results using Reciprocal Rank Fusion (RRF). Best of both worlds.">
                                         <input type="radio" name="searchMode" value="hybrid">
                                         <span class="mode-label">⚡ Hybrid</span>
                                     </label>
-                                    <label class="mode-option">
+                                    <label class="mode-option" title="Semantic: Uses AI embeddings to find conceptually similar images. Great for abstract queries like 'peaceful morning' or 'cyberpunk vibe'.">
                                         <input type="radio" name="searchMode" value="semantic">
                                         <span class="mode-label">🧠 Semantic</span>
                                     </label>
@@ -192,15 +197,15 @@
                             <div class="scope-container" style="border-top: none; padding-top: 0; margin-top: 0;">
                                 <label class="scope-label">Search Scope:</label>
                                 <div class="scope-options">
-                                    <label class="checkbox-label">
+                                    <label class="checkbox-label" title="Include AI-generated image descriptions in keyword search">
                                         <input type="checkbox" id="scopeAnalysis" class="checkbox-input" checked>
                                         <span class="checkbox-text">Summaries</span>
                                     </label>
-                                    <label class="checkbox-label">
+                                    <label class="checkbox-label" title="Include detected objects (e.g. 'cat', 'car', 'tree') in keyword search">
                                         <input type="checkbox" id="scopeObjects" class="checkbox-input" checked>
                                         <span class="checkbox-text">Objects</span>
                                     </label>
-                                    <label class="checkbox-label">
+                                    <label class="checkbox-label" title="Include extracted tags (e.g. 'sunset', 'portrait') in keyword search">
                                         <input type="checkbox" id="scopeTags" class="checkbox-input" checked>
                                         <span class="checkbox-text">Tags</span>
                                     </label>
@@ -209,7 +214,7 @@
 
                             <div class="dropdown-row">
                                 <label class="dropdown-label">Sort Order</label>
-                                <select id="sortOrder" class="styled-select">
+                                <select id="sortOrder" class="styled-select" title="Choose how results are ordered. Relevance uses the search engine score; Newest/Oldest sorts by file creation date.">
                                     <option value="relevance">Relevance</option>
                                     <option value="newest" selected>Newest First</option>
                                     <option value="oldest">Oldest First</option>
@@ -218,7 +223,7 @@
 
                             <div class="dropdown-row">
                                 <label class="dropdown-label">Scene Type</label>
-                                <select id="sceneType" class="styled-select">
+                                <select id="sceneType" class="styled-select" title="Filter results by the AI-detected scene classification badge assigned during analysis.">
                                     <option value="all">All Types</option>
                                     <option value="indoor">Indoor</option>
                                     <option value="outdoor">Outdoor</option>
@@ -231,7 +236,7 @@
 
                             <div class="dropdown-row">
                                 <label class="dropdown-label">Data Status</label>
-                                <select id="dataStatus" class="styled-select">
+                                <select id="dataStatus" class="styled-select" title="Filter images by their analysis completeness. Use this to find images that still need AI processing.">
                                     <option value="all">All Images</option>
                                     <option value="missing-any">⚠️ Missing Any Data</option>
                                     <option value="missing-tags">Missing Tags</option>
@@ -245,12 +250,12 @@
                             <div class="date-range-container">
                                 <label class="scope-label">Date Range</label>
                                 <div class="date-inputs">
-                                    <input type="date" id="startDate" class="date-input">
-                                    <input type="date" id="endDate" class="date-input">
+                                    <input type="date" id="startDate" class="date-input" title="Show only images created on or after this date">
+                                    <input type="date" id="endDate" class="date-input" title="Show only images created on or before this date">
                                 </div>
 
                                 <div class="search-btn-container">
-                                    <button id="searchBtn" class="search-btn">Search Images</button>
+                                    <button id="searchBtn" class="search-btn" title="Execute the search with current filters and settings. You can also press Enter in the search field.">Search Images</button>
                                 </div>
                             </div>
                         </div>
@@ -258,7 +263,8 @@
 
                     <!-- New Discovery Row (Horizontal Tags) -->
                     <div class="discovery-toggle-bar" id="discoveryToggle"
-                        style="margin-top: 1rem; border-top: 1px solid var(--border); padding-top: 0.75rem; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; color: var(--text-secondary); transition: all 0.2s;">
+                        style="margin-top: 1rem; border-top: 1px solid var(--border); padding-top: 0.75rem; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; color: var(--text-secondary); transition: all 0.2s;"
+                        title="Toggle visibility of the top tags and objects panel. Click a tag or object to add it as a search filter.">
                         <span class="toggle-icon">▼</span>
                         <span
                             style="font-weight: 500; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em;">Discover
@@ -292,7 +298,7 @@
                 <!-- Search Results Area -->
                 <div id="similarBanner" class="similar-banner" style="display: none; margin-bottom: 1rem;">
                     <span>🔍 Showing images similar to: <strong id="similarBannerName"></strong></span>
-                    <button id="clearSimilarBtn" class="similar-banner-close" title="Clear">✕</button>
+                    <button id="clearSimilarBtn" class="similar-banner-close" title="Exit 'Find Similar' mode and return to normal search">✕</button>
                 </div>
 
                 <div class="results-header" style="margin: 0.5rem 0 1.5rem 0;">
@@ -311,28 +317,28 @@
 
 
     <div id="contextMenu" class="context-menu">
-        <div class="context-menu-item" id="ctxRegenThumb">
+        <div class="context-menu-item" id="ctxRegenThumb" title="Re-create the thumbnail for this image from the original file">
             <span>🔄</span> Regenerate Thumbnail
         </div>
-        <div class="context-menu-item" id="ctxEdit">
+        <div class="context-menu-item" id="ctxEdit" title="Edit the text of this tag or object inline">
             <span>✏️</span> Edit Tag
         </div>
-        <div class="context-menu-item" id="ctxEditSummary">
+        <div class="context-menu-item" id="ctxEditSummary" title="Edit the AI-generated description for this image">
             <span>📝</span> Edit Description
         </div>
-        <div class="context-menu-item" id="ctxReparseSummary">
+        <div class="context-menu-item" id="ctxReparseSummary" title="Re-extract tags and objects from the existing description without re-analyzing the image">
             <span>🛠️</span> Reparse Description
         </div>
-        <div class="context-menu-item" id="ctxFindSimilar">
+        <div class="context-menu-item" id="ctxFindSimilar" title="Search for images with matching tags, objects, and descriptions">
             <span>🔎</span> Find Similar
         </div>
-        <div class="context-menu-item" id="ctxReAnalyze">
+        <div class="context-menu-item" id="ctxReAnalyze" title="Send this image back to the AI vision model for a fresh analysis">
             <span>🔍</span> Re-analyze Image
         </div>
-        <div class="context-menu-item delete" id="ctxDelete">
+        <div class="context-menu-item delete" id="ctxDelete" title="Remove this tag or object from the image's metadata">
             <span>🗑️</span> Delete Tag
         </div>
-        <div class="context-menu-item" id="ctxRename" style="display: none;">
+        <div class="context-menu-item" id="ctxRename" style="display: none;" title="Rename this file on disk">
             <span>📝</span> Rename File
         </div>
     </div>
