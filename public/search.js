@@ -1014,6 +1014,7 @@ if (generateEmbeddingsBtn) {
 
                 showAlertModal('Generation Complete!', 'Embeddings');
                 refreshData(); // Reload worker to pick up new file
+                fetchEmbeddingsStatus(); // Refresh the "Last updated" display
 
             } catch (err) {
                 console.error('Generation Error:', err);
@@ -1026,6 +1027,35 @@ if (generateEmbeddingsBtn) {
         }, 'Continue', 'var(--accent)');
     });
 }
+
+// Embeddings Status Display
+const embeddingsStatusEl = document.getElementById('embeddingsStatus');
+
+async function fetchEmbeddingsStatus() {
+    if (!embeddingsStatusEl) return;
+    try {
+        const res = await fetch(`${API_BASE_URL}/api/embeddings-status`);
+        if (!res.ok) throw new Error('Failed to fetch status');
+        const data = await res.json();
+
+        if (data.exists && data.count > 0) {
+            const date = new Date(data.lastModified);
+            const formatted = date.toLocaleDateString(undefined, {
+                year: 'numeric', month: 'short', day: 'numeric',
+                hour: '2-digit', minute: '2-digit'
+            });
+            const sizeMB = (data.sizeBytes / (1024 * 1024)).toFixed(1);
+            embeddingsStatusEl.innerHTML = `<span style="color: var(--accent);">●</span> ${data.count.toLocaleString()} embeddings · ${sizeMB} MB · Updated ${formatted}`;
+        } else {
+            embeddingsStatusEl.innerHTML = `<span style="color: var(--text-secondary);">○</span> No embeddings generated yet. Click "Generate Data" to enable Hybrid & Semantic search.`;
+        }
+    } catch (e) {
+        embeddingsStatusEl.textContent = '';
+    }
+}
+
+// Fetch on page load
+fetchEmbeddingsStatus();
 
 // Rename Action
 const ctxRename = document.getElementById('ctxRename');

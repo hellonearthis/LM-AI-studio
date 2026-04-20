@@ -1701,6 +1701,32 @@ Config Path:     ${CONFIG_PATH}
 // MAINTENANCE ENDPOINTS
 // ============================================================================
 
+// Embeddings file status (for "Last updated" display)
+app.get('/api/embeddings-status', (req, res) => {
+    const embeddingsPath = path.join(__dirname, 'public', 'search-embeddings.json');
+    try {
+        if (!fs.existsSync(embeddingsPath)) {
+            return res.json({ exists: false });
+        }
+        const stats = fs.statSync(embeddingsPath);
+        // Count entries without fully parsing the large file (read first 100 chars to check if valid)
+        let count = 0;
+        try {
+            const data = JSON.parse(fs.readFileSync(embeddingsPath, 'utf8'));
+            count = Object.keys(data).length;
+        } catch (e) { /* invalid json */ }
+
+        res.json({
+            exists: true,
+            lastModified: stats.mtime.toISOString(),
+            sizeBytes: stats.size,
+            count
+        });
+    } catch (err) {
+        res.json({ exists: false, error: err.message });
+    }
+});
+
 // Run EVoC + UMAP Pipeline (Streaming)
 app.post('/api/maintenance/run-evoc', (req, res) => {
     console.log('[MAINTENANCE] Running EVoC + UMAP Pipeline...');
