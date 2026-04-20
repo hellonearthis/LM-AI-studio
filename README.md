@@ -139,6 +139,9 @@ Navigate to the **Settings ⚙️** page to select your AI models.
 3.  **Find Similar**: Use the right-click menu to enter "Discovery Mode" for a specific image. Click the banner to reset the search.
 4.  **Semantic Search**: Toggle "Semantic" to find images by concept (requires Embeddings).
     - If needed, click **"Generate Data"** to build embeddings for your library.
+    - Uses a **text embedding model** from LM Studio (e.g. `nomic-embed-text-v1.5`). The model is resolved by priority: Settings config → `.env` variable → auto-detect (first model with "embed" in its name).
+    - The status line below the button shows the embedding count, file size, and last updated date.
+    - Embeddings are also reused by the **EVoC pipeline** (Settings → Run Map Analysis) for clustering and the Data Map visualization.
 5.  **Hybrid Search (⚡ New!)**: When embeddings are available, Hybrid mode is auto-selected. It runs keyword *and* semantic search simultaneously, then merges results using **Reciprocal Rank Fusion (RRF)** for the best of both worlds.
 6.  **Text Search**: Enter keywords to search descriptions and filenames. This works *alongside* your active tag filters for multi-layered discovery.
 6.  **Fuzziness Control**: Use the slider to adjust search strictness.

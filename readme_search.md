@@ -132,11 +132,46 @@ const options = {
 ```
 
 ### Semantic Search Workflow
-1.  **Generation**: User clicks "Generate Data". Server iterates all images, sends description/tags to LM Studio (`text-embedding` model), and saves the resulting 768-dim vector to `search-embeddings.json`.
-2.  **Querying**: User types "Peaceful". "Semantic Mode" is ON.
+1.  **Generation**: User clicks **"Generate Data"**. The server iterates all images with analysis data, constructs a text string from each image's description, tags, objects, and scene type, and sends it to LM Studio's `/v1/embeddings` endpoint. The resulting vector is saved to `search-embeddings.json`.
+2.  **Querying**: User types "Peaceful". Semantic or Hybrid mode is active.
 3.  **Vectorization**: Application sends "Peaceful" to `/api/embed`.
-4.  **Comparison**: The resulting vector is compared against all 5,000+ cached vectors using dot product (Cosine Similarity).
+4.  **Comparison**: The resulting vector is compared against all cached vectors using dot product (Cosine Similarity).
 5.  **Threshold**: Matches with similarity > 0.4 are returned.
+
+### Embedding Model Selection
+
+The **Generate Data** button and the `/api/embed` proxy both select an embedding model using the same priority chain:
+
+| Priority | Source | How to Configure |
+|----------|--------|-----------------|
+| 1st | `config.embeddingModel` | Settings page → Embedding Model dropdown → saved in `config.json` |
+| 2nd | `EMBEDDING_MODEL_ID` | Environment variable in `.env` file |
+| 3rd | **Auto-detect** | Queries LM Studio `/v1/models` and picks the first model with `"embed"` in its ID |
+| 4th | **Fallback** | Uses the first available model (may not be an embedding model) |
+
+> [!TIP]
+> Lock the embedding model via **Settings → Embedding Model** so it doesn't change depending on what's loaded in LM Studio at the time. Common models: `nomic-embed-text-v1.5`, `text-embedding-3-small`.
+
+> [!IMPORTANT]
+> Run `GET /api/diagnostics` to see which Vision and Embedding models are currently resolved, and where they came from (Settings, ENV, or Auto-detect).
+
+### Embedding Pipeline Dependencies
+
+The `search-embeddings.json` file is the **shared foundation** for multiple systems:
+
+```
+Generate Data → search-embeddings.json → Search (Hybrid/Semantic)
+                                       → EVoC + UMAP (Data Map clusters & coordinates)
+```
+
+| System | Reads From | Writes To |
+|--------|-----------|-----------|
+| **Generate Data** | Image analysis in SQLite | `search-embeddings.json` |
+| **Search (Hybrid/Semantic)** | `search-embeddings.json` | Search results |
+| **EVoC Pipeline** (Settings) | `search-embeddings.json` | `image_clusters` + `image_coordinates` tables |
+| **Latent Scope** (Data Map) | External Parquet files | Independent — does not use `search-embeddings.json` |
+
+> If you regenerate embeddings with a different model, you should also re-run the EVoC pipeline (Settings → Run Map Analysis) to update the cluster assignments and UMAP coordinates.
 
 ### Reciprocal Rank Fusion (RRF)
 
