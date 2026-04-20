@@ -106,6 +106,204 @@ select {
     font-size: 1.125rem;
 }
 
+/* Sidebar Controls (Common used in Database and Search) */
+.sidebar-controls {
+    padding: 1.5rem;
+    border-top: 1px solid var(--border);
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.validation-status {
+    background: rgba(52, 211, 153, 0.1);
+    border: 1px solid var(--accent);
+    padding: 0.75rem;
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+    position: relative;
+    font-size: 0.85rem;
+}
+
+.validation-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.validation-text {
+    color: var(--text-primary);
+    word-break: break-word;
+}
+
+.close-status-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 1.2rem;
+    line-height: 1;
+}
+
+.validation-progress-track {
+    height: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.validation-progress-bar {
+    width: 0%;
+    height: 100%;
+    background: var(--accent);
+    transition: width 0.3s;
+}
+
+.batch-actions-label {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.25rem;
+    padding-left: 0.2rem;
+}
+
+.sidebar-select {
+    width: 100%;
+    padding: 0.6rem;
+    border-radius: 8px;
+    background: var(--bg-color);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    font-family: inherit;
+    font-size: 0.85rem;
+    outline: none;
+}
+
+.sidebar-btn-secondary {
+    width: 100%;
+    background: rgba(56, 189, 248, 0.1);
+    border: 1px dashed var(--accent);
+    color: var(--accent);
+    padding: 0.6rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    text-align: center;
+    transition: all 0.2s;
+}
+
+.sidebar-btn-secondary:hover {
+    background: rgba(56, 189, 248, 0.2);
+}
+
+.sidebar-btn-neutral {
+    width: 100%;
+    background: var(--bg-color);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 0.6rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    text-align: center;
+    transition: all 0.2s;
+}
+
+.sidebar-btn-neutral:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.sidebar-btn-primary {
+    width: 100%;
+    background: var(--accent);
+    border: none;
+    color: white;
+    padding: 0.6rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.85rem;
+    text-align: center;
+    transition: all 0.2s;
+}
+
+.sidebar-btn-primary:hover {
+    filter: brightness(1.1);
+}
+
+.sidebar-btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.sidebar-actions-row {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+}
+
+.check-btn {
+    flex: 1;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 0.5rem;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.check-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.count-display {
+    background: var(--bg-color);
+    padding: 0.5rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    color: var(--accent);
+    font-weight: bold;
+    min-width: 50px;
+    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Model Status Indicators */
+.model-info-box {
+    margin-top: 0.5rem;
+    padding: 0.75rem;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #666;
+    display: inline-block;
+}
+
+.model-name-text {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-secondary);
+}
+
 
 
 /* ============================================================================

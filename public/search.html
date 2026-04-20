@@ -13,42 +13,71 @@
 
 <body>
     <nav class="sidebar">
-        <div class="sidebar-logo">
-            <div class="logo-icon">IA</div>
-            <h1>Studio</h1>
+        <div class="sidebar-header">
+            <h1>Lumina</h1>
+            <div class="sidebar-subtitle">AI Image Analysis</div>
         </div>
-        <div class="sidebar-menu">
-            <a href="index.html" class="menu-item">
-                <span class="menu-icon">🏠</span> Dashboard
+        <div class="sidebar-nav">
+            <a href="index.html" class="nav-item">
+                <span class="nav-icon">✨</span> Analysis
             </a>
-            <a href="database.html" class="menu-item">
-                <span class="menu-icon">📂</span> Database
+            <a href="database.html" class="nav-item">
+                <span class="nav-icon">🗄️</span> Database
             </a>
-            <a href="search.html" class="menu-item active">
-                <span class="menu-icon">🔍</span> Search
+            <a href="search.html" class="nav-item active">
+                <span class="nav-icon">🔍</span> Search
             </a>
-            <a href="tags.html" class="menu-item">
-                <span class="menu-icon">🏷️</span> Tags
+            <a href="tags.html" class="nav-item">
+                <span class="nav-icon">🏷️</span> Tags
             </a>
+            <a href="scope.html" class="nav-item">
+                <span class="nav-icon">🗺️</span> Map <span style="font-size: 0.7em; opacity: 0.7; margin-left: 5px;">(β)</span>
+            </a>
+            <a href="settings.html" class="nav-item">
+                <span class="nav-icon">⚙️</span> Settings
+            </a>
+        </div>
 
-            <div style="margin-top: 1.5rem; padding: 0 0.8rem;">
-                <label style="font-size: 0.7rem; color: var(--text-secondary); text-transform: uppercase;">Actions</label>
+        <div class="sidebar-controls">
+            <!-- Validation/Batch Status -->
+            <div id="validationStatus" class="validation-status" style="display: none;">
+                <div class="validation-header">
+                    <span id="validationText" class="validation-text">Ready</span>
+                    <button id="closeStatus" class="close-status-btn">&times;</button>
+                </div>
+                <div id="validationProgress" class="validation-progress-track">
+                    <div id="validationProgressBar" class="validation-progress-bar"></div>
+                </div>
             </div>
-            <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
-                <button id="validateBtn" title="Integrity Check"
-                    style="flex: 1; background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.5rem; border-radius: 8px; cursor: pointer;">
-                    🛠️ Check
-                </button>
+
+            <div class="batch-actions-label">Batch Actions</div>
+
+            <select id="dbPromptType" class="sidebar-select">
+                <option value="Detailed Analysis">Detailed Analysis</option>
+                <option value="Simple Description">Simple Description</option>
+                <option value="Detailed Description" selected>Detailed Description</option>
+                <option value="Ultra Detailed Description">Ultra Detailed Description</option>
+                <option value="Cinematic Description">Cinematic Description</option>
+                <option value="Video Summary">Video Summary</option>
+                <option value="Short Story">Short Story</option>
+            </select>
+
+            <button id="selectMissingBtn" class="sidebar-btn-secondary">Select Missing</button>
+            <button id="unselectAllBtn" class="sidebar-btn-neutral" style="display: none;">Unselect All</button>
+            <button id="processSelectedBtn" class="sidebar-btn-primary" disabled>Process (0)</button>
+            <button id="bulkRenameBtn" class="sidebar-btn-primary" disabled style="background: var(--bg-color); border: 1px solid var(--border); color: var(--text-primary); margin-top: 0.5rem; width: 100%;">Bulk Rename</button>
+
+            <div class="sidebar-actions-row">
+                <button id="validateBtn" title="Integrity Check" class="check-btn">🛠️ Check</button>
             </div>
-            <div id="activeModelInfo"
-                style="margin-top: auto; padding: 0.8rem; border-top: 1px solid var(--border); font-size: 0.75rem; color: var(--text-secondary); display: flex; flex-direction: column; gap: 0.3rem;">
-                <div style="display: flex; align-items: center; gap: 0.4rem;">
-                    <span id="modelStatusDot"
-                        style="width: 8px; height: 8px; border-radius: 50%; background: #666; display: inline-block;"></span>
+
+            <!-- Active Model Status -->
+            <div id="activeModelInfo" class="model-info-box">
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <span id="modelStatusDot" class="status-dot"></span>
                     <span style="font-weight: 600; color: var(--text-primary);">Active Model:</span>
                 </div>
-                <div id="activeModelName" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
-                    title="No model selected">None</div>
+                <div id="activeModelName" class="model-name-text" title="No model selected">None</div>
             </div>
         </div>
     </nav>

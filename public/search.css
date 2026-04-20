@@ -25,17 +25,7 @@
     color: var(--text-secondary);
 }
 
-/* Sidebar */
-.sidebar-section {
-    width: 300px;
-    margin-left: 2rem;
-    flex-shrink: 0;
-}
-
-.sticky-card {
-    position: sticky;
-    top: 2rem;
-}
+/* Filters & Search Controls */
 
 /* Filters & Search Controls */
 .search-controls-card {

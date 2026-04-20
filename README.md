@@ -21,7 +21,8 @@ An Electron-based desktop application that uses local AI (via LM Studio) to anal
 
 ## ✨ Features
 
-- **Model Selection & Status**: Switch between different Vision models (Qwen, Gemma-4, etc.) in Settings. Monitor real-time status (**🟢 Loaded**, **⚪ Standby**) directly in the search sidebar.
+- **Unified Lumina Navigation**: A consistent sidebar architecture across all pages (**Analysis, Database, Search, Tags, Map, Settings**).
+- **Model Selection & Status**: Switch between different Vision models (Qwen, Gemma-4, etc.) in Settings. Monitor real-time status (**🟢 Loaded**, **⚪ Standby**) directly in the sidebar on any page.
 - **Enhanced Data Filtering**: Use the **Data Status** filter to find images missing tags, objects, summary, or scene badges.
 - **Automatic Tag Cleaning**: System automatically strips brackets `[] () {}` and deduplicates tags/objects for a cleaner library.
 - **Model-Specific Optimization**: Automatically uses optimized prompt strategies for different model architectures (e.g., Qwen vs. Gemma-4) to prevent hallucinations and loops.
@@ -129,19 +130,19 @@ Navigate to the **Settings ⚙️** page to select your AI models.
 
 ### Searching
 
-1.  Navigate to the **Search** page.
-126. **Tag & Object Filters**: Use the specialized filter input to select exact tags or objects. 
+1.  **Unified Batch Actions**: The sidebar now provides consistent controls for **Selective Re-Analysis**, **Bulk Renaming**, and **Integrity Checks** across both the Database and Search views.
+2.  **Tag & Object Filters**: Use the specialized filter input to select exact tags or objects. 
     - **Autocomplete**: Start typing to see suggestions from your entire library.
     - **Filter Chips**: Selected items appear as removable bubbles.
     - **Search Logic**: Toggle between **Match All (AND)** and **Match Any (OR)** to refine how multiple filters interact.
-127. **Find Similar**: Use the right-click menu to enter "Discovery Mode" for a specific image. Click the banner to reset the search.
-128. **Semantic Search**: Toggle "Semantic Search" to find images by concept (requires Embeddings).
+3.  **Find Similar**: Use the right-click menu to enter "Discovery Mode" for a specific image. Click the banner to reset the search.
+4.  **Semantic Search**: Toggle "Semantic Search" to find images by concept (requires Embeddings).
     - If needed, click **"Generate Data"** to build embeddings for your library.
-129. **Text Search**: Enter keywords to search descriptions and filenames. This works *alongside* your active tag filters for multi-layered discovery.
-130. **Fuzziness Control**: Use the slider to adjust search strictness.
+5.  **Text Search**: Enter keywords to search descriptions and filenames. This works *alongside* your active tag filters for multi-layered discovery.
+6.  **Fuzziness Control**: Use the slider to adjust search strictness.
     -   **Exact (0.0)**: Use for precise keyword matching.
     -   **Loose (0.6)**: Use to find related terms or handle significant typos.
-131. **Filters**:
+7.  **Filters**:
     -   **Scene Type**: Filter by Indoor, Outdoor, Portrait, Landscape, Urban, Nature.
     -   **Date Range**: Restrict results to a specific timeframe.
 7.  **Inline Tag Management**: Right-click any tag/object to edit or delete it. Click `+` to add new tags (supports comma-separated multiple tags).
