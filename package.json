@@ -19,7 +19,7 @@
     "@chenglou/pretext": "^0.0.3",
     "@duckdb/duckdb-wasm": "^1.30.0",
     "@google/generative-ai": "^0.21.0",
-    "better-sqlite3": "^12.6.2",
+    "better-sqlite3": "^12.9.0",
     "d3": "^7.9.0",
     "dotenv": "^16.4.7",
     "electron": "^33.2.1",

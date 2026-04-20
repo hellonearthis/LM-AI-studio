@@ -10,12 +10,31 @@
 // Import Fuse.js (Available in public/libs/fuse.min.js)
 importScripts('libs/fuse.min.js');
 
+// ============================================================================
+// POLYFILLS
+// ============================================================================
+if (typeof Math.sumPrecise !== 'function') {
+    /**
+     * Polyfill for ES2026 Math.sumPrecise
+     * Note: This fallback uses standard reduce, so it won't have the same 
+     * precision guarantees as the native implementation if available.
+     */
+    Math.sumPrecise = function (iterable) {
+        let sum = 0;
+        for (const value of iterable) {
+            sum += Number(value);
+        }
+        return sum;
+    };
+    console.warn('[WORKER] Math.sumPrecise not natively supported, using standard fallback.');
+}
+
 let fuse = null;
 let allImages = [];
 let embeddingsMap = null; // ID -> Vector
 let isReady = false;
 
-// Pre-defined weights (must match server-side generation)
+// ... [Existing search keys] ...
 const SEARCH_KEYS = [
     { name: 'filename', weight: 1 },
     { name: 'analysis.summary', weight: 1 },
@@ -148,7 +167,8 @@ function performSemanticSearch(queryVector) {
     const matches = [];
 
     // Pre-calculate query magnitude (optimization)
-    const queryMag = Math.sqrt(queryVector.reduce((sum, val) => sum + val * val, 0));
+    // Use Math.sumPrecise for better precision in vector space
+    const queryMag = Math.sqrt(Math.sumPrecise(queryVector.map(val => val * val)));
 
     for (const img of allImages) {
         const imgVector = embeddingsMap[img.id];
@@ -170,17 +190,13 @@ function performSemanticSearch(queryVector) {
 }
 
 function cosineSimilarity(vecA, vecB, magA) {
-    // Dot Product
-    let dot = 0;
-    let magB = 0;
-
-    for (let i = 0; i < vecA.length; i++) {
-        dot += vecA[i] * vecB[i];
-        magB += vecB[i] * vecB[i];
-    }
-
-    magB = Math.sqrt(magB);
+    // Dot Product - use Math.sumPrecise to minimize floating point accumulation error
+    const dot = Math.sumPrecise(vecA.map((val, i) => val * vecB[i]));
+    
+    // Vector B Magnitude
+    const magB = Math.sqrt(Math.sumPrecise(vecB.map(val => val * val)));
 
     if (magA === 0 || magB === 0) return 0;
     return dot / (magA * magB);
 }
+

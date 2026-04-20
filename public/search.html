@@ -7,96 +7,33 @@
     <title>Search - Image Analysis Studio</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="search.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Numans&display=swap"
+    <link href="https://fonts.googleapis.com/css2?family=Numans&family=Outfit:wght@300;400;600&display=swap"
         rel="stylesheet">
 </head>
 
 <body>
     <nav class="sidebar">
-        <div class="sidebar-header">
-            <h1>Lumina</h1>
-            <div class="sidebar-subtitle">AI Image Analysis</div>
+        <div class="sidebar-logo">
+            <div class="logo-icon">IA</div>
+            <h1>Studio</h1>
         </div>
-        <div class="sidebar-nav">
-            <a href="index.html" class="nav-item">
-                <span class="nav-icon">✨</span> Analysis
+        <div class="sidebar-menu">
+            <a href="index.html" class="menu-item">
+                <span class="menu-icon">🏠</span> Dashboard
             </a>
-            <a href="database.html" class="nav-item">
-                <span class="nav-icon">🗄️</span> Database
+            <a href="database.html" class="menu-item">
+                <span class="menu-icon">📂</span> Database
             </a>
-            <a href="search.html" class="nav-item active">
-                <span class="nav-icon">🔍</span> Search
+            <a href="search.html" class="menu-item active">
+                <span class="menu-icon">🔍</span> Search
             </a>
-            <a href="tags.html" class="nav-item">
-                <span class="nav-icon">🏷️</span> Tags
+            <a href="tags.html" class="menu-item">
+                <span class="menu-icon">🏷️</span> Tags
             </a>
-            <a href="scope.html" class="nav-item">
-                <span class="nav-icon">🗺️</span> Map <span
-                    style="font-size: 0.7em; opacity: 0.7; margin-left: 5px;">(β)</span>
-            </a>
-            <a href="settings.html" class="nav-item">
-                <span class="nav-icon">⚙️</span> Settings
-            </a>
-        </div>
 
-        <!-- Sidebar Controls (Migrated from Database) -->
-        <div class="sidebar-controls"
-            style="padding: 1.5rem; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 0.75rem;">
-
-            <div id="validationStatus"
-                style="display: none; background: rgba(52, 211, 153, 0.1); border: 1px solid var(--accent); padding: 0.75rem; border-radius: 8px; margin-bottom: 1rem; position: relative; font-size: 0.85rem;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-                    <span id="validationText" style="color: var(--text-primary); word-break: break-word;">Ready</span>
-                    <button id="closeStatus"
-                        style="background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 1.2rem; line-height: 1;">&times;</button>
-                </div>
-                <div id="validationProgress"
-                    style="height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden;">
-                    <div id="validationProgressBar"
-                        style="width: 0%; height: 100%; background: var(--accent); transition: width 0.3s;"></div>
-                </div>
+            <div style="margin-top: 1.5rem; padding: 0 0.8rem;">
+                <label style="font-size: 0.7rem; color: var(--text-secondary); text-transform: uppercase;">Actions</label>
             </div>
-
-
-
-            <div
-                style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">
-                Batch Actions</div>
-
-            <select id="dbPromptType"
-                style="width: 100%; padding: 0.6rem; border-radius: 8px; background: var(--bg-color); color: var(--text-primary); border: 1px solid var(--border); font-family: inherit; font-size: 0.85rem; outline: none;">
-                <option value="Detailed Analysis">Detailed Analysis</option>
-                <option value="Simple Description">Simple Description</option>
-                <option value="Detailed Description" selected>Detailed Description</option>
-                <option value="Ultra Detailed Description">Ultra Detailed Description</option>
-                <option value="Cinematic Description">Cinematic Description</option>
-                <option value="Video Summary">Video Summary</option>
-                <option value="Short Story">Short Story</option>
-                <option value="Prompt Refine & Expand">Prompt Refine & Expand</option>
-            </select>
-
-            <button id="selectMissingBtn"
-                style="width: 100%; background: rgba(56, 189, 248, 0.1); border: 1px dashed var(--accent); color: var(--accent); padding: 0.6rem; border-radius: 8px; cursor: pointer; font-size: 0.85rem; text-align: center;">
-                Select Missing
-            </button>
-
-            <button id="unselectAllBtn"
-                style="display: none; width: 100%; background: var(--bg-color); border: 1px solid var(--border); color: var(--text-secondary); padding: 0.6rem; border-radius: 8px; cursor: pointer; font-size: 0.85rem; text-align: center;">
-                Unselect All
-            </button>
-
-            <button id="processSelectedBtn"
-                style="width: 100%; background: #10b981; border: none; color: white; padding: 0.6rem; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.85rem; text-align: center; transition: background 0.2s;"
-                disabled>
-                Process (0)
-            </button>
-
-            <button id="bulkRenameBtn"
-                style="width: 100%; background: #8b5cf6; border: none; color: white; padding: 0.6rem; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.85rem; text-align: center; margin-top: 0.25rem; transition: background 0.2s;"
-                disabled>
-                Bulk Rename
-            </button>
-
             <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
                 <button id="validateBtn" title="Integrity Check"
                     style="flex: 1; background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.5rem; border-radius: 8px; cursor: pointer;">
@@ -132,12 +69,10 @@
                 <!-- Search Controls -->
                 <div class="card search-controls-card">
                     <div class="filters-grid">
-                        <!-- Text Search -->
+                        <!-- Text Search & Settings -->
                         <div class="filter-section">
                             <div class="filter-header">
-                                <label class="filter-label">
-                                    Keyword Search:
-                                </label>
+                                <label class="filter-label">Keyword Search:</label>
                                 <span id="logicLabel" class="logic-label">
                                     Match All (AND)
                                     <label class="switch"
@@ -190,7 +125,7 @@
                             </div>
 
                             <!-- Search Mode -->
-                            <div class="filter-group">
+                            <div class="filter-group" style="margin-top: 1rem;">
                                 <div style="display: flex; justify-content: space-between; align-items: center;">
                                     <label class="filter-label" style="margin: 0;">Search Mode</label>
                                     <button id="generateEmbeddingsBtn" class="action-btn"
@@ -208,28 +143,28 @@
                                     </label>
                                 </div>
                                 <p style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.25rem;">
-                                    Use AI to find concepts (e.g., "sad robot"). Requires offline embedding generation.
+                                    Use AI to find concepts (e.g., "sad robot").
                                 </p>
                                 <div id="genProgress"
                                     style="font-size: 0.7rem; color: var(--accent); margin-top: 0.25rem; white-space: pre-wrap; display: none;">
                                 </div>
                             </div>
+                        </div>
 
+                        <!-- Filters & Sorting -->
+                        <div class="filter-section">
                             <!-- Search Scope -->
-                            <div class="scope-container">
+                            <div class="scope-container" style="border-top: none; padding-top: 0; margin-top: 0;">
                                 <label class="scope-label">Search Scope:</label>
-
                                 <div class="scope-options">
                                     <label class="checkbox-label">
                                         <input type="checkbox" id="scopeAnalysis" class="checkbox-input" checked>
-                                        <span class="checkbox-text">AI Summaries</span>
+                                        <span class="checkbox-text">Summaries</span>
                                     </label>
-
                                     <label class="checkbox-label">
                                         <input type="checkbox" id="scopeObjects" class="checkbox-input" checked>
                                         <span class="checkbox-text">Objects</span>
                                     </label>
-
                                     <label class="checkbox-label">
                                         <input type="checkbox" id="scopeTags" class="checkbox-input" checked>
                                         <span class="checkbox-text">Tags</span>
@@ -237,19 +172,15 @@
                                 </div>
                             </div>
 
-                            <!-- Sort Order -->
                             <div class="dropdown-row">
                                 <label class="dropdown-label">Sort Order</label>
                                 <select id="sortOrder" class="styled-select">
-                                    <option value="relevance">Relevance (Best Match)</option>
+                                    <option value="relevance">Relevance</option>
                                     <option value="newest" selected>Newest First</option>
                                     <option value="oldest">Oldest First</option>
                                 </select>
                             </div>
-                        </div>
 
-                        <!-- Scene Type -->
-                        <div class="filter-section">
                             <div class="dropdown-row">
                                 <label class="dropdown-label">Scene Type</label>
                                 <select id="sceneType" class="styled-select">
@@ -278,7 +209,6 @@
                             <!-- Date Range -->
                             <div class="date-range-container">
                                 <label class="scope-label">Date Range</label>
-
                                 <div class="date-inputs">
                                     <input type="date" id="startDate" class="date-input">
                                     <input type="date" id="endDate" class="date-input">
@@ -288,36 +218,35 @@
                                     <button id="searchBtn" class="search-btn">Search Images</button>
                                 </div>
                             </div>
-
-                            <!-- Results Area -->
-                            <div id="similarBanner" class="similar-banner" style="display: none;">
-                                <span>🔍 Showing images similar to: <strong id="similarBannerName"></strong></span>
-                                <button id="clearSimilarBtn" class="similar-banner-close" title="Clear">✕</button>
-                            </div>
-                            <div class="results-header">
-                                <h3 class="results-title">Results</h3>
-                                <span id="resultsCount" class="results-count">0 results</span>
-                            </div>
-
-                            <div id="searchResults" class="analysis-grid">
-                                <!-- Results will be injected here -->
-                            </div>
-                            <div id="scroll-sentinel" class="scroll-sentinel"></div>
                         </div>
+                    </div>
 
-                        <!-- Stats Sidebar -->
-                        <div class="sidebar-section">
-                            <div class="card sticky-card">
-                                <div class="sidebar-header-row">
-                                    <h3 class="sidebar-title">Top Tags</h3>
-                                    <a href="tags.html" class="show-all-link">Show All</a>
+                    <!-- New Discovery Row (Horizontal Tags) -->
+                    <div class="discovery-toggle-bar" id="discoveryToggle"
+                        style="margin-top: 1rem; border-top: 1px solid var(--border); padding-top: 0.75rem; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; color: var(--text-secondary); transition: all 0.2s;">
+                        <span class="toggle-icon">▼</span>
+                        <span
+                            style="font-weight: 500; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em;">Discover
+                            Tags & Objects</span>
+                    </div>
+
+                    <div id="discoveryContent" class="discovery-content show">
+                        <div class="stats-row"
+                            style="display: flex; gap: 2rem; margin-top: 1rem; padding-bottom: 0.5rem;">
+                            <div class="stats-group" style="flex: 1;">
+                                <div class="sidebar-header-row" style="margin-bottom: 0.5rem;">
+                                    <h3 class="sidebar-title" style="font-size: 0.9rem; margin: 0;">Top Tags</h3>
+                                    <a href="tags.html" class="show-all-link" style="font-size: 0.75rem;">Show All</a>
                                 </div>
-                                <div id="topTagsList" class="tags-list">
+                                <div id="topTagsList" class="tags-list horizontal-chips">
                                     <span class="loading-text">Loading...</span>
                                 </div>
+                            </div>
 
-                                <h3 class="objects-header">Top Objects</h3>
-                                <div id="topObjectsList" class="objects-list">
+                            <div class="stats-group" style="flex: 1;">
+                                <h3 class="objects-header" style="font-size: 0.9rem; margin: 0 0 0.5rem 0;">Top Objects
+                                </h3>
+                                <div id="topObjectsList" class="objects-list horizontal-chips">
                                     <span class="loading-text">Loading...</span>
                                 </div>
                             </div>
@@ -325,37 +254,57 @@
                     </div>
                 </div>
 
-
-                <div id="contextMenu" class="context-menu">
-                    <div class="context-menu-item" id="ctxRegenThumb">
-                        <span>🔄</span> Regenerate Thumbnail
-                    </div>
-                    <div class="context-menu-item" id="ctxEdit">
-                        <span>✏️</span> Edit Tag
-                    </div>
-                    <div class="context-menu-item" id="ctxEditSummary">
-                        <span>📝</span> Edit Description
-                    </div>
-                    <div class="context-menu-item" id="ctxReparseSummary">
-                        <span>🛠️</span> Reparse Description
-                    </div>
-                    <div class="context-menu-item" id="ctxFindSimilar">
-                        <span>🔎</span> Find Similar
-                    </div>
-                    <div class="context-menu-item" id="ctxReAnalyze">
-                        <span>🔍</span> Re-analyze Image
-                    </div>
-                    <div class="context-menu-item delete" id="ctxDelete">
-                        <span>🗑️</span> Delete Tag
-                    </div>
-                    <div class="context-menu-item" id="ctxRename" style="display: none;">
-                        <span>📝</span> Rename File
-                    </div>
+                <!-- Search Results Area -->
+                <div id="similarBanner" class="similar-banner" style="display: none; margin-bottom: 1rem;">
+                    <span>🔍 Showing images similar to: <strong id="similarBannerName"></strong></span>
+                    <button id="clearSimilarBtn" class="similar-banner-close" title="Clear">✕</button>
                 </div>
 
+                <div class="results-header" style="margin: 0.5rem 0 1.5rem 0;">
+                    <h3 class="results-title">Results</h3>
+                    <span id="resultsCount" class="results-count">0 results</span>
+                </div>
 
-                <script type="module" src="pretext-layout.js"></script>
-                <script src="search.js?v=2"></script>
+                <masonry-grid-lanes id="searchResults" class="analysis-grid" mode="columns" min-column-width="300"
+                    gap="16" text-metrics="pretext">
+                    <!-- Results will be injected here -->
+                </masonry-grid-lanes>
+                <div id="scroll-sentinel" class="scroll-sentinel"></div>
+            </div>
+        </div>
+    </div>
+
+
+    <div id="contextMenu" class="context-menu">
+        <div class="context-menu-item" id="ctxRegenThumb">
+            <span>🔄</span> Regenerate Thumbnail
+        </div>
+        <div class="context-menu-item" id="ctxEdit">
+            <span>✏️</span> Edit Tag
+        </div>
+        <div class="context-menu-item" id="ctxEditSummary">
+            <span>📝</span> Edit Description
+        </div>
+        <div class="context-menu-item" id="ctxReparseSummary">
+            <span>🛠️</span> Reparse Description
+        </div>
+        <div class="context-menu-item" id="ctxFindSimilar">
+            <span>🔎</span> Find Similar
+        </div>
+        <div class="context-menu-item" id="ctxReAnalyze">
+            <span>🔍</span> Re-analyze Image
+        </div>
+        <div class="context-menu-item delete" id="ctxDelete">
+            <span>🗑️</span> Delete Tag
+        </div>
+        <div class="context-menu-item" id="ctxRename" style="display: none;">
+            <span>📝</span> Rename File
+        </div>
+    </div>
+
+
+    <script type="module" src="pretext-layout.js"></script>
+    <script src="search.js?v=2"></script>
 </body>
 
 </html>

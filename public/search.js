@@ -2421,5 +2421,45 @@ function saveRecentRename(name) {
     recent.unshift(trimmed);
     // Keep only last 10
     recent = recent.slice(0, 10);
-    localStorage.setItem('recentRenames', JSON.stringify(recent));
+localStorage.setItem('recentRenames', JSON.stringify(recent));
 }
+
+// ============================================================================
+// DISCOVERY TAGS TOGGLE
+// ============================================================================
+function initDiscoveryToggle() {
+    const toggle = document.getElementById('discoveryToggle');
+    const content = document.getElementById('discoveryContent');
+    
+    if (!toggle || !content) return;
+
+    // Load initial state
+    const isHidden = localStorage.getItem('discoveryTagsHidden') === 'true';
+    if (isHidden) {
+        toggle.classList.add('collapsed');
+        content.classList.add('collapsed');
+        content.classList.remove('show');
+    }
+
+    toggle.addEventListener('click', () => {
+        const hiding = !content.classList.contains('collapsed');
+        
+        if (hiding) {
+            toggle.classList.add('collapsed');
+            content.classList.add('collapsed');
+            content.classList.remove('show');
+            localStorage.setItem('discoveryTagsHidden', 'true');
+        } else {
+            toggle.classList.remove('collapsed');
+            content.classList.remove('collapsed');
+            content.classList.add('show');
+            localStorage.setItem('discoveryTagsHidden', 'false');
+        }
+    });
+}
+
+// Initialize everything
+requestAnimationFrame(() => {
+    initDiscoveryToggle();
+    loadStats();
+});

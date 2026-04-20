@@ -10,6 +10,7 @@
 //   const height = PretextLayout.measureText(summaryText, containerWidthPx);
 
 import { prepare, layout } from './libs/pretext/layout.js';
+import { defineMasonryGridLanes } from "https://cdn.jsdelivr.net/npm/@schalkneethling/masonry-gridlanes-wc@0.1.0/+esm";
 
 // ============================================================================
 // CONFIGURATION
@@ -56,6 +57,9 @@ const PretextLayout = {
         if (_ready) return;
 
         try {
+            // Register masonry custom element
+            defineMasonryGridLanes();
+
             // Wait for Google Fonts (Numans) to finish loading
             if (document.fonts && document.fonts.ready) {
                 await document.fonts.ready;
@@ -63,7 +67,7 @@ const PretextLayout = {
             }
             _ready = true;
         } catch (err) {
-            console.warn('[Pretext] Font wait failed, proceeding anyway:', err);
+            console.warn('[Pretext] Initialization failed, proceeding anyway:', err);
             _ready = true;
         }
     },

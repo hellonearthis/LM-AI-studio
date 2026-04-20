@@ -170,43 +170,50 @@ header p {
 }
 
 .analysis-grid {
-    /* Fallback: CSS Columns (Masonry effect) */
-    column-width: 320px;
-    column-gap: 16px;
     display: block;
-    /* Ensure it's not grid for columns to work */
+    width: 100%;
+    /* Pretext Integration Defaults */
+    --mgl-pretext-font: 16px Numans;
+    --mgl-pretext-line-height: 25.6px; /* 1.6 * 16px */
+    --mgl-pretext-inline-chrome: 26px;  /* 0.75rem * 2 + 1px * 2 */
+}
+
+/* Page-specific overrides for Pretext metrics */
+body:has(a[href="search.html"].active) .analysis-grid {
+    --mgl-pretext-font: 14.4px Numans;
+    --mgl-pretext-line-height: 23.04px; /* 1.6 * 14.4px */
+    --mgl-pretext-block-chrome: 186px;  /* Estimated non-text height */
+}
+
+body:has(a[href="database.html"].active) .analysis-grid {
+    --mgl-pretext-block-chrome: 236px;  /* Estimated non-text height */
+}
+
+/* Hide cards during initial masonry calculation to prevent jank/flicker */
+masonry-grid-lanes[data-mgl-measuring="true"] .card {
+    visibility: hidden;
 }
 
 /* Ensure cards don't split across columns and have spacing */
 .analysis-grid>.card,
 .analysis-grid>div {
-    /* targeting direct children if cards are wrapped */
     break-inside: avoid;
     margin-bottom: 16px;
     display: inline-block;
-    /* Helps with break-inside in some browsers */
     width: 100%;
-    /* Ensures they fill the column width */
 }
 
-/* Progressive Enhancement for CSS Grid Lanes */
-@supports (display: grid-lanes) {
-    .analysis-grid {
-        display: grid-lanes;
-        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-        gap: 16px;
-        /* Reset column properties if grid-lanes is active */
-        column-width: auto;
-        column-count: auto;
-        display: grid-lanes;
-    }
-
-    .analysis-grid>.card {
-        margin-bottom: 0;
-        /* Let grid handle gaps */
-        width: auto;
-    }
+/* 
+   FALLBACK: If masonry-grid-lanes is not supported or failed to initialize,
+   revert to standard CSS Multi-column to ensure we always have 3+ columns.
+   The JS component will override this with absolute positioning once successful.
+*/
+masonry-grid-lanes:not(.masonry-grid-lanes--fallback):not(.masonry-grid-lanes--supports) {
+    column-width: 300px;
+    column-gap: 16px;
+    display: block;
 }
+
 
 @media (max-width: 1200px) {
     .analysis-grid {
@@ -816,4 +823,48 @@ select option {
     to {
         opacity: 0;
     }
+}
+
+/* ============================================================================
+   NATIVE WEB COMPONENT STYLES (injected to fix esm.sh 404)
+   ============================================================================ */
+masonry-grid-lanes {
+  box-sizing: border-box;
+  display: block;
+  position: relative;
+}
+masonry-grid-lanes *,
+masonry-grid-lanes *::before,
+masonry-grid-lanes *::after {
+  box-sizing: inherit;
+}
+masonry-grid-lanes.masonry-grid-lanes--supports {
+  display: grid-lanes;
+  grid-template-columns: var(--mgl-template-columns, repeat(auto-fill, minmax(min(100%, var(--mgl-min-column, 12.5rem)), 1fr)));
+  grid-template-rows: var(--mgl-template-rows, none);
+  gap: var(--mgl-gap, 0rem);
+  flow-tolerance: var(--mgl-flow-tolerance, 1em);
+}
+masonry-grid-lanes.masonry-grid-lanes--supports[data-mgl-mode="rows"] {
+  grid-template-columns: none;
+  grid-template-rows: var(--mgl-template-rows, repeat(var(--mgl-row-count, auto-fill), minmax(min(100%, var(--mgl-min-row, var(--mgl-min-column, 7.5rem))), 1fr)));
+}
+masonry-grid-lanes.masonry-grid-lanes--fallback:not([data-mgl-mode="rows"]) {
+  inline-size: 100%;
+  min-block-size: var(--mgl-fallback-min-height, 0rem);
+}
+masonry-grid-lanes.masonry-grid-lanes--fallback[data-mgl-mode="rows"] {
+  inline-size: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  min-block-size: var(--mgl-fallback-pack-height, 15rem);
+  overflow-inline: auto;
+  overflow-block: hidden;
+}
+masonry-grid-lanes.masonry-grid-lanes--fallback > * {
+  position: absolute;
+  margin: 0;
+}
+masonry-grid-lanes.masonry-grid-lanes--fallback[data-mgl-measuring="true"] > * {
+  position: static;
 }

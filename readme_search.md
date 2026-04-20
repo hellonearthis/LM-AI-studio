@@ -149,9 +149,10 @@ The `search-worker.js` acts as a pipeline that chains strict filters *after* the
 
 #### Phase 1: Enhanced Filtering (Immediate Value)
 - [x] **Negative Search**: Support `-card` to exclude results.
-- [x] **Tag-Click Filtering**: Clicking a tag in a result card adds it to search.
-- [x] **Sort Options**: Allow sorting by "Relevance" vs "Date".
 - [x] **Bulk Rename Results**: Select any number of search results and rename them sequentially on disk and in the DB.
+- [x] **Masonry Grid (A, B, C Row Layout)**: Implementation of a dense, multi-column masonry grid that ensures a minimum of 3 columns and follows row-packing order.
+- [x] **Tag Discovery Row**: A toggleable, full-width section for exploring Top Tags and Objects as horizontal chip clouds, replacing the old vertical sidebar.
+- [x] **Optimized Filter Layout**: Search controls consolidated into a clean 2-column grid for better information density.
 
 #### Phase 2: Hybrid Search (Completed)
 - [x] **Web Worker**: Fuse.js and Vector logic moved to `search-worker.js` for non-blocking UI.

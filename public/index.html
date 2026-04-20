@@ -125,7 +125,7 @@
                     <img id="previewImg" src="" alt="Preview">
                 </div>
 
-                <div class="analysis-grid">
+                <masonry-grid-lanes class="analysis-grid" mode="columns" min-column-width="300" gap="16" text-metrics="pretext">
                     <!-- Metadata Card -->
                     <div class="card">
                         <h2>Metadata</h2>
@@ -137,11 +137,12 @@
                         <h2>AI Analysis</h2>
                         <div id="analysisOutput"></div>
                     </div>
-                </div>
+                </masonry-grid-lanes>
             </div>
         </div>
     </div>
 
+    <script type="module" src="pretext-layout.js"></script>
     <script src="app.js"></script>
 </body>
 

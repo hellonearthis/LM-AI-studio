@@ -33,11 +33,13 @@ An Electron-based desktop application that uses local AI (via LM Studio) to anal
 - **Advanced Fuzzy Search**: Typos? No problem. Find images instantly with weighted fuzzy matching.
 - **Smart Filtering**: Filter search results by **Scene Type** (Indoor, Outdoor, Portrait, etc.) and **Date Range**.
 - **Batch Processing**: Select multiple images to analyze efficiently. Use **"Select Missing"** to target unanalyzed content.
-- **Bulk Rename & Re-Indexing**: Select a batch of files and rename them using a shared base name (e.g., `coffee`). The system includes a **Recent Renames** dropdown to quickly reuse previous naming schemes, automatically fills gaps in existing sequences (Option A), and ensures no numerical collisions across different file extensions.
-- **Configuration UI**: Easily manage your AI model preferences (Vision & Embeddings) directly from the new **Settings** page.
+- **Bulk Rename & Re-Indexing**: Select a batch of files and rename them using a shared base name (e.g., `coffee`). The system includes a **Recent Renames** dropdown to quickly reuse previous naming schemes, automatically fills gaps in existing sequences, and ensures no numerical collisions across different file extensions.
+- **Configuration UI**: Easily manage your AI model preferences (Vision & Embeddings) directly from the **Settings** page.
 - **Automated Database Repair**: Prune missing records, regenerate deleted thumbnails, and heal broken data.
 - **Inline Tag Management**: Edit, delete, and add tags directly from search results or the database browser via right-click.
-- **High-Performance Text Rendering**: Uses [`@chenglou/pretext`](https://github.com/chenglou/pretext) for arithmetic-based text measurement, eliminating DOM reflows and layout shifts during infinite scroll.
+- **High-Performance Masonry Layout**: Uses a specialized `<masonry-grid-lanes>` component providing a dense, **row-based (A, B, C across)** flow. The grid automatically packs cards to eliminate height gaps while ensuring a minimum of **3 columns** on desktop resolutions.
+- **Persistent Text Rendering**: Fully integrated with [`@chenglou/pretext`](https://github.com/chenglou/pretext) for arithmetic-based text measurement. This ensures pixel-perfect card heights and eliminates layout shifts during infinite scroll.
+- **Tag Discovery Row**: A new, horizontal "Discover Tags & Objects" row on the Search page. Features horizontal chip clouds for rapid browsing and a **toggleable visibility** state that persists across sessions.
 - **Robust Thumbnailing**: Efficient **AVIF** thumbnail generation with automatic background regeneration for maximum visual fidelity and minimal file size.
 - **Improved UI Layout**: Floating interactive elements (like the **Copy button**) positioned within flowing AI summary text for a cleaner, unified look.
 
