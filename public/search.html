@@ -164,7 +164,7 @@
                                     <label class="filter-label" style="margin: 0;">Search Mode</label>
                                     <button id="generateEmbeddingsBtn" class="action-btn"
                                         style="font-size: 0.7rem; padding: 0.2rem 0.6rem; height: auto;"
-                                        title="Generate AI embeddings for all images in the database. Required for Hybrid and Semantic search modes. Uses the Embedding model configured in Settings.">Generate Data</button>
+                                        title="Build search embeddings for Hybrid and Semantic search. Sends each image's description and tags to a TEXT EMBEDDING model (e.g. nomic-embed-text) in LM Studio, generating a vector for similarity matching. Skips images that already have embeddings. Progress is streamed live.">Generate Data</button>
                                 </div>
                                 <div class="search-mode-selector" style="margin-top: 0.5rem;">
                                     <label class="mode-option" title="Keyword: Uses Fuse.js fuzzy matching to search text in summaries, tags, and objects. Fuzziness slider controls match strictness.">

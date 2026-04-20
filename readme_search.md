@@ -233,7 +233,7 @@ All interactive elements on the search page include descriptive `title` tooltips
 | ⌨️ Keyword mode | Uses Fuse.js fuzzy matching to search text in summaries, tags, and objects. Fuzziness slider controls match strictness. |
 | ⚡ Hybrid mode | Runs both keyword and semantic search simultaneously, then merges results using Reciprocal Rank Fusion (RRF). Best of both worlds. |
 | 🧠 Semantic mode | Uses AI embeddings to find conceptually similar images. Great for abstract queries like 'peaceful morning' or 'cyberpunk vibe'. |
-| Generate Data | Generate AI embeddings for all images in the database. Required for Hybrid and Semantic search modes. |
+| Generate Data | Build search embeddings for Hybrid and Semantic search. Sends each image's description and tags to a TEXT EMBEDDING model (e.g. nomic-embed-text) in LM Studio, generating a vector for similarity matching. Skips already-embedded images. |
 | Sort Order | Choose how results are ordered. Relevance uses the search engine score; Newest/Oldest sorts by file creation date. |
 | Scene Type | Filter results by the AI-detected scene classification badge assigned during analysis. |
 | Data Status | Filter images by their analysis completeness. Use this to find images that still need AI processing. |
