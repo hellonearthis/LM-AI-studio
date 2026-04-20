@@ -5,12 +5,23 @@
 
 ## 1. System Overview
 
-The search module is a **Hybrid Search** system combining **Client-Side Fuzzy Search** (Fuse.js) with **Semantic Vector Search** (Embeddings). It allows users to query:
+The search module is a **Hybrid Search** system combining **Client-Side Fuzzy Search** (Fuse.js) with **Semantic Vector Search** (Embeddings) and **Reciprocal Rank Fusion (RRF)**. It allows users to query:
 1.  **Exact Metadata**: Filenames, exact tag matches.
 2.  **Fuzzy Text**: "mountians" finding "mountains".
 3.  **Conceptual / Semantic**: "sad robot" finding an image of a lonely droid, even if the word "sad" isn't used.
+4.  **Hybrid (RRF)**: Combines keyword and semantic results into a single ranked list — exact matches *and* conceptual understanding together.
 
 This hybrid approach ensures high precision for known items and high recall for abstract concepts.
+
+### Search Modes
+
+| Mode | Engine | Best For |
+|------|--------|----------|
+| ⌨️ **Keyword** | Fuse.js fuzzy matching | Exact filenames, known tags, typo-tolerant searches |
+| ⚡ **Hybrid** (Default) | Fuse.js + Cosine Similarity → RRF merge | General-purpose. Best of both worlds. |
+| 🧠 **Semantic** | Cosine Similarity only | Abstract concepts ("peaceful morning", "cyberpunk vibe") |
+
+> Hybrid mode auto-selects when embeddings are available. If the embedding API fails, it gracefully falls back to keyword-only.
 
 ---
 
@@ -60,10 +71,11 @@ graph TD
         Worker -->|Fuzzy Score| Engine1[Fuse.js]
         Worker -->|Vector| Engine2[Cosine Similarity]
         
-        Engine1 -->|Results| Merger[Result Merger]
-        Engine2 -->|Results| Merger
+        Engine1 -->|Ranked List A| RRF["RRF Merge (k=60)"]
+        Engine2 -->|Ranked List B| RRF
         
-        Merger -->|Sorted IDs| UI
+        RRF -->|Fused Results| Filters[Client-Side Filters]
+        Filters -->|Final Results| UI
     end
 ```
 
@@ -126,11 +138,40 @@ const options = {
 4.  **Comparison**: The resulting vector is compared against all 5,000+ cached vectors using dot product (Cosine Similarity).
 5.  **Threshold**: Matches with similarity > 0.4 are returned.
 
+### Reciprocal Rank Fusion (RRF)
+
+Inspired by [Exa's Canon search pipeline architecture](https://exa.ai/blog/composing-a-search-engine), the Hybrid mode uses **Reciprocal Rank Fusion** to merge the keyword and semantic result lists.
+
+**Formula:** `RRF(doc) = Σ 1/(k + rank_i)` where `k = 60`
+
+A document ranked #1 in keyword search gets score `1/61 ≈ 0.0164`. If the same document is ranked #5 in semantic search, it gets an additional `1/65 ≈ 0.0154`, for a combined score of `0.0318`. Documents appearing in *both* result sets naturally bubble to the top.
+
+```javascript
+/* search-worker.js - reciprocalRankFusion() */
+const RRF_K = 60;
+
+function reciprocalRankFusion(keywordResults, semanticResults) {
+    const scoreMap = new Map();
+    keywordResults.forEach((item, rank) => {
+        scoreMap.set(item.id, { item, score: 1 / (RRF_K + rank) });
+    });
+    semanticResults.forEach((item, rank) => {
+        const entry = scoreMap.get(item.id);
+        if (entry) entry.score += 1 / (RRF_K + rank);
+        else scoreMap.set(item.id, { item, score: 1 / (RRF_K + rank) });
+    });
+    return [...scoreMap.values()].sort((a, b) => b.score - a.score).map(e => e.item);
+}
+```
+
 ### Filtering Layer
-The `search-worker.js` acts as a pipeline that chains strict filters *after* the fuzzy/semantic search:
-1.  **Search Phase**: Get broad candidates (from Fuse or Vector).
-2.  **Strict Filter (Scene)**: `if (img.scene_type !== selectedType) discard`.
-3.  **Strict Filter (Date)**: `if (img.created_at < startDate) discard`.
+The `applyClientFilters()` function in `search.js` chains strict filters *after* the fuzzy/semantic/hybrid search:
+1.  **Search Phase**: Get broad candidates (from Fuse, Vector, or RRF merge).
+2.  **Tag/Object Pre-Filter**: Exact match on selected filter chips (AND/OR logic).
+3.  **Negative Filter**: Exclude results containing specified terms.
+4.  **Strict Filter (Scene)**: `if (img.scene_type !== selectedType) discard`.
+5.  **Strict Filter (Date)**: `if (img.created_at < startDate) discard`.
+6.  **Data Status Filter**: Show only images missing specific metadata fields.
 
 ---
 
@@ -158,6 +199,8 @@ The `search-worker.js` acts as a pipeline that chains strict filters *after* the
 - [x] **Web Worker**: Fuse.js and Vector logic moved to `search-worker.js` for non-blocking UI.
 - [x] **Semantic Search**: Full implementation of local embeddings.
 - [x] **Model Config**: Settings UI to managing Vision vs Embedding models.
+- [x] **Reciprocal Rank Fusion**: Hybrid mode merges keyword + semantic results using RRF (k=60), inspired by Exa's Canon architecture.
+- [x] **3-Way Search Mode**: Segmented control selector (Keyword | Hybrid | Semantic) with auto-detection of embeddings availability.
 
 #### Phase 3: Optimizations (Scalability)
 - [ ] **Binary Embeddings**: Compress JSON vectors to binary buffers to reduce load time/size by 3x.
@@ -169,3 +212,58 @@ The `search-worker.js` acts as a pipeline that chains strict filters *after* the
 
 > [!TIP]
 > **Discovery Mode:** A "Random Shuffle" or "More Like This" button on result cards that uses tag intersection to find visually similar images.
+
+---
+
+## 6. UI Tooltip Reference
+
+All interactive elements on the search page include descriptive `title` tooltips for user guidance. Below is a complete reference.
+
+### Search Controls
+
+| Element | Tooltip |
+|---|---|
+| Search input | Enter keywords to search across image descriptions, filenames, tags, and objects. Press Enter to search. |
+| Negative input | Enter words to exclude from results. Images containing any of these terms will be filtered out. |
+| AND/OR toggle | Toggle between AND (match all terms) and OR (match any term) logic |
+| Tag filter input | Type a tag or object name to see autocomplete suggestions. Select items to add them as filter chips. |
+| Tag logic AND | AND: results must match ALL selected tags and objects |
+| Tag logic OR | OR: results can match ANY of the selected tags or objects |
+| Fuzziness slider | Controls how loosely keywords are matched. 0.0 = exact matches only. 0.6 = very loose, tolerates typos and partial matches. |
+| ⌨️ Keyword mode | Uses Fuse.js fuzzy matching to search text in summaries, tags, and objects. Fuzziness slider controls match strictness. |
+| ⚡ Hybrid mode | Runs both keyword and semantic search simultaneously, then merges results using Reciprocal Rank Fusion (RRF). Best of both worlds. |
+| 🧠 Semantic mode | Uses AI embeddings to find conceptually similar images. Great for abstract queries like 'peaceful morning' or 'cyberpunk vibe'. |
+| Generate Data | Generate AI embeddings for all images in the database. Required for Hybrid and Semantic search modes. |
+| Sort Order | Choose how results are ordered. Relevance uses the search engine score; Newest/Oldest sorts by file creation date. |
+| Scene Type | Filter results by the AI-detected scene classification badge assigned during analysis. |
+| Data Status | Filter images by their analysis completeness. Use this to find images that still need AI processing. |
+| Start/End Date | Show only images created within the specified date range. |
+| Search Images button | Execute the search with current filters and settings. You can also press Enter in the search field. |
+| Scope: Summaries | Include AI-generated image descriptions in keyword search |
+| Scope: Objects | Include detected objects (e.g. 'cat', 'car', 'tree') in keyword search |
+| Scope: Tags | Include extracted tags (e.g. 'sunset', 'portrait') in keyword search |
+
+### Sidebar Controls
+
+| Element | Tooltip |
+|---|---|
+| Prompt Type selector | Choose the AI analysis mode for batch processing. Controls how the vision model describes selected images. |
+| Select Missing | Auto-select all visible images missing tags, objects, or a summary. Use with 'Process' to batch-analyze. |
+| Unselect All | Clear the current selection of images |
+| Process (N) | Re-analyze all selected images using the chosen analysis mode. Each image will be sent to the AI vision model. |
+| Bulk Rename | Rename all selected images using a shared base name. Automatically fills gaps in existing sequences. |
+| 🛠️ Check | Run a database integrity check: detects duplicates, repairs metadata, removes missing files, and regenerates broken thumbnails. |
+| Discover Tags & Objects | Toggle visibility of the top tags and objects panel. Click a tag or object to add it as a search filter. |
+
+### Context Menu (Right-Click)
+
+| Item | Tooltip |
+|---|---|
+| 🔄 Regenerate Thumbnail | Re-create the thumbnail for this image from the original file |
+| ✏️ Edit Tag | Edit the text of this tag or object inline |
+| 📝 Edit Description | Edit the AI-generated description for this image |
+| 🛠️ Reparse Description | Re-extract tags and objects from the existing description without re-analyzing the image |
+| 🔎 Find Similar | Search for images with matching tags, objects, and descriptions |
+| 🔍 Re-analyze Image | Send this image back to the AI vision model for a fresh analysis |
+| 🗑️ Delete Tag | Remove this tag or object from the image's metadata |
+| 📝 Rename File | Rename this file on disk |
