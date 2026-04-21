@@ -158,7 +158,7 @@ fuzzinessSlider.addEventListener('change', () => {
             type: 'UPDATE_CONFIG',
             payload: { fuzziness: parseFloat(fuzzinessSlider.value) }
         });
-        performSearch();
+        executeSearchQuery();
     }
 });
 
@@ -168,8 +168,8 @@ document.querySelectorAll('input[name="searchMode"]').forEach(radio => {
         // Sync hidden checkbox for backward compat
         const mode = getSearchMode();
         if (semanticToggle) semanticToggle.checked = (mode === 'semantic' || mode === 'hybrid');
-        toggleSearchModeUI();
-        performSearch();
+        updateSearchModeUI();
+        executeSearchQuery();
     });
 });
 
@@ -178,18 +178,18 @@ document.querySelectorAll('input[name="searchMode"]').forEach(radio => {
     if (el) {
         el.addEventListener('change', () => {
             if (el === sortOrder || el === negativeQuery) {
-                performSearch();
+                executeSearchQuery();
             } else {
                 const mode = getSearchMode();
                 if (mode === 'keyword' || mode === 'hybrid') {
-                    performSearch();
+                    executeSearchQuery();
                 }
             }
         });
     }
 });
 
-function toggleSearchModeUI() {
+function updateSearchModeUI() {
     const mode = getSearchMode();
     const isPureSemantic = (mode === 'semantic');
 
@@ -218,295 +218,346 @@ function toggleSearchModeUI() {
 // Allow Enter key in negative query
 if (negativeQuery) {
     negativeQuery.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') performSearch();
+        if (e.key === 'Enter') executeSearchQuery();
     });
 }
 
 /**
- * Initializes the search page using Web Worker.
+ * INITIALIZATION: The Search Engine Handshake
+ * 
+ * This function sets up the communication bridge between the browser and 
+ * our background Search Worker. We do this primarily to keep the main 
+ * interface responsive during heavy computations.
  */
-function initSearch() {
+function initializeSearchSystem() {
     if (isInitialized) return;
 
+    // Give visual feedback that the heavy lifing is starting
     searchBtn.disabled = true;
-    searchBtn.textContent = 'Loading Index...';
+    searchBtn.textContent = 'Preparing Search Engine...';
 
-    // Initialize pretext measuring engine (waits for font load)
+    // The PretextLayout engine helps us calculate the exact height of 
+    // AI summaries so the grid doesn't "jump" when images load.
     if (window.PretextLayout) {
         window.PretextLayout.init();
     }
 
-    // INSTANT FEEDBACK: Check URL params before worker is even ready
+    // Step 1: Handle any filters passed in the URL (e.g. from the Tags page)
     processUrlParams();
 
-    // Initialize Worker
+    // Step 2: Spawn the background thread
     searchWorker = new Worker('search-worker.js');
 
-    searchWorker.onmessage = function (e) {
-        const { type, payload } = e.data;
+    // Step 3: Listen for signals from the worker
+    searchWorker.onmessage = function (event) {
+        const { type, payload } = event.data;
 
         switch (type) {
             case 'READY':
-                console.log(`[MAIN] Worker Ready. Total items: ${payload.count}. Embeddings: ${payload.hasEmbeddings}`);
+                // The worker has finished parsing the multi-megabyte JSON indexes
+                console.log(`[MAIN] Search Engine Ready. Items: ${payload.count}. Semantic: ${payload.hasEmbeddings}`);
                 isInitialized = true;
                 searchBtn.disabled = false;
                 searchBtn.textContent = 'Search Images';
 
+                // FEATURE DETECTION: If the user hasn't generated embeddings yet, 
+                // we hide the Hybrid and Semantic search options to prevent confusion.
                 if (!payload.hasEmbeddings) {
-                    // Disable Hybrid and Semantic radio buttons if no embeddings
                     document.querySelectorAll('input[name="searchMode"]').forEach(radio => {
                         if (radio.value === 'hybrid' || radio.value === 'semantic') {
                             radio.disabled = true;
                         }
                     });
-                    const filterGroup = document.querySelector('.search-mode-selector')?.closest('.filter-group');
-                    if (filterGroup) filterGroup.title = "Hybrid & Semantic modes require embeddings. Click 'Generate Data' first.";
+                    const modeSelectorGroup = document.querySelector('.search-mode-selector')?.closest('.filter-group');
+                    if (modeSelectorGroup) {
+                        modeSelectorGroup.title = "Hybrid & Semantic modes require embeddings. Click 'Generate Data' first.";
+                    }
                 } else {
-                    // Embeddings available: auto-select Hybrid as default
+                    // CONVENIENCE: If embeddings exist, default to the best mode (Hybrid)
                     const hybridRadio = document.querySelector('input[name="searchMode"][value="hybrid"]');
                     if (hybridRadio && !hybridRadio.disabled) {
                         hybridRadio.checked = true;
                         if (semanticToggle) semanticToggle.checked = true;
-                        toggleSearchModeUI();
+                        updateSearchModeUI();
                     }
                 }
 
-                // Now that we are initialized, trigger the search if any filters were pre-populated
-                if (selectedTagFilters.size > 0 || selectedObjectFilters.size > 0 || searchQuery.value.trim() || urlParams.get('similar')) {
-                    console.log('[MAIN] Index ready, triggering pre-populated search');
-                    performSearch();
+                // If user arrived via a link with a search query, run it immediately
+                const hasPendingQuery = selectedTagFilters.size > 0 || 
+                                      selectedObjectFilters.size > 0 || 
+                                      searchQuery.value.trim() || 
+                                      urlParams.get('similar');
+                
+                if (hasPendingQuery) {
+                    executeSearchQuery();
                 }
                 break;
 
             case 'RESULTS':
-                handleWorkerResults(payload.results);
+                // The worker found some matches! Now we display them.
+                processAndDisplayMatches(payload.results);
                 break;
 
             case 'ERROR':
-                console.error('[MAIN] Worker Error:', payload);
-                searchResults.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: var(--text-secondary);">Failed to load search index.</div>';
+                console.error('[MAIN] Search Engine Error:', payload);
+                searchResults.innerHTML = '<div class="error-msg">Failed to load search index.</div>';
                 searchBtn.disabled = false;
-                searchBtn.textContent = 'Retry';
+                searchBtn.textContent = 'Retry Engine Load';
                 break;
         }
     };
 
-    // Start Worker Init
+    // Step 4: Tell the worker to start loading data
     searchWorker.postMessage({
         type: 'INIT',
         payload: { fuzziness: parseFloat(fuzzinessSlider.value) }
     });
 }
 
-function handleWorkerResults(results) {
-    // This function receives the "text match" results from the worker.
-    // We still need to apply Client-Side filters (Date, Scene Type, Negative) here 
-    // because sending those complex filters to worker is tricky (e.g. date parsing logic).
-    // It's efficient enough to filter 5000 items in main thread if the heavy Fuse search is done.
+/**
+ * RESULTS HANDLING: From Background Task to Visual Grid
+ * 
+ * The Worker sends us a list of "text-relevance" matches. We then 
+ * apply local "client-side" filters (like Date or Scene Type) before 
+ * showing the final results to the user.
+ */
+function processAndDisplayMatches(rawWorkerResults) {
+    // 1. Temporarily store the raw results (useful for local context lookups)
+    lastWorkerResults = rawWorkerResults;
 
-    // 1. Store Search Matches
-    lastWorkerResults = results; // Store for Find Similar lookups
-    let finalResults = results; // These are the Fuse matches (or all items if no query)
+    // 2. Apply "Client-Side" Filters
+    // We do things like Date Range and Scene Type here in the main thread
+    // because they are lightweight and change frequently based on user clicks.
+    const finalFilteredResults = applyLocalClientFilters(rawWorkerResults);
 
-    // 2. Client-Side Filtering (Negative, Scene, Date, Sort)
-    // We reuse the logic from performSearch but applied here
-    finalResults = applyClientFilters(finalResults);
+    // 3. Prepare the Infinite Scroll state
+    window.currentSearchResults = finalFilteredResults;
+    filteredImages = finalFilteredResults;
+    currentIndex = 0; // Reset scroll position to the top
+    searchResults.innerHTML = ''; // Wipe the previous grid
 
-    // 3. Render
-    window.currentSearchResults = finalResults;
-    filteredImages = finalResults;
-    currentIndex = 0;
-    searchResults.innerHTML = '';
-
-    resultsCount.textContent = `Found ${finalResults.length} results`;
+    // 4. Update the UI Count
+    resultsCount.textContent = `Found ${finalFilteredResults.length} results`;
     searchBtn.disabled = false;
     searchBtn.textContent = 'Search Images';
 
-    if (finalResults.length === 0) {
-        searchResults.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 2rem; color: var(--text-secondary);">No images found matching your criteria.</div>';
+    if (finalFilteredResults.length === 0) {
+        searchResults.innerHTML = `
+            <div style="grid-column: 1/-1; text-align: center; padding: 4rem 2rem;">
+                <div style="font-size: 3rem; margin-bottom: 1rem;">🔍</div>
+                <div style="color: var(--text-secondary); font-size: 1.1rem;">No images found matching your current filters.</div>
+                <button class="action-btn" style="margin-top: 1rem;" onclick="location.reload()">Clear All Filters</button>
+            </div>`;
     } else {
-        setupIntersectionObserver();
-        renderBatch();
+        // 5. Start the batch-rendering process
+        setupInfiniteScrollObserver();
+        renderNextBatchOfResults();
     }
 }
 
-function applyClientFilters(dataSet) {
-    const negQueryText = negativeQuery ? negativeQuery.value.trim() : '';
-    const typeFilter = sceneType.value;
-    const dataStatusFilter = document.getElementById('dataStatus') ? document.getElementById('dataStatus').value : 'all';
-    const startFilter = startDate.value;
-    const endFilter = endDate.value;
-    const currentSort = sortOrder ? sortOrder.value : 'newest';
-    const queryText = searchQuery.value.trim();
-    const currentMode = getSearchMode();
-    const isSemantic = (currentMode === 'semantic' || currentMode === 'hybrid');
+/**
+ * CLIENT-SIDE FILTERING: Precision Slicing
+ * 
+ * While the Worker handles "Fuzzy Search" and "AI Vector Search", 
+ * this function handles the sharp, binary filters: "Is it a Portrait?", 
+ * "Is it from 2024?", "Does it NOT contain 'cats'?".
+ */
+function applyLocalClientFilters(baseResultSet) {
+    const negativeQueryText = negativeQuery ? negativeQuery.value.trim() : '';
+    const activeSceneType = sceneType.value;
+    const dataStatusFilter = document.getElementById('dataStatus')?.value || 'all';
+    const startDateFilter = startDate.value;
+    const endDateFilter = endDate.value;
+    const activeSortMode = sortOrder ? sortOrder.value : 'newest';
+    const activeSearchQuery = searchQuery.value.trim();
 
-    const negativeTerms = negQueryText ? negQueryText.toLowerCase().split(/\s+/).filter(t => t.length > 0) : [];
+    // Prepare negative terms for fast lookup
+    const negativeTermsArray = negativeQueryText 
+        ? negativeQueryText.toLowerCase().split(/\s+/).filter(term => term.length > 0) 
+        : [];
 
-    let results = dataSet.filter(img => {
-        // Tag/Object Pre-Filter (exact match on whole tag strings)
+    let filteredSet = baseResultSet.filter(imageRecord => {
+        
+        // --- FILTER 1: Exact Tag/Object Chips ---
         if (selectedTagFilters.size > 0 || selectedObjectFilters.size > 0) {
-            const analysis = img.analysis || {};
-            const imgTags = (analysis.tags || []).map(t => t.toLowerCase());
-            const imgObjects = (analysis.objects || []).map(o => o.toLowerCase());
-            const allSelectedItems = [
-                ...Array.from(selectedTagFilters).map(t => ({ name: t.toLowerCase(), arr: imgTags })),
-                ...Array.from(selectedObjectFilters).map(o => ({ name: o.toLowerCase(), arr: imgObjects }))
+            const analysis = imageRecord.analysis || {};
+            const imageTags = (analysis.tags || []).map(t => t.toLowerCase());
+            const imageObjects = (analysis.objects || []).map(o => o.toLowerCase());
+            
+            // Map the selected filters into a standardized search structure
+            const activeFilterRequirements = [
+                ...Array.from(selectedTagFilters).map(tagName => ({ name: tagName.toLowerCase(), source: imageTags })),
+                ...Array.from(selectedObjectFilters).map(objName => ({ name: objName.toLowerCase(), source: imageObjects }))
             ];
 
-            const tagLogic = document.querySelector('input[name="tagLogic"]:checked')?.value || 'AND';
+            const matchLogicMode = document.querySelector('input[name="tagLogic"]:checked')?.value || 'AND';
 
-            if (tagLogic === 'AND') {
-                // ALL selected filters must match
-                if (!allSelectedItems.every(item => item.arr.includes(item.name))) return false;
+            if (matchLogicMode === 'AND') {
+                // "Match All": Every single selected chip must exist on the image
+                if (!activeFilterRequirements.every(req => req.source.includes(req.name))) return false;
             } else {
-                // ANY selected filter must match
-                if (!allSelectedItems.some(item => item.arr.includes(item.name))) return false;
+                // "Match Any": If even one chip matches, the image is passed through
+                if (!activeFilterRequirements.some(req => req.source.includes(req.name))) return false;
             }
         }
 
-        // Negative Filter
-        if (negativeTerms.length > 0) {
-            const analysis = img.analysis || {};
-            const textContent = [
-                img.filename,
+        // --- FILTER 2: Negative Search ("Subtract" concepts) ---
+        if (negativeTermsArray.length > 0) {
+            const analysis = imageRecord.analysis || {};
+            const searchableBlob = [
+                imageRecord.filename,
                 analysis.summary,
                 ...(analysis.objects || []),
                 ...(analysis.tags || []),
                 analysis.scene_type
             ].join(' ').toLowerCase();
 
-            if (negativeTerms.some(term => textContent.includes(term))) return false;
+            // If the image contains ANY of the negative keywords, we discard it
+            if (negativeTermsArray.some(badTerm => searchableBlob.includes(badTerm))) return false;
         }
 
-        // Scene Type
-        if (typeFilter !== 'all') {
-            const scene = (img.analysis && img.analysis.scene_type) || '';
-            if (scene.toLowerCase() !== typeFilter.toLowerCase()) return false;
+        // --- FILTER 3: Scene Type (Indoor, Nature, etc.) ---
+        if (activeSceneType !== 'all') {
+            const imageScene = (imageRecord.analysis && imageRecord.analysis.scene_type) || '';
+            if (imageScene.toLowerCase() !== activeSceneType.toLowerCase()) return false;
         }
 
-        // Date Range
-        const imgDate = new Date(img.created_at);
-        if (startFilter && imgDate < new Date(startFilter)) return false;
-        if (endFilter) {
-            const end = new Date(endFilter);
-            end.setHours(23, 59, 59);
-            if (imgDate > end) return false;
+        // --- FILTER 4: Date Range (Time-traveling search) ---
+        const imageCreationTime = new Date(imageRecord.created_at);
+        if (startDateFilter && imageCreationTime < new Date(startDateFilter)) return false;
+        if (endDateFilter) {
+            const endOfDay = new Date(endDateFilter);
+            endOfDay.setHours(23, 59, 59); // Include the entire end date
+            if (imageCreationTime > endOfDay) return false;
         }
 
-        // Data Status Filter
+        // --- FILTER 5: Data Hygiene (Finding missing AI data) ---
         if (dataStatusFilter !== 'all') {
-            const analysis = img.analysis || {};
+            const analysis = imageRecord.analysis || {};
             const hasTags = Array.isArray(analysis.tags) && analysis.tags.length > 0;
             const hasObjects = Array.isArray(analysis.objects) && analysis.objects.length > 0;
-            const hasBadge = !!analysis.scene_type && analysis.scene_type !== 'unknown';
+            const hasScene = !!analysis.scene_type && analysis.scene_type !== 'unknown';
             const hasSummary = !!analysis.summary && analysis.summary.length > 0;
 
-            if (dataStatusFilter === 'missing-any' && hasTags && hasObjects && hasBadge && hasSummary) return false;
+            if (dataStatusFilter === 'missing-any' && (hasTags && hasObjects && hasScene && hasSummary)) return false;
             if (dataStatusFilter === 'missing-tags' && hasTags) return false;
             if (dataStatusFilter === 'missing-objects' && hasObjects) return false;
-            if (dataStatusFilter === 'missing-badge' && hasBadge) return false;
+            if (dataStatusFilter === 'missing-badge' && hasScene) return false;
             if (dataStatusFilter === 'missing-summary' && hasSummary) return false;
         }
 
         return true;
     });
 
-    // Sort
-    results.sort((a, b) => {
-        // Relevance Check: simple heuristic - if we have a query, trust Worker/Fuse order (which returns by score)
-        // UNLESS user explicitly wants Date.
-        // Worker returns results sorted by score if query exists.
-
-        if (currentSort === 'relevance' && queryText) {
-            return 0; // Keep current order (Worker provided score)
+    // --- SORTING: Final Ordering ---
+    filteredSet.sort((firstImage, secondImage) => {
+        
+        // RELEVANCE: If we have a query, the Worker already sorted them by score.
+        // We preserve that order by returning 0 (no change).
+        if (activeSortMode === 'relevance' && activeSearchQuery) {
+            return 0; 
         }
 
-        const dateA = new Date(a.created_at || 0).getTime();
-        const dateB = new Date(b.created_at || 0).getTime();
-        const updateA = a.updated_at ? new Date(a.updated_at).getTime() : dateA;
-        const updateB = b.updated_at ? new Date(b.updated_at).getTime() : dateB;
+        const dateA = new Date(firstImage.created_at || 0).getTime();
+        const dateB = new Date(secondImage.created_at || 0).getTime();
+        const updateA = firstImage.updated_at ? new Date(firstImage.updated_at).getTime() : dateA;
+        const updateB = secondImage.updated_at ? new Date(secondImage.updated_at).getTime() : dateB;
 
-        if (currentSort === 'oldest') {
+        if (activeSortMode === 'oldest') {
             return dateA - dateB;
-        } else if (currentSort === 'relevance') {
-            return updateB - updateA; // Fallback to newest
+        } else if (activeSortMode === 'newest') {
+            return updateB - updateA; // Newest edits/additions first
         } else {
-            return updateB - updateA; // Newest
+            // Default "Relevance" fallback for non-query views is just Newest
+            return updateB - updateA;
         }
     });
 
-    return results;
+    return filteredSet;
 }
 
-async function performSearch() {
+/**
+ * EXECUTION: The Central Search Orchestrator
+ * 
+ * This is the brain of the search page. It decides whether to use 
+ * Keyword logic, AI Semantic logic, or the Hybrid merge.
+ */
+async function executeSearchQuery() {
     if (!isInitialized || !searchWorker) return;
 
+    // Show a loading spinner so the user knows we are working
     searchBtn.disabled = true;
     searchBtn.innerHTML = '<div class="spinner"></div> Searching...';
 
-    const queryText = searchQuery.value.trim();
-    const mode = getSearchMode();
+    const rawQueryString = searchQuery.value.trim();
+    const activeSearchMode = getSearchMode();
 
-    if (mode === 'hybrid' && queryText) {
-        // HYBRID MODE: Run keyword + semantic, merge with RRF
+    // SCENARIO 1: HYBRID MODE (Keyword + Semantic)
+    if (activeSearchMode === 'hybrid' && rawQueryString) {
         try {
-            searchBtn.textContent = 'Embedding...';
-            const res = await fetch('/api/embed', {
+            // First, we need to turn the user's text into a concept vector.
+            // We ask our local server (which proxies to LM Studio) for the math.
+            searchBtn.textContent = 'Generating Embedding...';
+            const embedResponse = await fetch('/api/embed', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: queryText })
+                body: JSON.stringify({ text: rawQueryString })
             });
 
-            if (!res.ok) throw new Error('Failed to get embedding');
-            const data = await res.json();
+            if (!embedResponse.ok) throw new Error('LM Studio failed to generate a search vector.');
+            const vectorData = await embedResponse.json();
 
-            searchBtn.textContent = 'Fusing...';
+            // Now we send BOTH the text and the vector to the Worker.
+            // It will run two searches in parallel and fuse them with RRF.
+            searchBtn.textContent = 'Fusing Results...';
             searchWorker.postMessage({
                 type: 'HYBRID_SEARCH',
-                payload: { query: queryText, vector: data.embedding }
+                payload: { query: rawQueryString, vector: vectorData.embedding }
             });
 
         } catch (err) {
             console.error('Hybrid Search Failed:', err);
-            // Fallback to keyword-only gracefully
-            console.warn('[MAIN] Falling back to keyword search');
+            // FAIL-SAFE: If the AI model isn't loaded, don't crash! 
+            // Just drop back to reliable keyword search.
+            console.warn('[MAIN] AI Engine offline. Falling back to Keyword search.');
             searchWorker.postMessage({
                 type: 'SEARCH',
-                payload: { query: queryText }
+                payload: { query: rawQueryString }
             });
         }
-    } else if (mode === 'semantic' && queryText) {
-        // PURE SEMANTIC MODE
+    } 
+    // SCENARIO 2: PURE SEMANTIC (AI Matches Only)
+    else if (activeSearchMode === 'semantic' && rawQueryString) {
         try {
-            searchBtn.textContent = 'Embedding...';
-            const res = await fetch('/api/embed', {
+            searchBtn.textContent = 'Analyzing Concept...';
+            const embedResponse = await fetch('/api/embed', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: queryText })
+                body: JSON.stringify({ text: rawQueryString })
             });
 
-            if (!res.ok) throw new Error('Failed to get embedding');
-            const data = await res.json();
+            if (!embedResponse.ok) throw new Error('AI Engine unreachable.');
+            const vectorData = await embedResponse.json();
 
-            searchBtn.textContent = 'Comparing...';
+            searchBtn.textContent = 'Comparing Concepts...';
             searchWorker.postMessage({
                 type: 'SEMANTIC_SEARCH',
-                payload: { vector: data.embedding }
+                payload: { vector: vectorData.embedding }
             });
 
         } catch (err) {
             console.error('Semantic Search Failed:', err);
-            showAlertModal('Semantic search failed: ' + err.message + '. Please ensure LM Studio is running.', 'Search Error');
+            showAlertModal('AI search failed. Please ensure LM Studio is running. Error: ' + err.message, 'Concept Search Error');
             searchBtn.disabled = false;
             searchBtn.textContent = 'Search Images';
         }
-    } else {
-        // KEYWORD MODE (Default)
-        if (!isInitialized) return;
+    } 
+    // SCENARIO 3: KEYWORD MODE (Fast & Familiar)
+    else {
+        // Just send the text to the worker for fuzzy matching (Fuse.js)
         searchWorker.postMessage({
             type: 'SEARCH',
-            payload: { query: queryText }
+            payload: { query: rawQueryString }
         });
     }
 }
@@ -524,7 +575,7 @@ function processUrlParams() {
 
     if (initialSimilar) {
         console.log(`[MAIN] Pre-populating 'similar' for ID: ${initialSimilar}`);
-        findSimilar(initialSimilar);
+        findSimilar(initialSimilar); // This handles its own search execution
     } else if (initialQuery || initialTag) {
         const queryVal = initialQuery || initialTag;
         const decoded = decodeURIComponent(queryVal);
@@ -549,23 +600,23 @@ function refreshData() {
     if (searchWorker) {
         searchWorker.terminate();
         isInitialized = false;
-        initSearch();
+        initializeSearchSystem();
     }
 }
 
-function setupIntersectionObserver() {
+function setupInfiniteScrollObserver() {
     if (observer) observer.disconnect();
 
     observer = new IntersectionObserver((entries) => {
         if (entries[0].isIntersecting) {
-            renderBatch();
+            renderNextBatchOfResults();
         }
     }, { rootMargin: '400px' });
 
     if (sentinel) observer.observe(sentinel);
 }
 
-function renderBatch() {
+function renderNextBatchOfResults() {
     if (isRendering || currentIndex >= filteredImages.length) {
         if (currentIndex >= filteredImages.length && observer) observer.disconnect();
         return;
@@ -701,18 +752,18 @@ function createResultHtml(img, summaryHeight) {
 
 // Override Load Stats to also init search
 // Defer slightly to allow pretext module script to register on window
-requestAnimationFrame(() => initSearch());
+requestAnimationFrame(() => initializeSearchSystem());
 
 // Event Listeners
 if (searchBtn) {
     searchBtn.addEventListener('click', () => {
-        performSearch();
+        executeSearchQuery();
     });
 }
 // Allow Enter key in search box
 if (searchQuery) {
     searchQuery.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') performSearch();
+        if (e.key === 'Enter') executeSearchQuery();
     });
 }
 
@@ -1749,7 +1800,7 @@ async function updateTag(id, type, oldTag, newTag, action) {
             card.outerHTML = newHtml;
         } else {
             // Fallback for extreme cases (shouldn't happen if card is visible)
-            await performSearch();
+            await executeSearchQuery();
         }
 
     } catch (error) {
@@ -1954,14 +2005,14 @@ function addTagFilter(name, type) {
     renderFilterChips();
     if (tagFilterInput) tagFilterInput.value = '';
     hideAutocomplete();
-    performSearch();
+    executeSearchQuery();
 }
 
 function removeTagFilter(name, type) {
     const targetSet = type === 'tag' ? selectedTagFilters : selectedObjectFilters;
     targetSet.delete(name);
     renderFilterChips();
-    performSearch();
+    executeSearchQuery();
 }
 
 function renderFilterChips() {
@@ -2076,7 +2127,7 @@ if (tagFilterInput) {
 document.querySelectorAll('input[name="tagLogic"]').forEach(radio => {
     radio.addEventListener('change', () => {
         if (selectedTagFilters.size > 0 || selectedObjectFilters.size > 0) {
-            performSearch();
+            executeSearchQuery();
         }
     });
 });
@@ -2106,7 +2157,7 @@ async function findSimilar(imageId) {
     if (!source) {
         // Fallback: If we still don't have it, perform a search once to populate results
         if (allData.length === 0) {
-            await performSearch(); // This is async now but we don't have a promise yet...
+            await executeSearchQuery(); // This is async now but we don't have a promise yet...
             // We'll just alert for now or retry once results are in.
             setTimeout(() => findSimilar(imageId), 1000); 
             return;
@@ -2161,7 +2212,7 @@ async function findSimilar(imageId) {
         similarBannerName.textContent = source.filename || `ID ${imageId}`;
     }
 
-    performSearch();
+    executeSearchQuery();
 }
 
 function clearSimilarMode() {
@@ -2175,7 +2226,7 @@ function clearSimilarMode() {
 
     if (similarBanner) similarBanner.style.display = 'none';
 
-    performSearch();
+    executeSearchQuery();
 }
 
 if (clearSimilarBtn) {
@@ -2191,12 +2242,12 @@ searchBtn.addEventListener('click', performSearch);
 
 // Allow Enter key to search
 searchQuery.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') performSearch();
+    if (e.key === 'Enter') executeSearchQuery();
 });
 
 // Initialize
 loadStats();
-initSearch();
+initializeSearchSystem();
 updateModelIndicator();
 setInterval(updateModelIndicator, 10000);
 
@@ -2240,7 +2291,7 @@ async function updateModelIndicator() {
     }
 }
 
-// URL parameters are now handled by processUrlParams() called during initSearch()
+// URL parameters are now handled by processUrlParams() called during initializeSearchSystem()
 
 // File Link Handler (Show in Folder)
 document.addEventListener("click", (e) => {

@@ -1698,186 +1698,236 @@ Config Path:     ${CONFIG_PATH}
 });
 
 // ============================================================================
-// MAINTENANCE ENDPOINTS
+// MAINTENANCE & AI PIPELINE ENDPOINTS
 // ============================================================================
 
-// Embeddings file status (for "Last updated" display)
+/**
+ * ENDPOINT: Get Embeddings Status
+ * 
+ * WHY: The Search UI needs to know when the embeddings were last generated
+ * and how many images are covered so it can show the "Last updated" status line.
+ */
 app.get('/api/embeddings-status', (req, res) => {
-    const embeddingsPath = path.join(__dirname, 'public', 'search-embeddings.json');
+    const searchEmbeddingsPath = path.join(__dirname, 'public', 'search-embeddings.json');
     try {
-        if (!fs.existsSync(embeddingsPath)) {
+        if (!fs.existsSync(searchEmbeddingsPath)) {
             return res.json({ exists: false });
         }
-        const stats = fs.statSync(embeddingsPath);
-        // Count entries without fully parsing the large file (read first 100 chars to check if valid)
-        let count = 0;
+
+        const fileStatistics = fs.statSync(searchEmbeddingsPath);
+        
+        // We calculate the number of unique image embeddings currently stored.
+        let totalEmbeddingCount = 0;
         try {
-            const data = JSON.parse(fs.readFileSync(embeddingsPath, 'utf8'));
-            count = Object.keys(data).length;
-        } catch (e) { /* invalid json */ }
+            const rawEmbeddingsData = JSON.parse(fs.readFileSync(searchEmbeddingsPath, 'utf8'));
+            totalEmbeddingCount = Object.keys(rawEmbeddingsData).length;
+        } catch (parseError) { 
+            /* If the file is partially written or corrupt, we return 0 */
+        }
 
         res.json({
             exists: true,
-            lastModified: stats.mtime.toISOString(),
-            sizeBytes: stats.size,
-            count
+            lastModified: fileStatistics.mtime.toISOString(),
+            sizeBytes: fileStatistics.size,
+            count: totalEmbeddingCount
         });
     } catch (err) {
         res.json({ exists: false, error: err.message });
     }
 });
 
-// Run EVoC + UMAP Pipeline (Streaming)
+/**
+ * ENDPOINT: Run EVoC + UMAP Pipeline
+ * 
+ * WHAT: This triggers an external Python script that performs semantic clustering.
+ * WHY: It uses the embeddings we generated to find groups of similar images 
+ * and calculates 2D coordinates for the "Data Map" visualization.
+ */
 app.post('/api/maintenance/run-evoc', (req, res) => {
-    console.log('[MAINTENANCE] Running EVoC + UMAP Pipeline...');
+    console.log('[MAINTENANCE] Initiating Semantic Map Analysis (EVoC + UMAP)...');
 
+    // This is a long-running process, so we use "Chunked" encoding to send 
+    // progress updates back to the browser in real-time.
     res.setHeader('Content-Type', 'text/plain');
     res.setHeader('Transfer-Encoding', 'chunked');
 
-    const scriptPath = path.join(__dirname, 'scripts', 'evoc_pipeline.py');
-    const dbPath = path.join(__dirname, 'images.db');
-    const embeddingsPath = path.join(__dirname, 'public', 'search-embeddings.json');
+    const pythonScriptPath = path.join(__dirname, 'scripts', 'evoc_pipeline.py');
+    const sqliteDatabasePath = path.join(__dirname, 'images.db');
+    const searchEmbeddingsPath = path.join(__dirname, 'public', 'search-embeddings.json');
 
-    // Run the python script
-    const pythonProcess = spawn('python', [scriptPath, '--db', dbPath, '--embeddings', embeddingsPath]);
+    // We use 'spawn' to run the Python environment as a child process.
+    const pythonSubprocess = spawn('python', [
+        pythonScriptPath, 
+        '--db', sqliteDatabasePath, 
+        '--embeddings', searchEmbeddingsPath
+    ]);
 
-    pythonProcess.stdout.on('data', (data) => {
-        res.write(data.toString());
-        process.stdout.write(`[PY-STDOUT] ${data}`);
+    // Pipe the Python output directly to the HTTP response
+    pythonSubprocess.stdout.on('data', (chunk) => {
+        res.write(chunk.toString());
+        process.stdout.write(`[PYTHON-LOG] ${chunk}`);
     });
 
-    pythonProcess.stderr.on('data', (data) => {
-        res.write(`ERROR: ${data.toString()}`);
-        process.stderr.write(`[PY-STDERR] ${data}`);
+    pythonSubprocess.stderr.on('data', (errorChunk) => {
+        res.write(`PIPELINE_ERROR: ${errorChunk.toString()}`);
+        process.stderr.write(`[PYTHON-ERR] ${errorChunk}`);
     });
 
-    pythonProcess.on('close', (code) => {
-        res.write(`\n[PROCESS COMPLETED WITH CODE ${code}]\n`);
+    pythonSubprocess.on('close', (exitCode) => {
+        res.write(`\n[ANALYSIS COMPLETE - EXIT CODE ${exitCode}]\n`);
         res.end();
     });
 });
 
-// Generate Embeddings (Streaming)
+/**
+ * ENDPOINT: Generate Search Embeddings
+ * 
+ * WHAT: Converts every image's AI analysis (descriptions/tags) into math vectors.
+ * WHY: This is the fuel for "Semantic" and "Hybrid" search. It allows the 
+ * app to understand that "a golden retriever" is similar to "a yellow dog".
+ */
 app.post('/maintenance/generate-embeddings', async (req, res) => {
-    console.log('[MAINTENANCE] Generating embeddings...');
+    console.log('[MAINTENANCE] Starting background embedding generation...');
 
-    // Set headers for long-running streaming response
     res.setHeader('Content-Type', 'text/plain');
     res.setHeader('Transfer-Encoding', 'chunked');
 
     try {
-        const images = db.prepare(`SELECT id, filename, analysis FROM images WHERE analysis IS NOT NULL AND analysis != '{}'`).all();
-        const msgFound = `Found ${images.length} images with analysis.\n`;
-        res.write(msgFound);
-        console.log(msgFound.trim());
+        // Step 1: Find images that have already been analyzed by the vision model
+        const analyzedImages = db.prepare(`
+            SELECT id, filename, analysis 
+            FROM images 
+            WHERE analysis IS NOT NULL AND analysis != '{}'
+        `).all();
+        
+        res.write(`Found ${analyzedImages.length} analyzed images to process.\n`);
 
-        const OUTPUT_PATH = path.join(__dirname, 'public', 'search-embeddings.json');
+        const SEARCH_EMBEDDINGS_FILE = path.join(__dirname, 'public', 'search-embeddings.json');
 
-        let embeddingMap = {};
-        if (fs.existsSync(OUTPUT_PATH)) {
+        // Step 2: Load existing embeddings so we can do an "Incremental" update (don't waste API calls!)
+        let existingEmbeddingsMap = {};
+        if (fs.existsSync(SEARCH_EMBEDDINGS_FILE)) {
             try {
-                embeddingMap = JSON.parse(fs.readFileSync(OUTPUT_PATH, 'utf8'));
-                res.write(`Loaded ${Object.keys(embeddingMap).length} existing embeddings.\n`);
+                existingEmbeddingsMap = JSON.parse(fs.readFileSync(SEARCH_EMBEDDINGS_FILE, 'utf8'));
+                res.write(`Resume mode: Found ${Object.keys(existingEmbeddingsMap).length} existing embeddings. Skipping overhead.\n`);
             } catch (e) {
-                res.write('Starting fresh (invalid existing file).\n');
+                res.write('Existing embedding file was unreadable. Starting fresh.\n');
             }
         }
 
-        // Fetch Model ID
-        const config = getConfig();
-        let modelId = config.embeddingModel || process.env.EMBEDDING_MODEL_ID || 'local-model';
+        // Step 3: Determine which LM Studio model to use
+        const currentApplicationConfig = getConfig();
+        let targetModelId = currentApplicationConfig.embeddingModel || process.env.EMBEDDING_MODEL_ID || 'local-model';
 
-        if (config.embeddingModel || process.env.EMBEDDING_MODEL_ID) {
-            const msgModel = `Using Configured Embedding Model: ${modelId}\n`;
-            res.write(msgModel);
-            console.log(msgModel.trim());
-        } else {
+        // Auto-detect logic if no specific model is locked in settings
+        if (!currentApplicationConfig.embeddingModel && !process.env.EMBEDDING_MODEL_ID) {
             try {
-                const modelsRes = await fetch('http://127.0.0.1:1234/v1/models');
-                if (modelsRes.ok) {
-                    const modelsData = await modelsRes.json();
-                    if (modelsData.data && modelsData.data.length > 0) {
-                        // Smart Selection: Prefer models with "embed" in the name
-                        const embeddingModel = modelsData.data.find(m => m.id.toLowerCase().includes('embed'));
-                        if (embeddingModel) {
-                            modelId = embeddingModel.id;
-                            const msgModel = `Using Dedicated Embedding Model: ${modelId}\n`;
-                            res.write(msgModel);
-                            console.log(msgModel.trim());
+                const modelsApiResponse = await fetch('http://127.0.0.1:1234/v1/models');
+                if (modelsApiResponse.ok) {
+                    const modelsList = await modelsApiResponse.json();
+                    if (modelsList.data && modelsList.data.length > 0) {
+                        // Smart Selection: We prefer models that literally have "embed" in their name
+                        const bestMatch = modelsList.data.find(m => m.id.toLowerCase().includes('embed'));
+                        if (bestMatch) {
+                            targetModelId = bestMatch.id;
+                            res.write(`Auto-detected Embedding Model: ${targetModelId}\n`);
                         } else {
-                            modelId = modelsData.data[0].id;
-                            const msgModel = `Warning: No model with 'embed' found. Using first available: ${modelId}\n`;
-                            res.write(msgModel);
-                            console.log(msgModel.trim());
+                            targetModelId = modelsList.data[0].id;
+                            res.write(`Warning: No specific embedding model found. Falling back to: ${targetModelId}\n`);
                         }
                     }
                 }
             } catch (e) {
-                res.write('Warning: Could not check models. Using default ID.\n');
-                console.warn('Warning: Could not check models. Using default ID.');
+                res.write('Warning: Could not contact LM Studio for model auto-detection. Using defaults.\n');
             }
+        } else {
+            res.write(`Using Configured Model: ${targetModelId}\n`);
         }
 
-        let newCount = 0;
-        let skipCount = 0;
-        let errorCount = 0;
+        let imagesSuccessfullyEmbedded = 0;
+        let imagesSkipped = 0;
+        let imagesWithErrors = 0;
 
-        for (const img of images) {
-            // Check cancellation (if connection closed)
+        // Step 4: The Processing Loop
+        for (const image of analyzedImages) {
+            // Safety Check: Did the user close the browser tab?
             if (res.writableEnded || res.closed) {
-                console.log('[MAINTENANCE] Connection closed by client.');
+                console.log('[MAINTENANCE] Client disconnected. Stopping generation.');
                 break;
             }
 
-            if (embeddingMap[img.id]) {
-                skipCount++;
-                if (skipCount % 100 === 0) process.stdout.write('.'); // Use process.stdout.write for dots
+            // Skip if we already have this image vectorized
+            if (existingEmbeddingsMap[image.id]) {
+                imagesSkipped++;
+                if (imagesSkipped % 50 === 0) process.stdout.write('.'); 
                 continue;
             }
 
-            // Parse Analysis
-            let analysis = {};
+            // Parse the AI analysis JSON stored in the database
+            let imageAnalysisData = {};
             try {
-                analysis = typeof img.analysis === 'string' ? JSON.parse(img.analysis) : img.analysis;
+                imageAnalysisData = typeof image.analysis === 'string' ? JSON.parse(image.analysis) : image.analysis;
             } catch (e) { continue; }
 
-            // Construct Text
-            const textParts = [];
-            if (analysis.summary) textParts.push(`Description: ${analysis.summary}`);
-            if (analysis.scene_type) textParts.push(`Scene Type: ${analysis.scene_type}`);
-            if (analysis.objects && analysis.objects.length > 0) textParts.push(`Objects: ${analysis.objects.join(', ')}`);
-            if (analysis.tags && analysis.tags.length > 0) textParts.push(`Tags: ${analysis.tags.join(', ')}`);
+            // Construct the search text blob (The more data we include, the better the semantic matches)
+            const textToEmbed = [
+                imageAnalysisData.summary ? `Description: ${imageAnalysisData.summary}` : '',
+                imageAnalysisData.scene_type ? `Scene: ${imageAnalysisData.scene_type}` : '',
+                (imageAnalysisData.objects && imageAnalysisData.objects.length > 0) ? `Objects: ${imageAnalysisData.objects.join(', ')}` : '',
+                (imageAnalysisData.tags && imageAnalysisData.tags.length > 0) ? `Tags: ${imageAnalysisData.tags.join(', ')}` : ''
+            ].filter(part => part.length > 0).join('. ');
 
-            const inputText = textParts.join('. ');
-            if (!inputText) continue;
+            if (!textToEmbed) continue;
 
             try {
-                const response = await fetch('http://127.0.0.1:1234/v1/embeddings', {
+                // Call LM Studio's Embeddings API
+                const lmStudioResponse = await fetch('http://127.0.0.1:1234/v1/embeddings', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        input: inputText,
-                        model: modelId
-                    })
+                    body: JSON.stringify({ input: textToEmbed, model: targetModelId })
                 });
 
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.data && data.data[0] && data.data[0].embedding) {
-                        embeddingMap[img.id] = data.data[0].embedding;
-                        newCount++;
-                        res.write('+'); // Success dot
-                        if (newCount % 10 === 0) console.log(`[EMBED] Generated ${newCount}...`);
+                if (lmStudioResponse.ok) {
+                    const embeddingResult = await lmStudioResponse.json();
+                    if (embeddingResult.data && embeddingResult.data[0]?.embedding) {
+                        existingEmbeddingsMap[image.id] = embeddingResult.data[0].embedding;
+                        imagesSuccessfullyEmbedded++;
+                        res.write('+'); // Visual progress indicator
                     } else {
-                        errorCount++;
-                        res.write('x');
-                        console.log(`[EMBED] Invalid format for ${img.id}`);
+                        imagesWithErrors++;
+                        res.write('?');
                     }
                 } else {
-                    errorCount++;
-                    res.write('E'); // Error
-                    const errText = await response.text();
-                    console.error(`[EMBED] API Error for ${img.id}: ${response.status} ${errText}`);
+                    imagesWithErrors++;
+                    res.write('!');
+                    const errorDetails = await lmStudioResponse.text();
+                    console.error(`[EMBED-API-ERR] ${image.id}: ${lmStudioResponse.status} - ${errorDetails}`);
+                }
+            } catch (err) {
+                imagesWithErrors++;
+                res.write('X');
+                console.error(`[EMBED-FETCH-ERR] ${image.id}:`, err.message);
+            }
+
+            // INTERMEDIATE SAVE: We save every 20 images so that if the power 
+            // goes out, we don't lose all our progress.
+            if (imagesSuccessfullyEmbedded % 20 === 0 && imagesSuccessfullyEmbedded > 0) {
+                fs.writeFileSync(SEARCH_EMBEDDINGS_FILE, JSON.stringify(existingEmbeddingsMap));
+                console.log(`[MAINTENANCE] Checkpoint: Saved ${imagesSuccessfullyEmbedded} new entries.`);
+            }
+        }
+
+        // Final Save
+        fs.writeFileSync(SEARCH_EMBEDDINGS_FILE, JSON.stringify(existingEmbeddingsMap));
+        res.write(`\n\nPROCESS COMPLETE.\n- Added: ${imagesSuccessfullyEmbedded}\n- Skipped: ${imagesSkipped}\n- Errors: ${imagesWithErrors}\n`);
+        res.end();
+
+    } catch (err) {
+        console.error('[MAINTENANCE-CRITICAL] Global Embed Error:', err);
+        res.write(`\nCRITICAL ERROR: ${err.message}\n`);
+        res.end();
+    }
+});
                 }
 
             } catch (err) {

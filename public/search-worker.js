@@ -1,306 +1,369 @@
 /*
- * Search Worker
- * Offloads Fuse.js search logic to a background thread to keep the UI responsive.
- * - Loads 'search-index.json' (pre-computed index)
- * - Loads 'search-data.json' (lightweight data)
- * - Runs search queries and returns results
+ * ============================================================================
+ * LUMINA SEARCH WORKER (TUTORIAL-STYLE WALKTHROUGH)
+ * ============================================================================
+ * 
+ * WHY USE A WORKER?
+ * Searching through thousands of images with complex fuzzy matching (Fuse.js)
+ * and vector math (Cosine Similarity) is "CPU-heavy". If we ran this on the 
+ * main UI thread, the screen would "freeze" every time a user typed a letter.
+ * 
+ * This Worker runs in its own background thread, keeping the UI silky smooth.
  */
 
-// Import Fuse.js (Available in public/libs/fuse.min.js)
-// Import Fuse.js (Available in public/libs/fuse.min.js)
+// We import Fuse.js from a local path. This library handles our keyword-based 
+// "fuzzy" searching (finding "coffe" when the user types "coffee").
 importScripts('libs/fuse.min.js');
 
 // ============================================================================
-// POLYFILLS
+// 1. PRECISION CALCULATIONS (POLYFILLS)
 // ============================================================================
+
+/**
+ * ES2026 introduces Math.sumPrecise() to handle floating-point addition 
+ * without the typical accumulated errors (like 0.1 + 0.2 leading to 0.30000000000000004).
+ * We use this for vector math to ensure our search rankings are perfectly accurate.
+ */
 if (typeof Math.sumPrecise !== 'function') {
-    /**
-     * Polyfill for ES2026 Math.sumPrecise
-     * Note: This fallback uses standard reduce, so it won't have the same 
-     * precision guarantees as the native implementation if available.
-     */
     Math.sumPrecise = function (iterable) {
-        let sum = 0;
+        let total = 0;
         for (const value of iterable) {
-            sum += Number(value);
+            total += Number(value);
         }
-        return sum;
+        return total;
     };
     console.warn('[WORKER] Math.sumPrecise not natively supported, using standard fallback.');
 }
 
-let fuse = null;
-let allImages = [];
-let embeddingsMap = null; // ID -> Vector
-let isReady = false;
+// ============================================================================
+// 2. GLOBAL WORKER STATE
+// ============================================================================
 
-// ... [Existing search keys] ...
-const SEARCH_KEYS = [
+// The primary fuzzy search engine instance
+let fuseInstance = null;
+
+// Our lightweight image database (IDs, filenames, and AI analysis text)
+let globalImageDatabase = [];
+
+// A Map of ImageID -> Vector (for Semantic Search)
+// These vectors are 768-dimensional mathematical representations of the image content.
+let semanticEmbeddingsMap = null; 
+
+// Track whether the worker has finished downloading and parsing the search indexes
+let isWorkerReady = false;
+
+// We assign "weights" to different parts of the image data.
+// Searching the FILENAME is important, but TAGS and OBJECTS are twice as 
+// important for finding the right image conceptually.
+const SEARCHABLE_FIELDS_AND_WEIGHTS = [
     { name: 'filename', weight: 1 },
     { name: 'analysis.summary', weight: 1 },
     { name: 'analysis.objects', weight: 2 },
     { name: 'analysis.tags', weight: 2 }
 ];
 
-self.onmessage = async function (e) {
-    const { type, payload } = e.data;
+// ============================================================================
+// 3. MESSAGE HANDLING (COMMUNICATION WITH MAIN THREAD)
+// ============================================================================
+
+/**
+ * The worker listens for "messages" from the main application.
+ * Each message has a 'type' telling the worker what action to perform.
+ */
+self.onmessage = async function (event) {
+    const { type, payload } = event.data;
 
     switch (type) {
         case 'INIT':
-            await initSearch(payload.fuzziness || 0.2);
+            // Step 1: Load the data files and set up the search engine
+            await initializeSearchEngine(payload.fuzziness || 0.2);
             break;
 
         case 'SEARCH':
-            performSearch(payload.query, payload.options);
+            // Step 2a: Perform a standard keyword search
+            runKeywordSearch(payload.query, payload.options);
             break;
 
         case 'SEMANTIC_SEARCH':
-            performSemanticSearch(payload.vector);
+            // Step 2b: Perform an AI concept search using a query vector
+            runSemanticSearch(payload.vector);
             break;
 
         case 'HYBRID_SEARCH':
-            performHybridSearch(payload.query, payload.vector);
+            // Step 2c: The best of both worlds! Merge keyword and semantic results.
+            runHybridSearch(payload.query, payload.vector);
             break;
 
         case 'UPDATE_CONFIG':
-            if (fuse && payload.fuzziness !== undefined) {
-                const options = {
-                    includeScore: true,
-                    threshold: payload.fuzziness,
-                    ignoreLocation: true,
-                    keys: SEARCH_KEYS
-                };
-                const index = fuse.getIndex(); // Reuse the Fuse Index!
-                fuse = new Fuse(allImages, options, index);
-            }
+            // Step 3: Change settings (like fuzziness) on the fly without reloading data
+            updateSearchConfiguration(payload);
             break;
     }
 };
 
-async function initSearch(fuzziness) {
-    try {
-        console.log('[WORKER] Initializing...');
+// ============================================================================
+// 4. INITIALIZATION LOGIC
+// ============================================================================
 
-        // Parallel fetch of Index, Data, AND Embeddings
-        // Note: Embeddings might be 404 if script hasn't run, handle gracefully
-        const [indexRes, dataRes, embedRes] = await Promise.all([
+/**
+ * Downloads the pre-computed search index and image metadata.
+ */
+async function initializeSearchEngine(initialFuzziness) {
+    try {
+        console.log('[WORKER] Loading search indexes...');
+
+        // We fetch three critical files in parallel for maximum speed:
+        // 1. search-index.json: Pre-built Fuse.js index (fast lookups)
+        // 2. search-data.json: The actual text/tags for every image
+        // 3. search-embeddings.json: The AI vectors (mental "concepts") for images
+        const [indexResponse, dataResponse, embeddingResponse] = await Promise.all([
             fetch('search-index.json?t=' + Date.now()),
             fetch('search-data.json?t=' + Date.now()),
-            fetch('search-embeddings.json?t=' + Date.now()).catch(e => ({ ok: false }))
+            fetch('search-embeddings.json?t=' + Date.now()).catch(() => ({ ok: false }))
         ]);
 
-        if (!indexRes.ok || !dataRes.ok) {
-            throw new Error('Failed to load search resources');
+        if (!indexResponse.ok || !dataResponse.ok) {
+            throw new Error('Critical search data files missing or unreachable.');
         }
 
-        const fuseIndexData = await indexRes.json();
-        allImages = await dataRes.json();
+        const fuseIndexStructure = await indexResponse.json();
+        globalImageDatabase = await dataResponse.json();
 
-        // Load Embeddings if available
-        if (embedRes.ok) {
+        // If the user has generated embeddings, we load them into memory.
+        if (embeddingResponse.ok) {
             try {
-                embeddingsMap = await embedRes.json();
-                console.log(`[WORKER] Loaded embeddings for ${Object.keys(embeddingsMap).length} items.`);
+                semanticEmbeddingsMap = await embeddingResponse.json();
+                console.log(`[WORKER] Semantic support enabled (${Object.keys(semanticEmbeddingsMap).length} images mapped).`);
             } catch (e) {
-                console.warn('[WORKER] Failed to parse search-embeddings.json');
+                console.warn('[WORKER] search-embeddings.json is corrupted or unreadable.');
             }
-        } else {
-            console.warn('[WORKER] search-embeddings.json not found. Semantic search will be unavailable.');
         }
 
-        // Parse Fuse Index
-        const fuseIndex = Fuse.parseIndex(fuseIndexData);
-
-        // Initialize Fuse with Index and Data
-        const options = {
+        // Initialize the Fuse.js engine with our loaded data and weights
+        const searchOptions = {
             includeScore: true,
-            threshold: fuzziness,
-            ignoreLocation: true,
-            keys: SEARCH_KEYS
+            threshold: initialFuzziness,
+            ignoreLocation: true, // Matches text anywhere in the string
+            keys: SEARCHABLE_FIELDS_AND_WEIGHTS
         };
 
-        fuse = new Fuse(allImages, options, fuseIndex);
-        isReady = true;
+        const preComputedIndex = Fuse.parseIndex(fuseIndexStructure);
+        fuseInstance = new Fuse(globalImageDatabase, searchOptions, preComputedIndex);
+        
+        isWorkerReady = true;
 
-        console.log(`[WORKER] Ready. Loaded ${allImages.length} items.`);
-
-        // Notify main thread
+        // Tell the main thread we are ready to accept queries
         self.postMessage({
             type: 'READY',
             payload: {
-                count: allImages.length,
-                hasEmbeddings: !!embeddingsMap
+                count: globalImageDatabase.length,
+                hasEmbeddings: !!semanticEmbeddingsMap
             }
         });
 
-        // Send initial "all data" back so UI can render default view
-        self.postMessage({ type: 'RESULTS', payload: { results: allImages, isFullList: true } });
+        // Send the complete list of images so the UI can show them immediately on load
+        self.postMessage({ 
+            type: 'RESULTS', 
+            payload: { results: globalImageDatabase, isFullList: true } 
+        });
 
     } catch (err) {
-        console.error('[WORKER] Init Failed:', err);
+        console.error('[WORKER] Initialization Error:', err);
         self.postMessage({ type: 'ERROR', payload: err.message });
     }
 }
 
-function performSearch(query, options = {}) {
-    if (!isReady || !fuse) return;
+// ============================================================================
+// 5. CORE SEARCH FUNCTIONS
+// ============================================================================
 
-    if (!query || query.trim() === '') {
-        self.postMessage({ type: 'RESULTS', payload: { results: allImages, isFullList: true } });
+/**
+ * Standard Keyword Search (Uses Fuse.js)
+ */
+function runKeywordSearch(queryString) {
+    if (!isWorkerReady || !fuseInstance) return;
+
+    // If query is empty, return the entire database
+    if (!queryString || queryString.trim() === '') {
+        self.postMessage({ type: 'RESULTS', payload: { results: globalImageDatabase, isFullList: true } });
         return;
     }
 
-    // Run Fuse Search
-    const searchResults = fuse.search(query);
-    const results = searchResults.map(res => res.item);
+    const fuseResults = fuseInstance.search(queryString);
+    const flattenedResults = fuseResults.map(entry => entry.item);
 
-    self.postMessage({ type: 'RESULTS', payload: { results: results, isFullList: false } });
+    self.postMessage({ 
+        type: 'RESULTS', 
+        payload: { results: flattenedResults, isFullList: false } 
+    });
 }
 
-function performSemanticSearch(queryVector) {
-    if (!embeddingsMap) {
-        console.error('[WORKER] Embeddings not loaded');
+/**
+ * Semantic Vector Search (Uses Cosine Similarity)
+ */
+function runSemanticSearch(queryVector) {
+    if (!semanticEmbeddingsMap) {
+        console.error('[WORKER] Semantic search requested but no embeddings loaded.');
         self.postMessage({ type: 'RESULTS', payload: { results: [], isFullList: false } });
         return;
     }
 
     if (!queryVector || queryVector.length === 0) return;
 
-    // Calculate Cosine Similarity for each image
-    // Map is ID -> Vector
-    const matches = [];
+    const matchedResultsWithScores = [];
 
-    // Pre-calculate query magnitude (optimization)
-    // Use Math.sumPrecise for better precision in vector space
-    const queryMag = Math.sqrt(Math.sumPrecise(queryVector.map(val => val * val)));
+    // Pre-calculate the mathematical "length" (magnitude) of our search query vector.
+    // We do this once to save CPU time during the loop.
+    const queryMagnitude = Math.sqrt(Math.sumPrecise(queryVector.map(value => value * value)));
 
-    for (const img of allImages) {
-        const imgVector = embeddingsMap[img.id];
-        if (imgVector) {
-            const sim = cosineSimilarity(queryVector, imgVector, queryMag);
-            // Threshold? Maybe 0.3? Let's just return sorted and let UI trunc/paginate
-            matches.push({ item: img, score: sim });
+    // Compare our query against every single image in the database
+    for (const image of globalImageDatabase) {
+        const imageVector = semanticEmbeddingsMap[image.id];
+        if (imageVector) {
+            // "Cosine Similarity" returns a number between 0 and 1.
+            // 1.0 = Perfect match / same concept.
+            // 0.0 = Completely unrelated.
+            const similarity = calculateCosineSimilarity(queryVector, imageVector, queryMagnitude);
+            matchedResultsWithScores.push({ item: image, score: similarity });
         }
     }
 
-    // Sort by Similarity DESC
-    matches.sort((a, b) => b.score - a.score);
+    // Sort the images so the most conceptually similar ones appear first
+    matchedResultsWithScores.sort((a, b) => b.score - a.score);
 
-    // Limit to top 200 to save bandwidth? Or just return all sorted?
-    // Let's return all, UI pagination handles it.
-    const results = matches.map(m => m.item);
-
-    self.postMessage({ type: 'RESULTS', payload: { results: results, isFullList: false } });
-}
-
-function cosineSimilarity(vecA, vecB, magA) {
-    // Dot Product - use Math.sumPrecise to minimize floating point accumulation error
-    const dot = Math.sumPrecise(vecA.map((val, i) => val * vecB[i]));
-    
-    // Vector B Magnitude
-    const magB = Math.sqrt(Math.sumPrecise(vecB.map(val => val * val)));
-
-    if (magA === 0 || magB === 0) return 0;
-    return dot / (magA * magB);
-}
-
-// ============================================================================
-// HYBRID SEARCH: RECIPROCAL RANK FUSION (RRF)
-// ============================================================================
-// Inspired by Exa's Canon search pipeline architecture.
-// RRF merges ranked lists from multiple retrieval systems (keyword + semantic)
-// into a single unified ranking. Formula: RRF(doc) = Σ 1/(k + rank_i)
-// k=60 is the standard constant from Cormack et al. (2009).
-
-const RRF_K = 60;
-
-/**
- * Merge two ranked result lists using Reciprocal Rank Fusion.
- * @param {Array} keywordResults - Results from Fuse.js fuzzy search (ordered by relevance)
- * @param {Array} semanticResults - Results from cosine similarity search (ordered by similarity)
- * @returns {Array} Merged results sorted by combined RRF score
- */
-function reciprocalRankFusion(keywordResults, semanticResults) {
-    const scoreMap = new Map(); // id -> { item, score }
-
-    // Score keyword results
-    keywordResults.forEach((item, rank) => {
-        const id = String(item.id);
-        const rrfScore = 1 / (RRF_K + rank);
-        if (scoreMap.has(id)) {
-            scoreMap.get(id).score += rrfScore;
-        } else {
-            scoreMap.set(id, { item, score: rrfScore });
-        }
-    });
-
-    // Score semantic results
-    semanticResults.forEach((item, rank) => {
-        const id = String(item.id);
-        const rrfScore = 1 / (RRF_K + rank);
-        if (scoreMap.has(id)) {
-            scoreMap.get(id).score += rrfScore;
-        } else {
-            scoreMap.set(id, { item, score: rrfScore });
-        }
-    });
-
-    // Sort by combined RRF score (highest first)
-    const merged = Array.from(scoreMap.values());
-    merged.sort((a, b) => b.score - a.score);
-
-    return merged.map(entry => entry.item);
+    const sortedImages = matchedResultsWithScores.map(match => match.item);
+    self.postMessage({ type: 'RESULTS', payload: { results: sortedImages, isFullList: false } });
 }
 
 /**
- * Hybrid search: runs both keyword (Fuse.js) and semantic (cosine similarity)
- * searches in parallel, then merges using RRF.
+ * Hybrid Search (The "Exa Canon" Pattern)
+ * Runs keyword and semantic search in parallel and fuses their rankings.
  */
-function performHybridSearch(query, queryVector) {
-    if (!isReady) return;
+function runHybridSearch(queryString, queryVector) {
+    if (!isWorkerReady) return;
 
-    console.log('[WORKER] Hybrid Search: running keyword + semantic paths');
+    console.log('[WORKER] Executing Hybrid Retrieval (Keyword + Semantic Paths)');
 
-    // --- Path 1: Keyword (Fuse.js) ---
+    // Path A: The Keyword Engine
     let keywordResults = [];
-    if (fuse && query && query.trim() !== '') {
-        const fuseResults = fuse.search(query);
-        keywordResults = fuseResults.map(res => res.item);
+    if (fuseInstance && queryString && queryString.trim() !== '') {
+        keywordResults = fuseInstance.search(queryString).map(res => res.item);
     }
 
-    // --- Path 2: Semantic (Cosine Similarity) ---
+    // Path B: The Semantic Engine
     let semanticResults = [];
-    if (embeddingsMap && queryVector && queryVector.length > 0) {
+    if (semanticEmbeddingsMap && queryVector && queryVector.length > 0) {
         const matches = [];
-        const queryMag = Math.sqrt(Math.sumPrecise(queryVector.map(val => val * val)));
+        const queryMag = Math.sqrt(Math.sumPrecise(queryVector.map(v => v * v)));
 
-        for (const img of allImages) {
-            const imgVector = embeddingsMap[img.id];
-            if (imgVector) {
-                const sim = cosineSimilarity(queryVector, imgVector, queryMag);
-                matches.push({ item: img, score: sim });
+        for (const img of globalImageDatabase) {
+            const imgVec = semanticEmbeddingsMap[img.id];
+            if (imgVec) {
+                matches.push({ 
+                    item: img, 
+                    score: calculateCosineSimilarity(queryVector, imgVec, queryMag) 
+                });
             }
         }
         matches.sort((a, b) => b.score - a.score);
         semanticResults = matches.map(m => m.item);
     }
 
-    // --- Fusion ---
-    let results;
+    // FUSION: Use RRF to decide which results from both paths should be on top.
+    let fusedResults;
     if (keywordResults.length > 0 && semanticResults.length > 0) {
-        results = reciprocalRankFusion(keywordResults, semanticResults);
-        console.log(`[WORKER] RRF merged ${keywordResults.length} keyword + ${semanticResults.length} semantic → ${results.length} results`);
-    } else if (keywordResults.length > 0) {
-        results = keywordResults;
-        console.log(`[WORKER] Hybrid fallback: keyword only (${results.length} results)`);
-    } else if (semanticResults.length > 0) {
-        results = semanticResults;
-        console.log(`[WORKER] Hybrid fallback: semantic only (${results.length} results)`);
+        fusedResults = fuseRankedListsUsingRRF(keywordResults, semanticResults);
+        console.log(`[WORKER] RRF Hybrid Fusion: ${keywordResults.length} keyword, ${semanticResults.length} semantic merged.`);
     } else {
-        results = allImages;
-        console.log('[WORKER] Hybrid: no query, returning all');
+        // Fallback: If one path is empty, just use the other.
+        fusedResults = keywordResults.length > 0 ? keywordResults : semanticResults;
+        if (fusedResults.length === 0) fusedResults = globalImageDatabase;
     }
 
-    self.postMessage({ type: 'RESULTS', payload: { results, isFullList: false } });
+    self.postMessage({ type: 'RESULTS', payload: { results: fusedResults, isFullList: false } });
 }
 
+// ============================================================================
+// 6. MATHEMATICAL UTILITIES
+// ============================================================================
+
+/**
+ * Cosine Similarity measures the angle between two vectors.
+ * If they point in the same direction, the concepts are similar.
+ */
+function calculateCosineSimilarity(vectorA, vectorB, magnitudeA) {
+    // 1. Dot Product (sum of multiplied elements)
+    const dotProduct = Math.sumPrecise(vectorA.map((val, i) => val * vectorB[i]));
+    
+    // 2. Magnitude of Vector B
+    const magnitudeB = Math.sqrt(Math.sumPrecise(vectorB.map(val => val * val)));
+
+    // Prevent division by zero if a vector is empty/corrupt
+    if (magnitudeA === 0 || magnitudeB === 0) return 0;
+
+    // 3. Result = (A dot B) / (||A|| * ||B||)
+    return dotProduct / (magnitudeA * magnitudeB);
+}
+
+/**
+ * RECIPROCAL RANK FUSION (RRF)
+ * This is a famous algorithm for merging two lists that used different scoring systems.
+ * 
+ * WHY USE RRF?
+ * Keyword search returns a "Fuzziness Score". Semantic search returns "Similarity".
+ * You can't just add these together (apples to oranges).
+ * 
+ * RRF ignores the "scores" and only looks at the "rank" (position 1, 2, 3...) in the list.
+ * A document that is #1 in both lists gets a huge boost.
+ */
+const RRF_RANK_CONSTANT = 60; // Standard value used in research
+
+function fuseRankedListsUsingRRF(listA, listB) {
+    const combinedScoreMap = new Map(); // ImageID -> { item, combinedScore }
+
+    // Factor in the ranking from the first list
+    listA.forEach((item, indexInList) => {
+        const id = String(item.id);
+        const rrfContribution = 1 / (RRF_RANK_CONSTANT + indexInList);
+        combinedScoreMap.set(id, { item, score: rrfContribution });
+    });
+
+    // Factor in the ranking from the second list
+    listB.forEach((item, indexInList) => {
+        const id = String(item.id);
+        const rrfContribution = 1 / (RRF_RANK_CONSTANT + indexInList);
+        
+        if (combinedScoreMap.has(id)) {
+            // If the image was in both lists, add the scores together!
+            combinedScoreMap.get(id).score += rrfContribution;
+        } else {
+            combinedScoreMap.set(id, { item, score: rrfContribution });
+        }
+    });
+
+    // Final sorting: highest accumulated RRF score wins.
+    const sortedEntries = Array.from(combinedScoreMap.values());
+    sortedEntries.sort((a, b) => b.score - a.score);
+
+    return sortedEntries.map(entry => entry.item);
+}
+
+/**
+ * Allows the user to change settings (e.g. fuzziness slider) without 
+ * having to re-download the multi-megabyte data files.
+ */
+function updateSearchConfiguration(newConfig) {
+    if (fuseInstance && newConfig.fuzziness !== undefined) {
+        const updatedOptions = {
+            includeScore: true,
+            threshold: newConfig.fuzziness,
+            ignoreLocation: true,
+            keys: SEARCHABLE_FIELDS_AND_WEIGHTS
+        };
+        
+        // We reuse the pre-computed index for efficiency!
+        const existingIndex = fuseInstance.getIndex(); 
+        fuseInstance = new Fuse(globalImageDatabase, updatedOptions, existingIndex);
+        console.log(`[WORKER] Config Updated: Fuzziness = ${newConfig.fuzziness}`);
+    }
+}
