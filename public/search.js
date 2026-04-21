@@ -282,15 +282,8 @@ function initializeSearchSystem() {
                     }
                 }
 
-                // If user arrived via a link with a search query, run it immediately
-                const hasPendingQuery = selectedTagFilters.size > 0 || 
-                                      selectedObjectFilters.size > 0 || 
-                                      searchQuery.value.trim() || 
-                                      urlParams.get('similar');
-                
-                if (hasPendingQuery) {
-                    executeSearchQuery();
-                }
+                // Always run an initial search to populate the grid
+                executeSearchQuery();
                 break;
 
             case 'RESULTS':
@@ -2238,7 +2231,7 @@ let lastWorkerResults = [];
 
 
 // Event Listeners
-searchBtn.addEventListener('click', performSearch);
+searchBtn.addEventListener('click', executeSearchQuery);
 
 // Allow Enter key to search
 searchQuery.addEventListener('keypress', (e) => {
@@ -2420,8 +2413,12 @@ if (selectMissingBtn) {
             }
         });
 
-        if (count > 0) updateProcessButton();
-        else showAlertModal('No visible images found with missing data.', 'Auto Selection');
+        if (count > 0) {
+            updateProcessButton();
+            showAlertModal(`Successfully selected ${count} images with missing data.`, 'Selection Complete');
+        } else {
+            showAlertModal('No visible images found with missing data.', 'Auto Selection');
+        }
     });
 }
 
@@ -2496,10 +2493,27 @@ if (validateBtn) {
         const options = await showIntegrityCheckModal();
         if (!options) return;
 
+        validateBtn.disabled = true;
+        const originalText = validateBtn.innerHTML;
+        validateBtn.innerHTML = '🔄 Checking...';
+
+        let validateInterval;
+
         if (validationStatus) {
             validationStatus.style.display = 'block';
-            validationText.textContent = 'Running database integrity check...';
-            validationProgressBar.style.width = '10%';
+            validationText.textContent = 'Starting integrity check...';
+            validationProgressBar.style.width = '2%';
+
+            validateInterval = setInterval(async () => {
+                try {
+                    const statusRes = await fetch(`${API_BASE_URL}/validate-status`);
+                    if (statusRes.ok) {
+                        const statusData = await statusRes.json();
+                        validationText.textContent = statusData.status;
+                        validationProgressBar.style.width = `${Math.max(2, statusData.progress)}%`;
+                    }
+                } catch(e) {}
+            }, 250);
         }
 
         try {
@@ -2509,6 +2523,9 @@ if (validateBtn) {
                 body: JSON.stringify({ options, reanalyze: false })
             });
             const data = await res.json();
+            
+            if (validateInterval) clearInterval(validateInterval);
+            
             const r = data.results;
 
             if (validationProgressBar) validationProgressBar.style.width = '100%';
@@ -2538,7 +2555,10 @@ if (validateBtn) {
             } catch (e) {
                 showAlertModal('Check failed: ' + e.message, 'Integrity Check Error');
                 if (validationStatus) validationStatus.style.display = 'none';
-        }
+            } finally {
+                validateBtn.disabled = false;
+                validateBtn.innerHTML = originalText;
+            }
     });
 }
 

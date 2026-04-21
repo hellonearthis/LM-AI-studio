@@ -1117,7 +1117,16 @@ app.post('/search', (req, res) => {
  * 4. regenerate missing or valid thumbnails (including deep verification).
  * 5. Deduplicates entire image records based on file path.
  */
+// Global tracking for DB validation
+global.validationProgress = { status: 'Idle', progress: 0 };
+
+app.get('/validate-status', (req, res) => {
+    res.json(global.validationProgress || { status: 'Idle', progress: 0 });
+});
+
 app.post('/validate-database', async (req, res) => {
+    global.validationProgress = { status: 'Starting integrity check...', progress: 2 };
+
     console.log('[VALIDATE] Request received');
     const options = req.body.options || { 
         removeMissing: true, 
@@ -1207,11 +1216,20 @@ app.post('/validate-database', async (req, res) => {
 
         dedupeTransaction(allImages);
 
+        global.validationProgress = { status: 'Preparing metadata check...', progress: 10 };
+
         // Refresh images list after dedupe
         const images = db.prepare(`SELECT * FROM images`).all();
         results.total = images.length;
 
+        let completed = 0;
         for (const img of images) {
+            completed++;
+            global.validationProgress = { 
+                status: `Scanning file ${completed} of ${images.length}`, 
+                progress: Math.floor(10 + (completed / images.length) * 85)
+            };
+
             const filePath = img.path;
 
             // 1. Check if file exists on disk
@@ -1258,6 +1276,7 @@ app.post('/validate-database', async (req, res) => {
                         .avif({ quality: 50 })
                         .toFile(thumbPath);
                     results.fixedThumbnails++;
+                    db.prepare('UPDATE images SET updated_at = ? WHERE id = ?').run(new Date().toISOString(), img.id);
                 } catch (err) {
                     console.error(`[VALIDATE] Failed to regenerate thumbnail for ${filePath}:`, err.message);
                     results.errors.push(`Thumbnail error: ${img.filename}`);
@@ -1420,14 +1439,18 @@ app.post('/validate-database', async (req, res) => {
             }
         }
 
+        global.validationProgress = { status: 'Saving search indexes...', progress: 95 };
+        
         if (results.missing > 0 || results.fixedThumbnails > 0 || results.reanalyzed > 0) {
             generateSearchIndex();
         }
 
+        global.validationProgress = { status: 'Complete', progress: 100 };
         res.json({ success: true, results });
 
     } catch (err) {
         console.error('[VALIDATE] Critical Error:', err);
+        global.validationProgress = { status: 'Error', progress: 0 };
         res.status(500).json({ error: 'Validation failed', details: err.message });
     }
 });
@@ -1459,7 +1482,10 @@ app.post('/regenerate-thumbnail', async (req, res) => {
             .avif({ quality: 50 })
             .toFile(thumbPath);
 
-        res.json({ success: true, thumbPath: `thumbnails/id_${id}.avif` });
+        db.prepare('UPDATE images SET updated_at = ? WHERE id = ?').run(new Date().toISOString(), id);
+        
+        // Return a raw timestamp so the UI can immediately append it to the image src
+        res.json({ success: true, thumbPath: `thumbnails/id_${id}.avif`, newTimestamp: Date.now() });
 
     } catch (err) {
         console.error('[THUMB] Regeneration Error:', err);
@@ -1809,7 +1835,25 @@ app.post('/maintenance/generate-embeddings', async (req, res) => {
         if (fs.existsSync(SEARCH_EMBEDDINGS_FILE)) {
             try {
                 existingEmbeddingsMap = JSON.parse(fs.readFileSync(SEARCH_EMBEDDINGS_FILE, 'utf8'));
-                res.write(`Resume mode: Found ${Object.keys(existingEmbeddingsMap).length} existing embeddings. Skipping overhead.\n`);
+                
+                // PRUNING STEP: Remove "ghost" entries for images that no longer exist in the database.
+                const currentImageIdsInDatabase = new Set(analyzedImages.map(img => String(img.id)));
+                const storedEmbeddingIds = Object.keys(existingEmbeddingsMap);
+                
+                let prunedCount = 0;
+                for (const id of storedEmbeddingIds) {
+                    if (!currentImageIdsInDatabase.has(String(id))) {
+                        delete existingEmbeddingsMap[id];
+                        prunedCount++;
+                    }
+                }
+
+                if (prunedCount > 0) {
+                    res.write(`Pruned ${prunedCount} stale embedding entries for deleted images.\n`);
+                    console.log(`[MAINTENANCE] Pruned ${prunedCount} ghost entries from search-embeddings.json`);
+                }
+
+                res.write(`Resume mode: Found ${Object.keys(existingEmbeddingsMap).length} valid embeddings. Skipping overhead.\n`);
             } catch (e) {
                 res.write('Existing embedding file was unreadable. Starting fresh.\n');
             }
@@ -1892,15 +1936,19 @@ app.post('/maintenance/generate-embeddings', async (req, res) => {
                     if (embeddingResult.data && embeddingResult.data[0]?.embedding) {
                         existingEmbeddingsMap[image.id] = embeddingResult.data[0].embedding;
                         imagesSuccessfullyEmbedded++;
-                        res.write('+'); // Visual progress indicator
+                        
+                        // Periodic counter update instead of a character for every image
+                        if (imagesSuccessfullyEmbedded % 10 === 0) {
+                            res.write(`Progress: ${imagesSuccessfullyEmbedded} images embedded...\n`);
+                        }
                     } else {
                         imagesWithErrors++;
-                        res.write('?');
+                        res.write('! (Invalid embedding format)\n');
                     }
                 } else {
                     imagesWithErrors++;
-                    res.write('!');
                     const errorDetails = await lmStudioResponse.text();
+                    res.write(`! (API Error: ${lmStudioResponse.status})\n`);
                     console.error(`[EMBED-API-ERR] ${image.id}: ${lmStudioResponse.status} - ${errorDetails}`);
                 }
             } catch (err) {
@@ -1925,32 +1973,6 @@ app.post('/maintenance/generate-embeddings', async (req, res) => {
     } catch (err) {
         console.error('[MAINTENANCE-CRITICAL] Global Embed Error:', err);
         res.write(`\nCRITICAL ERROR: ${err.message}\n`);
-        res.end();
-    }
-});
-                }
-
-            } catch (err) {
-                errorCount++;
-                res.write('!');
-                console.error(`[EMBED] Fetch Error for ${img.id}:`, err.message);
-            }
-
-            // Save periodically
-            if (newCount % 20 === 0 && newCount > 0) {
-                fs.writeFileSync(OUTPUT_PATH, JSON.stringify(embeddingMap));
-                console.log(`[EMBED] Autosaved ${newCount} embeddings.`);
-            }
-        }
-
-        // Final Save
-        fs.writeFileSync(OUTPUT_PATH, JSON.stringify(embeddingMap));
-        res.write(`\n\nDone. Added: ${newCount}, Skipped: ${skipCount}, Errors: ${errorCount}\n`);
-        res.end();
-
-    } catch (err) {
-        console.error('[MAINTENANCE] Embed Generation Error:', err);
-        res.write(`\nError: ${err.message}\n`);
         res.end();
     }
 });

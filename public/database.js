@@ -614,9 +614,27 @@ if (validateBtn) {
         if (!options) return;
 
         validateBtn.disabled = true;
-        validationStatus.style.display = 'block';
-        validationText.textContent = 'Running database integrity check...';
-        validationProgressBar.style.width = '10%';
+        const originalText = validateBtn.innerHTML;
+        validateBtn.innerHTML = '🔄 Checking...';
+
+        let validateInterval;
+
+        if (validationStatus) {
+            validationStatus.style.display = 'block';
+            validationText.textContent = 'Starting integrity check...';
+            validationProgressBar.style.width = '2%';
+
+            validateInterval = setInterval(async () => {
+                try {
+                    const statusRes = await fetch(`${API_BASE_URL}/validate-status`);
+                    if (statusRes.ok) {
+                        const statusData = await statusRes.json();
+                        validationText.textContent = statusData.status;
+                        validationProgressBar.style.width = `${Math.max(2, statusData.progress)}%`;
+                    }
+                } catch(e) {}
+            }, 250);
+        }
 
         try {
             const res = await fetch(`${API_BASE_URL}/validate-database`, {
@@ -625,12 +643,14 @@ if (validateBtn) {
                 body: JSON.stringify({ options, reanalyze: false })
             });
 
+            if (validateInterval) clearInterval(validateInterval);
+
             if (!res.ok) throw new Error('Validation failed');
 
             const data = await res.json();
             const r = data.results;
 
-            validationProgressBar.style.width = '100%';
+            if (validationProgressBar) validationProgressBar.style.width = '100%';
 
             let message = `<strong>Check Complete</strong><br>`;
             if (r.purged > 0) message += `🔥 Purged ${r.purged} legacy thumbnails<br>`;
@@ -659,6 +679,7 @@ if (validateBtn) {
             validationProgressBar.style.backgroundColor = '#ef4444';
         } finally {
             validateBtn.disabled = false;
+            validateBtn.innerHTML = originalText;
         }
     });
 }
