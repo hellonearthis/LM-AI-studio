@@ -583,7 +583,7 @@ async function showIntegrityCheckModal() {
 
                 <div style="display: flex; gap: 1rem; justify-content: flex-end;">
                     <button id="icCancelBtn" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.6rem 1.25rem; border-radius: 8px; cursor: pointer; font-weight: 500;">Cancel</button>
-                    <button id="icRunBtn" style="background: var(--accent); border: none; color: white; padding: 0.6rem 2rem; border-radius: 8px; cursor: pointer; font-weight: 600; box-shadow: 0 4px 12px var(--accent-glow);">Run Check</button>
+                    <button id="icRunBtn" style="background: var(--accent); border: none; color: white; padding: 0.6rem 2rem; border-radius: 8px; cursor: pointer; font-weight: 600;">Run Check</button>
                 </div>
             </div>
         `;

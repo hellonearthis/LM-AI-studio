@@ -94,7 +94,7 @@
 .modern-input:focus {
     outline: none;
     border-color: var(--accent);
-    box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+    box-shadow: 0 0 0 2px rgba(108, 143, 0, 0.2);
 }
 
 .modern-input {
@@ -135,8 +135,7 @@
 }
 
 .action-btn:hover {
-    background-color: #0ea5e9;
-    /* slightly lighter than default accent usually */
+    background-color: var(--accent-hover);
     transform: translateY(-1px);
 }
 
@@ -171,7 +170,6 @@
 .progress-bar-fill {
     height: 100%;
     background: var(--accent);
-    box-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
     transition: width 0.3s ease;
 }
 

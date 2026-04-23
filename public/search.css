@@ -69,7 +69,7 @@
 }
 
 .search-mode-selector input[type="radio"]:checked + .mode-label {
-    background: rgba(52, 211, 153, 0.15);
+    background: rgba(108, 143, 0, 0.15);
     color: var(--accent);
     font-weight: 600;
     box-shadow: inset 0 -2px 0 var(--accent);
@@ -434,7 +434,7 @@
 
 .tag-autocomplete-item:hover,
 .tag-autocomplete-item.active {
-    background: rgba(99, 102, 241, 0.15);
+    background: rgba(108, 143, 0, 0.1);
 }
 
 .ac-type {
@@ -520,8 +520,9 @@
     justify-content: space-between;
     padding: 0.75rem 1rem;
     margin-top: 1rem;
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(139, 92, 246, 0.1) 100%);
-    border: 1px solid rgba(99, 102, 241, 0.3);
+    background: linear-gradient(135deg, rgba(108, 143, 0, 0.1) 0%, rgba(108, 143, 0, 0.05) 100%);
+    border: 1px solid rgba(108, 143, 0, 0.2);
+    backdrop-filter: blur(8px);
     border-radius: 10px;
     color: var(--text-primary);
     font-size: 0.9rem;
