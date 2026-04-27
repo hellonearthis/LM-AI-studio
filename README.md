@@ -39,8 +39,9 @@ An Electron-based desktop application that uses local AI (via LM Studio) to anal
 - **Configuration UI**: Easily manage your AI model preferences (Vision & Embeddings) directly from the **Settings** page.
 - **Automated Database Repair**: Prune missing records, regenerate deleted thumbnails, and heal broken data.
 - **Inline Tag Management**: Edit, delete, and add tags directly from search results or the database browser via right-click.
+- **Intelligent Image Loading (🚀 New!)**: Optimized for Largest Contentful Paint (LCP). The first few images of any view use `eager` loading and `high` fetch priority to appear instantly, while subsequent content uses `lazy` loading and `async` decoding to maintain smooth scrolling and save bandwidth.
 - **High-Performance Masonry Layout**: Uses a specialized `<masonry-grid-lanes>` component providing a dense, **row-based (A, B, C across)** flow. The grid automatically packs cards to eliminate height gaps while ensuring a minimum of **3 columns** on desktop resolutions.
-- **Persistent Text Rendering**: Fully integrated with [`@chenglou/pretext`](https://github.com/chenglou/pretext) for arithmetic-based text measurement. This ensures pixel-perfect card heights and eliminates layout shifts during infinite scroll.
+- **Persistent Text Rendering**: Fully integrated with [`@chenglou/pretext`](https://github.com/chenglou/pretext) for arithmetic-based text measurement. This ensures pixel-perfect card heights and eliminates layout shifts during infinite scroll by pre-calculating the summary height before the card is even rendered.
 - **Tag Discovery Row**: A new, horizontal "Discover Tags & Objects" row on the Search page. Features horizontal chip clouds for rapid browsing and a **toggleable visibility** state that persists across sessions.
 - **Robust Thumbnailing**: Efficient **AVIF** thumbnail generation with automatic background regeneration for maximum visual fidelity and minimal file size.
 - **Improved UI Layout**: Floating interactive elements (like the **Copy button**) positioned within flowing AI summary text for a cleaner, unified look.

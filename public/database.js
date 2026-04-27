@@ -147,43 +147,69 @@ async function loadNextPage() {
     }
 }
 
+/**
+ * Sets up an invisible 'sentinel' element at the bottom of the grid.
+ * When this element enters the viewport, the IntersectionObserver triggers 
+ * the next page of results to load, creating an 'infinite scroll' effect.
+ */
 function setupSentinel() {
-    let sentinel = document.getElementById('scroll-sentinel');
-    if (!sentinel) {
-        sentinel = document.createElement('div');
-        sentinel.id = 'scroll-sentinel';
-        sentinel.style.width = '100%';
-        sentinel.style.height = '100px'; // Larger sentinel
-        sentinel.style.marginTop = '20px';
-        dbGrid.parentNode.appendChild(sentinel);
+    let scrollSentinel = document.getElementById('scroll-sentinel');
+    if (!scrollSentinel) {
+        scrollSentinel = document.createElement('div');
+        scrollSentinel.id = 'scroll-sentinel';
+        scrollSentinel.style.width = '100%';
+        scrollSentinel.style.height = '100px'; // Tall enough to trigger reliably
+        scrollSentinel.style.marginTop = '20px';
+        dbGrid.parentNode.appendChild(scrollSentinel);
     }
-    setupIntersectionObserver(sentinel);
+    setupIntersectionObserver(scrollSentinel);
 }
 
+/**
+ * Renders a list of image objects into the DOM.
+ * This function handles two critical performance tasks:
+ * 1. Pre-measuring text height via Pretext to prevent layout shifts.
+ * 2. Applying intelligent lazy loading to optimize LCP.
+ */
 function renderBatch(newImages) {
-    // Pre-measure summary heights with pretext if available
-    let summaryHeights = new Map();
+    // PRE-MEASUREMENT STEP (The 'Why'):
+    // We use PretextLayout to calculate exactly how many pixels of height the 
+    // AI summary text will need BEFORE we actually put it in the DOM. 
+    // This allows the masonry grid to calculate the correct card positions 
+    // instantly, preventing the page from 'jumping' as text renders.
+    let summaryHeightsMap = new Map();
     if (window.PretextLayout && window.PretextLayout.ready) {
         const gridWidth = dbGrid.offsetWidth > 0 ? dbGrid.offsetWidth : 1000;
+        // Calculate responsive column count to match CSS breakpoints
         const colCount = Math.max(1, Math.floor((gridWidth + 16) / (320 + 16)));
         const actualCardWidth = (gridWidth - (colCount - 1) * 16) / colCount;
-        const textWidth = actualCardWidth - 24; // Full width minus 0.75rem*2 padding
+        const textWidth = actualCardWidth - 24; // Account for card padding (0.75rem * 2)
 
-        const items = newImages.map(img => {
+        const textItemsToMeasure = newImages.map(img => {
             const analysis = (typeof img.analysis === 'string')
                 ? JSON.parse(img.analysis || '{}') : (img.analysis || {});
             return { id: img.id, text: analysis.summary || '' };
         });
 
-        summaryHeights = window.PretextLayout.measureBatch(items, textWidth, 'database');
+        summaryHeightsMap = window.PretextLayout.measureBatch(textItemsToMeasure, textWidth, 'database');
     }
 
-    // Generate HTML for batch
-    const batchHtml = newImages.map(img => {
-        const h = summaryHeights.get(String(img.id));
-        return createCardHtml(img, h);
+    // HTML GENERATION STEP:
+    // We map over our image data and convert each record into a string of HTML.
+    const batchHtml = newImages.map((img, index) => {
+        const measuredHeight = summaryHeightsMap.get(String(img.id));
+        
+        // INTELLIGENT LOADING (The 'Why'):
+        // Images at the top of the first page are visible immediately (LCP). 
+        // We set the first image to 'fetchpriority=high' and the first row to 'loading=eager'
+        // so the browser downloads them instantly rather than waiting for JS to finish.
+        const isPriorityImage = (currentPage === 1 && index === 0);
+        const isEagerLoad = (currentPage === 1 && index < 4);
+        
+        return createCardHtml(img, measuredHeight, isPriorityImage, isEagerLoad);
     }).join('');
-    // Append to grid
+
+    // Final DOM injection
     dbGrid.insertAdjacentHTML('beforeend', batchHtml);
 }
 
@@ -229,7 +255,7 @@ function measureSingleCardHeight(img, context = 'database') {
     return result.height;
 }
 
-function createCardHtml(img, summaryHeight) {
+function createCardHtml(img, summaryHeight, isPriority = false, isEager = false) {
     // Parse stored JSON data (handle if already parsed or string)
     let analysis = img.analysis;
     if (typeof analysis === 'string') {
@@ -270,6 +296,11 @@ function createCardHtml(img, summaryHeight) {
                 <img src="${displayPath}" 
                         data-fullpath="${fullPath}"
                         class="thumbnail-preview"
+                        loading="${isEager ? 'eager' : 'lazy'}"
+                        decoding="async"
+                        ${isPriority ? 'fetchpriority="high"' : ''}
+                        width="100"
+                        height="100"
                         onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
                         style="width: 100px; height: 100px; object-fit: cover; border-radius: 6px; cursor: pointer;"
                         title="Click to view full size">

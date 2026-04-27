@@ -609,45 +609,65 @@ function setupInfiniteScrollObserver() {
     if (sentinel) observer.observe(sentinel);
 }
 
+/**
+ * Renders the next set of search results from the 'filteredImages' list.
+ * This utilizes infinite scroll via a scroll-sentinel.
+ */
 function renderNextBatchOfResults() {
+    // 1. Guards: Prevent double-rendering or rendering past the end of results
     if (isRendering || currentIndex >= filteredImages.length) {
         if (currentIndex >= filteredImages.length && observer) observer.disconnect();
         return;
     }
 
     isRendering = true;
-    const start = currentIndex;
-    const batch = filteredImages.slice(start, start + BATCH_SIZE);
-    currentIndex += batch.length; // Update immediately to prevent duplicate triggers
+    const startIndex = currentIndex;
+    const currentBatch = filteredImages.slice(startIndex, startIndex + BATCH_SIZE);
+    currentIndex += currentBatch.length; 
 
-    // Pre-measure summary heights with pretext if available
-    let summaryHeights = new Map();
+    // 2. PRE-MEASUREMENT (The 'Why'):
+    // Before rendering, we calculate the exact height of the AI summaries. 
+    // This allows the masonry grid to calculate the positions of all cards 
+    // before the images load, preventing layout shifts (CLS).
+    let summaryHeightsMap = new Map();
     if (window.PretextLayout && window.PretextLayout.ready) {
         const gridWidth = searchResults.offsetWidth > 0 ? searchResults.offsetWidth : 1000;
         const colCount = Math.max(1, Math.floor((gridWidth + 16) / (320 + 16)));
         const actualCardWidth = (gridWidth - (colCount - 1) * 16) / colCount;
-        const textWidth = actualCardWidth - 24; // Full width minus 0.75rem*2 padding
+        const textWidth = actualCardWidth - 24; // Card padding (0.75rem * 2)
 
-        const items = batch.map(img => {
+        const textItemsToMeasure = currentBatch.map(img => {
             const analysis = img.analysis || {};
             return { id: img.id, text: analysis.summary || '' };
         });
 
-        summaryHeights = window.PretextLayout.measureBatch(items, textWidth, 'search');
+        summaryHeightsMap = window.PretextLayout.measureBatch(textItemsToMeasure, textWidth, 'search');
     }
 
-    // Safely render batch
-    let batchHtml = '';
-    for (const img of batch) {
+    // 3. HTML GENERATION:
+    // We convert the batch of images into HTML strings.
+    let finalBatchHtml = '';
+    const isFirstPage = (startIndex === 0);
+    
+    currentBatch.forEach((img, index) => {
         try {
-            const h = summaryHeights.get(String(img.id));
-            batchHtml += createResultHtml(img, h);
+            const measuredHeight = summaryHeightsMap.get(String(img.id));
+            
+            // INTELLIGENT LOADING (The 'Why'):
+            // The first few search results are what the user sees first. 
+            // Setting 'eager' load and 'high' priority ensures these images 
+            // are requested immediately by the browser.
+            const isPriorityImage = (isFirstPage && index === 0);
+            const isEagerLoad = (isFirstPage && index < 4);
+            
+            finalBatchHtml += createResultHtml(img, measuredHeight, isPriorityImage, isEagerLoad);
         } catch (err) {
-            console.error('Error rendering image card:', img, err);
+            console.error('Error rendering search result card:', img, err);
         }
-    }
+    });
 
-    searchResults.insertAdjacentHTML('beforeend', batchHtml);
+    // 4. Final UI Update
+    searchResults.insertAdjacentHTML('beforeend', finalBatchHtml);
     isRendering = false;
 }
 
@@ -673,7 +693,7 @@ function measureSingleCardHeight(img, context = 'search') {
     return result.height;
 }
 
-function createResultHtml(img, summaryHeight) {
+function createResultHtml(img, summaryHeight, isPriority = false, isEager = false) {
     // Helper to escape HTML special characters
     const escapeHtml = (str) => {
         if (!str) return '';
@@ -705,6 +725,11 @@ function createResultHtml(img, summaryHeight) {
                 <img src="${escapeHtml(displayPath)}" 
                      data-fullpath="${escapeHtml(img.path)}"
                      class="thumbnail-preview"
+                     loading="${isEager ? 'eager' : 'lazy'}"
+                     decoding="async"
+                     ${isPriority ? 'fetchpriority="high"' : ''}
+                     width="80"
+                     height="80"
                      onerror="this.style.display='none'"
                      style="width: 80px; height: 80px; object-fit: cover; border-radius: 6px; cursor: pointer;"
                      title="Click to view full size">
