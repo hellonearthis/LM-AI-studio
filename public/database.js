@@ -696,6 +696,14 @@ if (validateBtn) {
             }
 
             validationText.innerHTML = message;
+            
+            // Auto-hide after 5 seconds if successful
+            setTimeout(() => {
+                if (validationStatus.style.display === 'block' && !message.includes('Error')) {
+                    validationStatus.style.display = 'none';
+                    validationProgressBar.style.width = '0%';
+                }
+            }, 5000);
 
             // Refresh grid if changes were made
             if (r.missing > 0 || r.fixedThumbnails > 0 || r.purged > 0) {
