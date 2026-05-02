@@ -58,7 +58,7 @@
     height: 100%;
     display: block;
     cursor: grab;
-    background: #1a1a1a;
+    background: var(--bg-color);
 }
 
 #vizCanvas:active {
@@ -94,7 +94,6 @@
 .viz-btn:hover {
     background: var(--accent);
     color: white;
-    transform: scale(1.1);
 }
 
 .viz-tooltip {

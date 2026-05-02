@@ -27,6 +27,7 @@ const statErrors = document.getElementById('statErrors');
 
 // State
 let isProcessing = false;
+let batchErrors = []; // Track errors for current batch
 const API_BASE_URL = 'http://localhost:3000';
 
 // ============================================================================
@@ -309,6 +310,7 @@ async function processBatch(files) {
     const totalFiles = files.length;
 
     // Initialize Status UI
+    batchErrors = []; // Reset errors for new batch
     sidebarStatus.style.display = 'block';
     statProcessed.textContent = `0/${totalFiles}`;
     statAdded.textContent = '0';
@@ -441,6 +443,7 @@ async function processBatch(files) {
         } catch (error) {
             console.error(`Error processing ${filename}:`, error);
             errorCount++;
+            batchErrors.push({ filename, error: error.message });
             statErrors.textContent = errorCount;
         }
 
@@ -496,6 +499,50 @@ async function autoSaveToDatabase(data) {
 
     return await response.json();
 }
+
+// ============================================================================
+// MODAL FUNCTIONS
+// ============================================================================
+
+function showErrorModal() {
+    const modal = document.getElementById('errorModal');
+    const errorList = document.getElementById('errorList');
+    
+    if (batchErrors.length === 0) {
+        showStatus('No errors recorded in the last batch.', 'info');
+        return;
+    }
+
+    errorList.innerHTML = '';
+    batchErrors.forEach(err => {
+        const item = document.createElement('div');
+        item.className = 'error-list-item';
+        item.innerHTML = `
+            <span class="error-file-name">${err.filename}</span>
+            <span class="error-message-text">${err.error}</span>
+        `;
+        errorList.appendChild(item);
+    });
+
+    modal.style.display = 'flex';
+}
+
+// Event Listeners for Modal
+document.querySelector('.status-errors').addEventListener('click', showErrorModal);
+document.getElementById('closeErrorModal').addEventListener('click', () => {
+    document.getElementById('errorModal').style.display = 'none';
+});
+document.getElementById('closeErrorModalBtn').addEventListener('click', () => {
+    document.getElementById('errorModal').style.display = 'none';
+});
+
+// Close modal on click outside
+window.addEventListener('click', (event) => {
+    const modal = document.getElementById('errorModal');
+    if (event.target === modal) {
+        modal.style.display = 'none';
+    }
+});
 
 // ============================================================================
 // DISPLAY FUNCTIONS

@@ -255,6 +255,12 @@ function measureSingleCardHeight(img, context = 'database') {
     return result.height;
 }
 
+const BRICKS_GRADS = ['purple', 'blue', 'green', 'orange', 'pink'];
+function getCardGrad(id) {
+    const numericId = typeof id === 'string' ? id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) : id;
+    return BRICKS_GRADS[numericId % BRICKS_GRADS.length];
+}
+
 function createCardHtml(img, summaryHeight, isPriority = false, isEager = false) {
     // Parse stored JSON data (handle if already parsed or string)
     let analysis = img.analysis;
@@ -290,66 +296,81 @@ function createCardHtml(img, summaryHeight, isPriority = false, isEager = false)
     const isSelected = selectedIds.has(String(img.id));
 
     return `
-        <div class="card ${isSelected ? 'selected' : ''}" data-id="${img.id}">
-            <div style="display: flex; gap: 1rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;">
-                <!--Thumbnail Image -->
-                <img src="${displayPath}" 
-                        data-fullpath="${fullPath}"
-                        class="thumbnail-preview"
-                        loading="${isEager ? 'eager' : 'lazy'}"
-                        decoding="async"
-                        ${isPriority ? 'fetchpriority="high"' : ''}
-                        width="100"
-                        height="100"
-                        onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
-                        style="width: 100px; height: 100px; object-fit: cover; border-radius: 6px; cursor: pointer;"
-                        title="Click to view full size">
-                <!-- Fallback -->
-                <div class="thumb-fallback" style="display: none; width: 100px; height: 100px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px; flex-direction: column; align-items: center; justify-content: center; gap: 0.25rem; font-size: 0.7rem; color: var(--text-secondary); text-align: center; padding: 0.5rem;">
-                    <span>No Preview</span>
-                    <button class="regen-thumb-btn" data-id="${img.id}" style="background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary); cursor: pointer; border-radius: 4px; padding: 2px 6px; font-size: 0.65rem;" title="Regenerate Thumbnail">
-                        🔄 Regen
-                    </button>
-                </div>
-                <!-- Image Info -->
-                <div style="flex: 1;">
-                    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                        <div style="flex: 1; min-width: 0;">
-                            <h2 class="card-filename file-link" data-path="${img.path}" style="margin: 0; border: none; font-size: 1.1rem; cursor: pointer; color: var(--accent); text-decoration: none; display: block;" title="${(metadataStr || 'No extra metadata').replace(/"/g, '&quot;')}">${img.filename}</h2>
-                            <small style="color: var(--text-secondary);">${date} • ${width}w ${height}h</small>
+        <div class="card ${isSelected ? 'selected' : ''}" data-id="${img.id}" data-grad="${getCardGrad(img.id)}">
+            <div class="card-inner">
+                <!-- FRONT FACE -->
+                <div class="card-front">
+                    <div style="display: flex; gap: 1rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;">
+                        <!--Thumbnail Image -->
+                        <img src="${displayPath}" 
+                                data-fullpath="${fullPath}"
+                                class="thumbnail-preview"
+                                loading="${isEager ? 'eager' : 'lazy'}"
+                                decoding="async"
+                                ${isPriority ? 'fetchpriority="high"' : ''}
+                                width="100"
+                                height="100"
+                                onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
+                                style="width: 100px; height: 100px; object-fit: cover; border-radius: 8px; cursor: pointer;"
+                                title="Click to view full size">
+                        <!-- Fallback -->
+                        <div class="thumb-fallback" style="display: none; width: 100px; height: 100px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px; flex-direction: column; align-items: center; justify-content: center; gap: 0.25rem; font-size: 0.7rem; color: var(--text-secondary); text-align: center; padding: 0.5rem;">
+                            <span>No Preview</span>
+                            <button class="regen-thumb-btn" data-id="${img.id}" style="background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary); cursor: pointer; border-radius: 4px; padding: 2px 6px; font-size: 0.65rem;" title="Regenerate Thumbnail">
+                                🔄 Regen
+                            </button>
                         </div>
-                        <div style="display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-end;">
-                            <button class="delete-btn" data-id="${img.id}" style="background: transparent; border: 1px solid #ef4444; color: #ef4444; padding: 0.25rem 0.5rem; border-radius: 6px; cursor: pointer; font-size: 0.75rem; transition: all 0.2s;" title="Delete Image">X</button>
-                            <!-- Selection Checkbox -->
-                            <div style="display: flex; align-items: center; gap: 0.25rem;">
-                                <input type="checkbox" class="card-select-cb" data-id="${img.id}" ${isSelected ? 'checked' : ''} style="cursor: pointer; transform: scale(1.2);">
+                        <!-- Image Info -->
+                        <div style="flex: 1; min-width: 0;">
+                            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                                <div style="flex: 1; min-width: 0;">
+                                    <h2 class="card-filename file-link" data-path="${img.path}" style="margin: 0; border: none; font-size: 1.1rem; cursor: pointer; color: var(--accent); text-decoration: none; display: block;" title="${(metadataStr || 'No extra metadata').replace(/"/g, '&quot;')}">${img.filename}</h2>
+                                    <small style="color: var(--text-secondary);">${date} • ${width}w ${height}h</small>
+                                </div>
+                                <div style="display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-end;">
+                                    <button class="delete-btn" data-id="${img.id}" style="background: transparent; border: 1px solid #ef4444; color: #ef4444; padding: 0.25rem 0.5rem; border-radius: 6px; cursor: pointer; font-size: 0.75rem; transition: all 0.2s;" title="Delete Image">X</button>
+                                    <!-- Selection Checkbox -->
+                                    <div style="display: flex; align-items: center; gap: 0.25rem;">
+                                        <input type="checkbox" class="card-select-cb" data-id="${img.id}" ${isSelected ? 'checked' : ''} style="cursor: pointer; transform: scale(1.2);">
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            </div>
-            
-            <!-- AI Summary Section -->
-            <div class="analysis-section">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-                    <h3 style="font-size: 0.9rem; color: var(--text-secondary); margin: 0;">AI Summary</h3>
-                    <button class="copy-btn" data-text="${(analysis.summary || '').replace(/"/g, '&quot;')}" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.15rem 0.4rem; border-radius: 4px; cursor: pointer; font-size: 0.65rem; white-space: nowrap;" title="Copy to clipboard">Copy</button>
-                </div>
-                <p class="${summaryHeight ? 'pretext-measured' : ''}" style="margin: 0;${summaryHeight ? ` min-height: ${summaryHeight}px;` : ''}">${analysis.summary || 'No summary'}</p>
-            </div>
+                    
+                    <!-- AI Summary Section -->
+                    <div class="analysis-section" style="flex: 1;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                            <h3 style="font-size: 0.9rem; color: var(--text-secondary); margin: 0;">AI Summary</h3>
+                            <button class="copy-btn" data-text="${(analysis.summary || '').replace(/"/g, '&quot;')}" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.15rem 0.4rem; border-radius: 4px; cursor: pointer; font-size: 0.65rem; white-space: nowrap;" title="Copy to clipboard">Copy</button>
+                        </div>
+                        <p class="${summaryHeight ? 'pretext-measured' : ''}" style="margin: 0; font-size: 0.9rem; color: var(--text-primary); line-height: 1.5; ${summaryHeight ? ` min-height: ${summaryHeight}px;` : ''}">${analysis.summary || 'No summary'}</p>
+                    </div>
 
-            <!-- Tags Section -->
-            <div class="tags-section">
-                <div class="tags-container" style="margin-bottom: 0.5rem;">
-                    <strong style="font-size: 0.75rem; color: var(--text-secondary); margin-right: 0.5rem;">Objects:</strong>
-                    ${(analysis.objects || []).map(obj => `<span class="tag editable" data-id="${img.id}" data-type="objects" data-tag="${obj}" style="background-color: rgba(16, 185, 129, 0.2); color: #34d399; cursor: context-menu;">${obj}</span>`).join('')}
-                    <button class="add-tag-btn" data-id="${img.id}" data-type="objects" title="Add Object">+</button>
+                    <div style="margin-top: 1rem; text-align: right;">
+                        <span style="font-size: 0.7rem; color: var(--text-secondary); opacity: 0.6;">Click card to reveal details ↻</span>
+                    </div>
                 </div>
-                <div class="tags-container">
-                    <strong style="font-size: 0.75rem; color: var(--text-secondary); margin-right: 0.5rem;">Tags:</strong>
-                    ${(analysis.tags || []).map(tag => `<span class="tag editable" data-id="${img.id}" data-type="tags" data-tag="${tag}" style="cursor: context-menu;">${tag}</span>`).join('')}
-                    ${analysis.scene_type ? `<span class="tag" style="background-color: rgba(129, 140, 248, 0.2); color: #818cf8;">${analysis.scene_type}</span>` : ''}
-                    <button class="add-tag-btn" data-id="${img.id}" data-type="tags" title="Add Tag">+</button>
+
+                <!-- BACK FACE -->
+                <div class="card-back">
+                    <div class="tags-section">
+                        <div class="tags-container" style="margin-bottom: 1rem;">
+                            <strong style="font-size: 0.8rem; color: var(--text-secondary); display: block; margin-bottom: 0.5rem;">Detected Objects:</strong>
+                            ${(analysis.objects || []).map(obj => `<span class="tag editable" data-id="${img.id}" data-type="objects" data-tag="${obj}" style="background-color: rgba(16, 185, 129, 0.2); color: #34d399; cursor: pointer; font-size: 0.75rem; margin-bottom: 4px;" title="Click to search, Right-click to edit">${obj}</span>`).join('')}
+                            <button class="add-tag-btn" data-id="${img.id}" data-type="objects" title="Add Object">+</button>
+                        </div>
+                        <div class="tags-container">
+                            <strong style="font-size: 0.8rem; color: var(--text-secondary); display: block; margin-bottom: 0.5rem;">Image Tags:</strong>
+                            ${(analysis.tags || []).map(tag => `<span class="tag editable" data-id="${img.id}" data-type="tags" data-tag="${tag}" style="cursor: pointer; font-size: 0.75rem; margin-bottom: 4px;" title="Click to search, Right-click to edit">${tag}</span>`).join('')}
+                            ${analysis.scene_type ? `<span class="tag" style="background-color: rgba(129, 140, 248, 0.2); color: #818cf8; font-size: 0.75rem; margin-bottom: 4px;">${analysis.scene_type}</span>` : ''}
+                            <button class="add-tag-btn" data-id="${img.id}" data-type="tags" title="Add Tag">+</button>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 2rem; text-align: center;">
+                        <span style="font-size: 0.75rem; color: var(--accent); cursor: pointer; padding: 0.5rem; border: 1px solid var(--accent); border-radius: 6px;" onclick="this.closest('.card').classList.remove('flipped')">Back to Summary</span>
+                    </div>
                 </div>
             </div>
         </div>
@@ -416,6 +437,30 @@ dbGrid.addEventListener('click', async (e) => {
         } finally {
             btn.disabled = false;
             btn.textContent = '🔄 Regen';
+        }
+        return;
+    }
+    
+    // Tag Click (Redirect to Search)
+    const tagEl = e.target.closest('.tag.editable');
+    if (tagEl) {
+        e.stopPropagation();
+        const tagText = tagEl.dataset.tag;
+        const dataType = tagEl.dataset.type; // 'tags' or 'objects'
+        if (tagText) {
+            const searchType = dataType === 'objects' ? 'object' : 'tag';
+            window.location.href = `search.html?tag=${encodeURIComponent(tagText)}&type=${searchType}`;
+        }
+        return;
+    }
+
+    // NEW: Card Flip Toggle
+    const card = e.target.closest('.card');
+    if (card) {
+        // Only flip if we didn't click an interactive element
+        const isInteractive = e.target.closest('button, input, .file-link, .tag, .thumbnail-preview');
+        if (!isInteractive) {
+            card.classList.toggle('flipped');
         }
     }
 });

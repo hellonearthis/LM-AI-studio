@@ -693,6 +693,12 @@ function measureSingleCardHeight(img, context = 'search') {
     return result.height;
 }
 
+const BRICKS_GRADS = ['purple', 'blue', 'green', 'orange', 'pink'];
+function getCardGrad(id) {
+    const numericId = typeof id === 'string' ? id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) : id;
+    return BRICKS_GRADS[numericId % BRICKS_GRADS.length];
+}
+
 function createResultHtml(img, summaryHeight, isPriority = false, isEager = false) {
     // Helper to escape HTML special characters
     const escapeHtml = (str) => {
@@ -717,51 +723,68 @@ function createResultHtml(img, summaryHeight, isPriority = false, isEager = fals
     const isSelected = selectedIds.has(String(img.id));
 
     return `
-        <div class="card ${isSelected ? 'selected' : ''}" data-id="${img.id}" style="position: relative;">
-            <div style="position: absolute; top: 0.75rem; right: 0.75rem; z-index: 5;">
-                <input type="checkbox" class="card-select-cb" data-id="${img.id}" ${isSelected ? 'checked' : ''} style="transform: scale(1.3); cursor: pointer;">
-            </div>
-            <div style="display: flex; gap: 1rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; padding-right: 1.5rem;">
-                <img src="${escapeHtml(displayPath)}" 
-                     data-fullpath="${escapeHtml(img.path)}"
-                     class="thumbnail-preview"
-                     loading="${isEager ? 'eager' : 'lazy'}"
-                     decoding="async"
-                     ${isPriority ? 'fetchpriority="high"' : ''}
-                     width="80"
-                     height="80"
-                     onerror="this.style.display='none'"
-                     style="width: 80px; height: 80px; object-fit: cover; border-radius: 6px; cursor: pointer;"
-                     title="Click to view full size">
-                <div style="flex: 1; min-width: 0;">
-                    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                        <h3 class="file-link" data-path="${escapeHtml(img.path)}" style="margin: 0; color: var(--accent); font-size: 1rem; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Show in folder">${escapeHtml(img.filename)}</h3>
-                        <button class="delete-btn" data-id="${img.id}" style="background: transparent; border: 1px solid #ef4444; color: #ef4444; padding: 0.25rem 0.5rem; border-radius: 6px; cursor: pointer; font-size: 0.7rem; transition: all 0.2s; margin-left: 0.5rem;">X</button>
+        <div class="card ${isSelected ? 'selected' : ''}" data-id="${img.id}" data-grad="${getCardGrad(img.id)}">
+            <div class="card-inner">
+                <!-- FRONT FACE -->
+                <div class="card-front">
+                    <div style="position: absolute; top: 0.75rem; right: 0.75rem; z-index: 5;">
+                        <input type="checkbox" class="card-select-cb" data-id="${img.id}" ${isSelected ? 'checked' : ''} style="transform: scale(1.3); cursor: pointer;">
                     </div>
-                    <small style="color: var(--text-secondary);">${date}</small>
-                    <div style="margin-top: 0.25rem;">
-                        <span class="badge" style="font-size: 0.7rem;">${escapeHtml(analysis.scene_type) || 'Unknown'}</span>
+                    
+                    <div style="display: flex; gap: 1rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; padding-right: 1.5rem;">
+                        <img src="${escapeHtml(displayPath)}" 
+                             data-fullpath="${escapeHtml(img.path)}"
+                             class="thumbnail-preview"
+                             loading="${isEager ? 'eager' : 'lazy'}"
+                             decoding="async"
+                             ${isPriority ? 'fetchpriority="high"' : ''}
+                             width="80"
+                             height="80"
+                             onerror="this.style.display='none'"
+                             style="width: 80px; height: 80px; object-fit: cover; border-radius: 8px; cursor: pointer;"
+                             title="Click to view full size">
+                        <div style="flex: 1; min-width: 0;">
+                            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                                <h3 class="file-link" data-path="${escapeHtml(img.path)}" style="margin: 0; color: var(--accent); font-size: 1rem; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Show in folder">${escapeHtml(img.filename)}</h3>
+                                <button class="delete-btn" data-id="${img.id}" style="background: transparent; border: 1px solid #ef4444; color: #ef4444; padding: 0.25rem 0.5rem; border-radius: 6px; cursor: pointer; font-size: 0.7rem; transition: all 0.2s; margin-left: 0.5rem;">X</button>
+                            </div>
+                            <small style="color: var(--text-secondary);">${date}</small>
+                            <div style="margin-top: 0.25rem;">
+                                <span class="badge" style="font-size: 0.7rem;">${escapeHtml(analysis.scene_type) || 'Unknown'}</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div style="flex: 1;">
+                        <p class="summary-text ${summaryHeight ? 'pretext-measured' : ''}" data-id="${img.id}" style="font-size: 0.9rem; color: var(--text-primary); margin: 0; line-height: 1.4;${summaryHeight ? ` min-height: ${summaryHeight}px;` : ''}">
+                            <button class="copy-btn" data-text="${escapeHtml(analysis.summary || '')}" style="float: right; margin: 0.1rem 0 0.25rem 0.5rem; background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.25rem 0.5rem; border-radius: 4px; cursor: pointer; font-size: 0.75rem; white-space: nowrap;" title="Copy to clipboard">Copy</button>
+                            ${escapeHtml(analysis.summary) || 'No summary available'}
+                        </p>
+                    </div>
+
+                    <div style="margin-top: 1rem; text-align: right;">
+                        <span style="font-size: 0.7rem; color: var(--text-secondary); opacity: 0.6;">Click card to reveal details ↻</span>
                     </div>
                 </div>
-            </div>
-            
-            <div style="margin-bottom: 1rem;">
-                <p class="summary-text ${summaryHeight ? 'pretext-measured' : ''}" data-id="${img.id}" style="font-size: 0.9rem; color: var(--text-primary); margin: 0; line-height: 1.4;${summaryHeight ? ` min-height: ${summaryHeight}px;` : ''}">
-                    <button class="copy-btn" data-text="${escapeHtml(analysis.summary || '')}" style="float: right; margin: 0.1rem 0 0.25rem 0.5rem; background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.25rem 0.5rem; border-radius: 4px; cursor: pointer; font-size: 0.75rem; white-space: nowrap;" title="Copy to clipboard">Copy</button>
-                    ${escapeHtml(analysis.summary) || 'No summary available'}
-                </p>
-            </div>
-            
-            <div class="tags-section">
-                <div class="tags-container" style="margin-bottom: 0.5rem;">
-                    <strong style="font-size: 0.75rem; color: var(--text-secondary); margin-right: 0.5rem;">Objects:</strong>
-                    ${objects.map(obj => `<span class="tag editable" data-id="${img.id}" data-type="objects" data-tag="${escapeHtml(obj)}" title="Click to search, Right-click to edit" style="cursor: pointer; font-size: 0.75rem; background-color: rgba(16, 185, 129, 0.2); color: #34d399;">${escapeHtml(obj)}</span>`).join('')}
-                    <button class="add-tag-btn" data-id="${img.id}" data-type="objects" title="Add Object">+</button>
-                </div>
-                <div class="tags-container">
-                    <strong style="font-size: 0.75rem; color: var(--text-secondary); margin-right: 0.5rem;">Tags:</strong>
-                    ${tags.map(tag => `<span class="tag editable" data-id="${img.id}" data-type="tags" data-tag="${escapeHtml(tag)}" title="Click to search, Right-click to edit" style="cursor: pointer; font-size: 0.75rem;">${escapeHtml(tag)}</span>`).join('')}
-                    <button class="add-tag-btn" data-id="${img.id}" data-type="tags" title="Add Tag">+</button>
+
+                <!-- BACK FACE -->
+                <div class="card-back">
+                    <div class="tags-section">
+                        <div class="tags-container" style="margin-bottom: 1rem;">
+                            <strong style="font-size: 0.8rem; color: var(--text-secondary); display: block; margin-bottom: 0.5rem;">Detected Objects:</strong>
+                            ${objects.map(obj => `<span class="tag editable" data-id="${img.id}" data-type="objects" data-tag="${escapeHtml(obj)}" title="Click to search, Right-click to edit" style="cursor: pointer; font-size: 0.75rem; background-color: rgba(16, 185, 129, 0.2); color: #34d399; margin-bottom: 4px;">${escapeHtml(obj)}</span>`).join('')}
+                            <button class="add-tag-btn" data-id="${img.id}" data-type="objects" title="Add Object">+</button>
+                        </div>
+                        <div class="tags-container">
+                            <strong style="font-size: 0.8rem; color: var(--text-secondary); display: block; margin-bottom: 0.5rem;">Image Tags:</strong>
+                            ${tags.map(tag => `<span class="tag editable" data-id="${img.id}" data-type="tags" data-tag="${escapeHtml(tag)}" title="Click to search, Right-click to edit" style="cursor: pointer; font-size: 0.75rem; margin-bottom: 4px;">${escapeHtml(tag)}</span>`).join('')}
+                            <button class="add-tag-btn" data-id="${img.id}" data-type="tags" title="Add Tag">+</button>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 2rem; text-align: center;">
+                        <span style="font-size: 0.75rem; color: var(--accent); cursor: pointer; padding: 0.5rem; border: 1px solid var(--accent); border-radius: 6px;" onclick="this.closest('.card').classList.remove('flipped')">Back to Summary</span>
+                    </div>
                 </div>
             </div>
         </div>
@@ -853,7 +876,18 @@ searchResults.addEventListener('click', (e) => {
         const btn = e.target.closest('.add-tag-btn');
         const id = btn.dataset.id;
         const type = btn.dataset.type; // 'tags' or 'objects'
-        addTag(id, type);
+        showAddTagInput(id, type, btn);
+        return;
+    }
+
+    // NEW: Card Flip Toggle
+    const card = e.target.closest('.card');
+    if (card) {
+        // Only flip if we didn't click an interactive element
+        const isInteractive = e.target.closest('button, input, .file-link, .tag, .thumbnail-preview');
+        if (!isInteractive) {
+            card.classList.toggle('flipped');
+        }
     }
 });
 

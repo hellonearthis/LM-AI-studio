@@ -13,6 +13,8 @@ function createWindow() {
     mainWindow = new BrowserWindow({
         width: 1400,
         height: 900,
+        backgroundColor: '#0B0B1A',
+        show: false,
         webPreferences: {
             preload: path.join(__dirname, 'preload.cjs'),
             contextIsolation: true,
@@ -22,9 +24,12 @@ function createWindow() {
     });
 
     // Switch to local server to support workers/WASM properly
-    // Wait a brief moment for server to start or assume it's ready (server.js starts fast)
-    // In production, we should wait for a 'ready' signal, but for this dev setup, it's fine.
     mainWindow.loadURL('http://localhost:3000/index.html');
+
+    // Prevent white flash by showing only when ready
+    mainWindow.once('ready-to-show', () => {
+        mainWindow.show();
+    });
 }
 
 app.whenReady().then(createWindow);

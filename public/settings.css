@@ -2,7 +2,7 @@
 
 .settings-card {
     background: var(--card-bg);
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     padding: 1.5rem;
     margin-bottom: 1.5rem;
@@ -43,7 +43,7 @@
 
 .refresh-btn {
     background: transparent;
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--border);
     color: var(--text-primary);
     padding: 0.5rem 1rem;
     border-radius: var(--radius-sm);
@@ -81,7 +81,7 @@
 
 .save-status {
     margin-left: 1rem;
-    color: #4ade80;
+    color: var(--accent-secondary);
     display: none;
 }
 
@@ -101,7 +101,7 @@
     margin-top: 1.5rem;
     padding: 0.5rem 0;
     cursor: pointer;
-    border-top: 1px solid var(--border-color);
+    border-top: 1px solid var(--border);
     color: var(--accent);
     font-weight: 600;
     font-size: 0.9rem;

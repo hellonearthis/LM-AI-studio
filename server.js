@@ -91,8 +91,8 @@ try {
  */
 app.post('/check-fast', (req, res) => {
     try {
-        const { path, size, mtime } = req.body;
-        const row = db.prepare('SELECT id, size, mtime FROM images WHERE path = ?').get(path);
+        const { path: targetPath, size, mtime } = req.body;
+        const row = db.prepare('SELECT id, size, mtime FROM images WHERE path = ?').get(targetPath);
 
         if (!row) {
             return res.json({ exists: false });
@@ -430,6 +430,7 @@ Rules:
 
     const jsonSchema = {
         name: "image_analysis",
+        strict: true,
         schema: {
             type: "object",
             properties: {
@@ -477,6 +478,8 @@ Rules:
     });
 
     if (!lmResponse.ok) {
+        const errorBody = await lmResponse.text();
+        console.error(`[ANALYZE] LM Studio Error Body:`, errorBody);
         throw new Error(`LM Studio API Error: ${lmResponse.statusText}`);
     }
 
@@ -532,7 +535,14 @@ app.post('/analyze', async (req, res) => {
         const base64Data = imageData.replace(/^data:image\/\w+;base64,/, '');
         const buffer = Buffer.from(base64Data, 'base64');
 
-        // Metadata extraction (Keep existing logic)
+        // Standardize image to JPEG for vision model compatibility
+        // This fixes "Bad Request" errors when client sends AVIF/WebP which some backends don't like
+        const standardizedBuffer = await sharp(buffer)
+            .jpeg({ quality: 80 })
+            .toBuffer();
+        const standardizedImageData = `data:image/jpeg;base64,${standardizedBuffer.toString('base64')}`;
+
+        // Metadata extraction
         let metadata = {};
         try {
             metadata = await exifr.parse(buffer, {
@@ -548,8 +558,8 @@ app.post('/analyze', async (req, res) => {
             if (!metadata.format) metadata.format = sharpMeta.format;
         } catch (e) { /* ignore */ }
 
-        // Use shared analysis helper
-        const analysis = await performImageAnalysis(imageData, promptType);
+        // Use shared analysis helper with standardized data
+        const analysis = await performImageAnalysis(standardizedImageData, promptType);
 
         res.json({ analysis, metadata });
 
@@ -756,7 +766,7 @@ app.post('/create-thumbnail', async (req, res) => {
 app.post('/save', async (req, res) => {
     console.log('[SAVE] Request received');
     try {
-        const { filename, path, metadata, analysis, file_hash, mtime } = req.body;
+        const { filename, path: targetPath, metadata, analysis, file_hash, mtime } = req.body;
 
         // Ensure analysis is clean before any save operation
         if (analysis) deduplicateTags(analysis);
@@ -790,7 +800,7 @@ app.post('/save', async (req, res) => {
             if (existingByHash) {
                 console.log(`[SAVE] Duplicate found by hash: ${existingByHash.filename}`);
                 // If it's literally the same file (same path), we treat it as an update/skip
-                if (existingByHash.path === path) {
+                if (existingByHash.path === targetPath) {
                     // Same file path and same hash.
                     // If we have new analysis/metadata, we should UPDATE the record.
                     const hasNewData = (analysis && Object.keys(analysis).length > 0) || (metadata && Object.keys(metadata).length > 0);
@@ -849,11 +859,11 @@ app.post('/save', async (req, res) => {
 
         // 2. Check by Path (Location Match - fallback if hash missing or hash changed but path same)
         const checkPathSql = `SELECT id FROM images WHERE path = ?`;
-        const existingByPath = db.prepare(checkPathSql).get(path);
+        const existingByPath = db.prepare(checkPathSql).get(targetPath);
 
         if (existingByPath) {
             // Update existing
-            console.log(`[SAVE] Updating existing file by path: ${path}`);
+            console.log(`[SAVE] Updating existing file by path: ${targetPath}`);
             const updateSql = `
                 UPDATE images 
                 SET filename = ?, file_hash = ?, metadata = ?, analysis = ?, created_at = ?, mtime = ?, width = ?, height = ?, size = ?
@@ -866,7 +876,7 @@ app.post('/save', async (req, res) => {
 
         // 3. New Insert
         const insertSql = `INSERT INTO images (filename, path, file_hash, metadata, analysis, created_at, mtime, width, height, size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-        const info = db.prepare(insertSql).run(filename, path, file_hash, JSON.stringify(metadata), JSON.stringify(analysis), created_at, mtime || null, width, height, size);
+        const info = db.prepare(insertSql).run(filename, targetPath, file_hash, JSON.stringify(metadata), JSON.stringify(analysis), created_at, mtime || null, width, height, size);
         const newId = info.lastInsertRowid;
         console.log(`[SAVE] Success. New ID: ${newId}`);
 

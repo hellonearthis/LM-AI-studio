@@ -29,11 +29,11 @@
 }
 
 .status-added {
-    color: var(--accent);
+    color: var(--accent-secondary);
 }
 
 .status-updated {
-    color: #f59e0b;
+    color: var(--accent);
 }
 
 .status-existing {
@@ -94,7 +94,7 @@
 .modern-input:focus {
     outline: none;
     border-color: var(--accent);
-    box-shadow: 0 0 0 2px rgba(108, 143, 0, 0.2);
+    box-shadow: 0 0 0 2px rgba(222, 126, 104, 0.2);
 }
 
 .modern-input {
@@ -136,7 +136,6 @@
 
 .action-btn:hover {
     background-color: var(--accent-hover);
-    transform: translateY(-1px);
 }
 
 .action-btn:active {
