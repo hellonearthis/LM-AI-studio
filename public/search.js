@@ -1713,48 +1713,73 @@ function showConfirmModal(dialogue_message_text, action_on_confirmation_callback
 }
 
 // Custom Alert Modal (Replaces native alert)
-function showAlertModal(message, title = 'Notification', onOk = null) {
-    const modal = document.createElement('div');
-    modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;';
+// WHAT: Creates, styles, and presents a customized alert dialogue box to replace native browser alerts.
+// WHY: Custom modals provide a more integrated user interface and look extremely premium. By escaping the
+// dynamic text parameters (title text and body message text) using `escapeHtmlCharacters`, we completely prevent
+// XSS vulnerabilities if the message contains user-supplied inputs or dynamic error logs containing HTML.
+function showAlertModal(alert_dialogue_body_message_text, alert_dialogue_header_title_text = 'Notification', on_ok_action_callback_function = null) {
+    // WHAT: Creating the modal container backdrop overlay element.
+    // WHY: Overlay visually blurs and darkens background sections, highlighting the modal dialogue context.
+    const alert_modal_container_element = document.createElement('div');
+    alert_modal_container_element.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;';
 
-    modal.innerHTML = `
+    // WHAT: HTML-escaping the title and message strings to block injection exploits.
+    // WHY: Neutralizes any embedded script or tags, rendering them as standard text literals.
+    const escaped_alert_dialogue_header_title_text = escapeHtmlCharacters(alert_dialogue_header_title_text);
+    const escaped_alert_dialogue_body_message_text = escapeHtmlCharacters(alert_dialogue_body_message_text);
+
+    alert_modal_container_element.innerHTML = `
         <div style="background: var(--card-bg); padding: 2rem; border-radius: 12px; border: 1px solid var(--border); max-width: 400px; width: 90%; text-align: center;">
-            <h3 style="margin: 0 0 1rem 0; color: var(--text-primary);">${title}</h3>
-            <p style="margin: 0 0 1.5rem 0; color: var(--text-primary); font-size: 1.1rem;">${message}</p>
+            <h3 style="margin: 0 0 1rem 0; color: var(--text-primary);">${escaped_alert_dialogue_header_title_text}</h3>
+            <p style="margin: 0 0 1.5rem 0; color: var(--text-primary); font-size: 1.1rem;">${escaped_alert_dialogue_body_message_text}</p>
             <div style="display: flex; gap: 1rem; justify-content: center;">
                 <button id="okAlertBtn" style="background: var(--accent); border: none; color: white; padding: 0.5rem 1.5rem; border-radius: 6px; cursor: pointer; font-weight: 500;">OK</button>
             </div>
         </div>
     `;
 
-    document.body.appendChild(modal);
+    // WHAT: Injecting the alert modal element nodes into the main document body context.
+    // WHY: Nodes must belong to the active DOM layout hierarchy to render visually.
+    document.body.appendChild(alert_modal_container_element);
 
-    const okBtn = modal.querySelector('#okAlertBtn');
+    const ok_alert_button_element = alert_modal_container_element.querySelector('#okAlertBtn');
 
+    // WHAT: Directing user navigation focus directly onto the primary interactive OK confirm trigger button.
+    // WHY: Setting direct keyboard focus ensures excellent page accessibility for non-mouse users.
     setTimeout(() => {
-        okBtn.focus();
+        ok_alert_button_element.focus();
     }, 10);
 
-    const cleanup = () => {
-        document.removeEventListener('keydown', keyHandler);
-        modal.remove();
-        if (onOk) onOk();
-    };
-
-    okBtn.onclick = cleanup;
-
-    modal.onclick = (e) => {
-        if (e.target === modal) cleanup();
-    };
-
-    const keyHandler = (e) => {
-        if (e.key === 'Enter' || e.key === 'Escape') {
-            e.preventDefault();
-            cleanup();
+    // WHAT: Dismantling the modal elements and removing the global keyboard keydown listener block.
+    // WHY: Teardowns ensure no garbage references or obsolete listeners clutter page scopes.
+    const cleanup_modal_and_remove_event_listeners = () => {
+        document.removeEventListener('keydown', keyboard_event_handler_function);
+        alert_modal_container_element.remove();
+        if (on_ok_action_callback_function) {
+            on_ok_action_callback_function();
         }
     };
 
-    document.addEventListener('keydown', keyHandler);
+    ok_alert_button_element.onclick = cleanup_modal_and_remove_event_listeners;
+
+    // WHAT: Allowing click overlays on the outer backdrop container to close or dismiss alert prompts.
+    // WHY: Backdrop dismissal matches user interaction expectations on clean web dialog layouts.
+    alert_modal_container_element.onclick = (mouse_click_event_object) => {
+        if (mouse_click_event_object.target === alert_modal_container_element) {
+            cleanup_modal_and_remove_event_listeners();
+        }
+    };
+
+    // WHAT: Capturing general Enter and Escape keyboard keystrokes to submit alert screens.
+    // WHY: High accessibility demands fast keyboard navigation patterns to skip alerts.
+    const keyboard_event_handler_function = (keyboard_event_object) => {
+        if (keyboard_event_object.key === 'Enter' || keyboard_event_object.key === 'Escape') {
+            keyboard_event_object.preventDefault();
+            cleanup_modal_and_remove_event_listeners();
+        }
+    };
+
+    document.addEventListener('keydown', keyboard_event_handler_function);
 }
 
 /**
@@ -1770,37 +1795,48 @@ function showAlertModal(message, title = 'Notification', onOk = null) {
  * @param {Array} imagesArray - The master list of image metadata.
  * @returns {Promise<string|null>} Resolves with the new base name or null if aborted.
  */
-function showBulkRenameModal(selectedIdsSet, imagesArray) {
-    return new Promise((resolve) => {
-        // Create the dark background backdrop
-        const modalBackdrop = document.createElement('div');
-        modalBackdrop.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;';
+// WHAT: Creates, configures, and displays the batch rename modal dialogue.
+// WHY: Batch file renames are high-impact metadata operations. We construct a scrollable visual list of targeted
+// filenames. To prevent XSS injection, all targeted filenames and recent rename chip values are HTML-escaped
+// using `escapeHtmlCharacters` before rendering. All variables are written according to the `can_be_long` protocol.
+function showBulkRenameModal(selected_image_ids_set, cached_images_metadata_array) {
+    return new Promise((promise_resolution_handler_function) => {
+        // WHAT: Creating the modal container backdrop overlay element.
+        // WHY: Overlays isolate user attention and block background document interactions.
+        const bulk_rename_backdrop_element = document.createElement('div');
+        bulk_rename_backdrop_element.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;';
 
-        // Convert the set of IDs into human-readable filenames for the preview
-        const fileNamesToRename = Array.from(selectedIdsSet).map(id => {
-            const matchedImage = imagesArray.find(img => String(img.id) === id);
-            return matchedImage ? matchedImage.filename : `Image #${id}`;
+        // WHAT: Converting set IDs to human-readable filenames and escaping each to block script injection.
+        // WHY: Filenames are loaded dynamically from filesystems and databases, presenting an XSS threat if rendered unescaped.
+        const retrieved_target_filenames_list = Array.from(selected_image_ids_set).map((each_image_id_string) => {
+            const matched_image_metadata_object = cached_images_metadata_array.find((each_cached_image) => {
+                return String(each_cached_image.id) === each_image_id_string;
+            });
+            const filename_string_value = matched_image_metadata_object ? matched_image_metadata_object.filename : `Image #${each_image_id_string}`;
+            return escapeHtmlCharacters(filename_string_value);
         });
 
-        // Build the preview list (limited to 100 entries for performance)
-        const listItemsHtml = fileNamesToRename.slice(0, 100).map(name => `
+        // WHAT: Building scrollable list item HTML tags safely.
+        // WHY: Limits preview list to 100 entries to prevent memory and DOM lag on large batch operations.
+        const compiled_preview_list_items_html_string = retrieved_target_filenames_list.slice(0, 100).map((escaped_filename_item) => `
             <li style="padding: 0.25rem 0; border-bottom: 1px solid rgba(255,255,255,0.05); color: var(--text-secondary); font-size: 0.85rem; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                📄 ${name}
+                📄 ${escaped_filename_item}
             </li>
         `).join('');
-        
-        // Show an indicator if the list is truncated
-        const listOverflowHtml = fileNamesToRename.length > 100 ? `<li style="padding: 0.25rem 0; color: #a78bfa; font-size: 0.8rem; text-align: center;">...and ${fileNamesToRename.length - 100} more</li>` : '';
 
-        modalBackdrop.innerHTML = `
+        const compiled_overflow_indicator_html_string = retrieved_target_filenames_list.length > 100 
+            ? `<li style="padding: 0.25rem 0; color: #a78bfa; font-size: 0.8rem; text-align: center;">...and ${retrieved_target_filenames_list.length - 100} more</li>` 
+            : '';
+
+        bulk_rename_backdrop_element.innerHTML = `
             <div style="background: linear-gradient(135deg, var(--card-bg) 0%, #1e1b4b 100%); padding: 2rem; border-radius: 12px; border: 2px solid #8b5cf6; max-width: 450px; width: 90%; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,0.7);">
                 <h3 style="margin: 0 0 0.5rem 0; color: var(--text-primary); font-size: 1.25rem;">Bulk Rename Results</h3>
-                <p style="margin: 0 0 1rem 0; color: #c4b5fd; font-size: 0.9rem;">Targeting ${selectedIdsSet.size} selected image(s).</p>
+                <p style="margin: 0 0 1rem 0; color: #c4b5fd; font-size: 0.9rem;">Targeting ${selected_image_ids_set.size} selected image(s).</p>
                 
                 <div style="background: rgba(0,0,0,0.3); border: 1px solid #4c1d95; border-radius: 6px; padding: 0.5rem; margin-bottom: 1.5rem; max-height: 150px; overflow-y: auto;">
                     <ul style="list-style: none; padding: 0; margin: 0;">
-                        ${listItemsHtml}
-                        ${listOverflowHtml}
+                        ${compiled_preview_list_items_html_string}
+                        ${compiled_overflow_indicator_html_string}
                     </ul>
                 </div>
 
@@ -1808,20 +1844,25 @@ function showBulkRenameModal(selectedIdsSet, imagesArray) {
                     <label style="display: block; color: #a78bfa; font-size: 0.85rem; margin-bottom: 0.5rem;">New Base Name (e.g. "coffee")</label>
                     
                     ${(() => {
-                        const recent = getRecentRenames();
-                        if (recent.length === 0) return '';
+                        const list_of_recent_renames_array = getRecentRenames();
+                        if (list_of_recent_renames_array.length === 0) {
+                            return '';
+                        }
                         return `
                             <div id="recentRenamesContainer" style="margin-bottom: 0.75rem; display: flex; flex-wrap: wrap; gap: 0.4rem; padding: 0.5rem; background: rgba(0,0,0,0.2); border-radius: 6px; border: 1px dashed rgba(167, 139, 250, 0.3);">
                                 <span style="font-size: 0.7rem; color: #8b5cf6; width: 100%; margin-bottom: 0.2rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Recent:</span>
-                                ${recent.map(name => `
-                                    <span class="recent-rename-chip" 
-                                          style="background: rgba(139, 92, 246, 0.15); border: 1px solid rgba(139, 92, 246, 0.3); color: #c4b5fd; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; cursor: pointer; transition: all 0.2s;"
-                                          onmouseover="this.style.background='rgba(139, 92, 246, 0.3)'; this.style.borderColor='#8b5cf6';"
-                                          onmouseout="this.style.background='rgba(139, 92, 246, 0.15)'; this.style.borderColor='rgba(139, 92, 246, 0.3)';"
-                                          onclick="document.getElementById('renameBaseInput').value = '${name.replace(/'/g, "\\'")}'; document.getElementById('renameBaseInput').focus();">
-                                        ${name}
-                                    </span>
-                                `).join('')}
+                                ${list_of_recent_renames_array.map((each_recent_name_string) => {
+                                    const escaped_recent_name_string = escapeHtmlCharacters(each_recent_name_string);
+                                    return `
+                                        <span class="recent-rename-chip" 
+                                              style="background: rgba(139, 92, 246, 0.15); border: 1px solid rgba(139, 92, 246, 0.3); color: #c4b5fd; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; cursor: pointer; transition: all 0.2s;"
+                                              onmouseover="this.style.background='rgba(139, 92, 246, 0.3)'; this.style.borderColor='#8b5cf6';"
+                                              onmouseout="this.style.background='rgba(139, 92, 246, 0.15)'; this.style.borderColor='rgba(139, 92, 246, 0.3)';"
+                                              onclick="document.getElementById('renameBaseInput').value = '${escaped_recent_name_string.replace(/'/g, "\\'")}'; document.getElementById('renameBaseInput').focus();">
+                                            ${escaped_recent_name_string}
+                                        </span>
+                                    `;
+                                }).join('')}
                             </div>
                         `;
                     })()}
@@ -1837,53 +1878,70 @@ function showBulkRenameModal(selectedIdsSet, imagesArray) {
             </div>
         `;
 
-        document.body.appendChild(modalBackdrop);
+        document.body.appendChild(bulk_rename_backdrop_element);
 
-        // Binding DOM elements for logic
-        const baseInput = modalBackdrop.querySelector('#renameBaseInput');
-        const confirmBtn = modalBackdrop.querySelector('#goRenameBtn');
-        const abortBtn = modalBackdrop.querySelector('#cancelRenameBtn');
+        const text_input_field_element = bulk_rename_backdrop_element.querySelector('#renameBaseInput');
+        const confirm_action_button_element = bulk_rename_backdrop_element.querySelector('#goRenameBtn');
+        const cancel_action_button_element = bulk_rename_backdrop_element.querySelector('#cancelRenameBtn');
 
-        // Focus the text field immediately for a better UX
-        setTimeout(() => baseInput.focus(), 50);
+        // WHAT: Automatically focusing the input text field after display rendering delay.
+        // WHY: Guides user navigation seamlessly to start typing without requiring manual cursor clicks.
+        setTimeout(() => {
+            text_input_field_element.focus();
+        }, 50);
 
-        const closeAndResolve = (result) => {
-            document.removeEventListener('keydown', handleKeyInput);
-            modalBackdrop.remove();
-            resolve(result);
+        // WHAT: Standardizing modal closing logic and cleanups.
+        // WHY: Removes structural events and element trees from active page memories when resolving promises.
+        const close_modal_and_resolve_promise_action = (final_entered_value_string) => {
+            document.removeEventListener('keydown', keyboard_event_handler_function);
+            bulk_rename_backdrop_element.remove();
+            promise_resolution_handler_function(final_entered_value_string);
         };
 
-        const onConfirm = () => {
-            const value = baseInput.value.trim();
-            if (value) {
-                closeAndResolve(value);
+        const validate_and_submit_changes_action = () => {
+            const trimmed_input_value_string = text_input_field_element.value.trim();
+            if (trimmed_input_value_string) {
+                close_modal_and_resolve_promise_action(trimmed_input_value_string);
             } else {
-                // UI feedback for empty input
-                baseInput.style.border = '1px solid #ef4444';
-                setTimeout(() => baseInput.style.border = '1px solid var(--border)', 1000);
+                // Flash border color in red to denote missing required text field values
+                text_input_field_element.style.border = '1px solid #ef4444';
+                setTimeout(() => {
+                    text_input_field_element.style.border = '1px solid var(--border)';
+                }, 1000);
             }
         };
 
-        confirmBtn.onclick = onConfirm;
-        abortBtn.onclick = () => closeAndResolve(null);
+        confirm_action_button_element.onclick = validate_and_submit_changes_action;
+        cancel_action_button_element.onclick = () => {
+            close_modal_and_resolve_promise_action(null);
+        };
 
-        const handleKeyInput = (e) => {
-            if (e.key === 'Escape') {
-                e.preventDefault();
-                closeAndResolve(null);
-            } else if (e.key === 'Enter') {
-                e.preventDefault();
-                onConfirm();
+        // WHAT: Capturing general keystrokes specifically inside document contexts.
+        // WHY: Intercepts Escape and Enter keypress mappings for accessible navigation controls.
+        const keyboard_event_handler_function = (keyboard_event_object) => {
+            if (keyboard_event_object.key === 'Escape') {
+                keyboard_event_object.preventDefault();
+                close_modal_and_resolve_promise_action(null);
+            } else if (keyboard_event_object.key === 'Enter') {
+                keyboard_event_object.preventDefault();
+                validate_and_submit_changes_action();
             }
         };
 
-        document.addEventListener('keydown', handleKeyInput);
+        document.addEventListener('keydown', keyboard_event_handler_function);
         
-        // Manual hover bindings to maintain consistent styling with other pages
-        abortBtn.onmouseover = () => abortBtn.style.background = 'rgba(255,255,255,0.05)';
-        abortBtn.onmouseout = () => abortBtn.style.background = 'transparent';
-        confirmBtn.onmouseover = () => confirmBtn.style.filter = 'brightness(1.1)';
-        confirmBtn.onmouseout = () => confirmBtn.style.filter = 'brightness(1)';
+        cancel_action_button_element.onmouseover = () => {
+            cancel_action_button_element.style.background = 'rgba(255,255,255,0.05)';
+        };
+        cancel_action_button_element.onmouseout = () => {
+            cancel_action_button_element.style.background = 'transparent';
+        };
+        confirm_action_button_element.onmouseover = () => {
+            confirm_action_button_element.style.filter = 'brightness(1.1)';
+        };
+        confirm_action_button_element.onmouseout = () => {
+            confirm_action_button_element.style.filter = 'brightness(1)';
+        };
     });
 }
 

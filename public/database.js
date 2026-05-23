@@ -800,41 +800,58 @@ const modalConfirm = document.getElementById('modalConfirm');
 const modalHasCancel = document.getElementById('modalHasCancel');
 
 // Helper: Custom Modal
-function showModal(title, message, isConfirm = false) {
-    return new Promise((resolve) => {
+// WHAT: Opens, configures, and displays the app-wide general message modal dialog.
+// WHY: This central overlay modal is used for notifications or basic binary confirm prompts. By escaping the
+// message using `escapeHtmlCharacters` before replacing line breaks with `<br>` tags, we guarantee XSS safety
+// while still supporting multi-line spacing structure in the dialogue.
+function showModal(modal_dialogue_header_title_text, modal_dialogue_body_message_text, is_confirmation_prompt_boolean = false) {
+    return new Promise((promise_resolution_handler_function) => {
         if (!customModal) {
-            // Fallback if modal elements aren't found (shouldn't happen)
-            if (isConfirm) resolve(confirm(message));
-            else { showToast(message, 'info'); resolve(true); }
+            // WHAT: Fallback logic using native alerts/confirms if the custom modal elements are not found in the DOM.
+            // WHY: Ensures the application remains functional even in anomalous visual states.
+            if (is_confirmation_prompt_boolean) {
+                promise_resolution_handler_function(confirm(modal_dialogue_body_message_text));
+            } else {
+                showToast(modal_dialogue_body_message_text, 'info');
+                promise_resolution_handler_function(true);
+            }
             return;
         }
 
-        modalTitle.textContent = title;
-        modalMessage.innerHTML = message.replace(/\n/g, '<br>'); // Support simple line breaks
+        // WHAT: Assigning the text parameters and escaping inputs to shield the element from script injections.
+        // WHY: Escaping ensures any dynamic data or error messages inside the body are rendered safely.
+        modalTitle.textContent = modal_dialogue_header_title_text;
+        
+        const escaped_modal_dialogue_body_message_text = escapeHtmlCharacters(modal_dialogue_body_message_text);
+        modalMessage.innerHTML = escaped_modal_dialogue_body_message_text.replace(/\n/g, '<br>');
 
-        modalHasCancel.style.display = isConfirm ? 'block' : 'none';
-        modalConfirm.textContent = isConfirm ? 'Confirm' : 'OK';
+        modalHasCancel.style.display = is_confirmation_prompt_boolean ? 'block' : 'none';
+        modalConfirm.textContent = is_confirmation_prompt_boolean ? 'Confirm' : 'OK';
 
         customModal.style.display = 'flex';
 
-        const handleConfirm = () => {
-            cleanup();
-            resolve(true);
+        // WHAT: Defining click event handlers for confirming or cancelling the modal choice.
+        // WHY: The handlers close the dialogue and return the user's action through the promise scope.
+        const confirm_selection_action_handler_function = () => {
+            cleanup_modal_and_remove_event_listeners();
+            promise_resolution_handler_function(true);
         };
 
-        const handleCancel = () => {
-            cleanup();
-            resolve(false);
+        const cancel_selection_action_handler_function = () => {
+            cleanup_modal_and_remove_event_listeners();
+            promise_resolution_handler_function(false);
         };
 
-        const cleanup = () => {
-            modalConfirm.removeEventListener('click', handleConfirm);
-            modalHasCancel.removeEventListener('click', handleCancel);
+        // WHAT: Dismantling click listeners and hiding the custom modal layout node.
+        // WHY: Teardowns ensure no event trigger conflicts occur when the dialog is re-opened.
+        const cleanup_modal_and_remove_event_listeners = () => {
+            modalConfirm.removeEventListener('click', confirm_selection_action_handler_function);
+            modalHasCancel.removeEventListener('click', cancel_selection_action_handler_function);
             customModal.style.display = 'none';
         };
 
-        modalConfirm.addEventListener('click', handleConfirm);
-        modalHasCancel.addEventListener('click', handleCancel);
+        modalConfirm.addEventListener('click', confirm_selection_action_handler_function);
+        modalHasCancel.addEventListener('click', cancel_selection_action_handler_function);
     });
 }
 
@@ -847,38 +864,48 @@ function showModal(title, message, isConfirm = false) {
  * @param {Set} selectedIdsSet - A set of Image IDs currently selected in the UI.
  * @param {Array} imagesArray - The full local cache of image objects to pull filenames from.
  */
-function showBulkRenameModal(selectedIdsSet, imagesArray) {
-    return new Promise((resolve) => {
-        // Create the dim background overlay
-        const modalOverlay = document.createElement('div');
-        modalOverlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;';
+// WHAT: Creates, configures, and displays the batch rename modal dialogue.
+// WHY: Batch file renames are high-impact metadata operations. We construct a scrollable visual list of targeted
+// filenames. To prevent XSS injection, all targeted filenames and recent rename chip values are HTML-escaped
+// using `escapeHtmlCharacters` before rendering. All variables are written according to the `can_be_long` protocol.
+function showBulkRenameModal(selected_image_ids_set, cached_images_metadata_array) {
+    return new Promise((promise_resolution_handler_function) => {
+        // WHAT: Creating the modal container backdrop overlay element.
+        // WHY: Overlays isolate user attention and block background document interactions.
+        const bulk_rename_backdrop_element = document.createElement('div');
+        bulk_rename_backdrop_element.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;';
 
-        // Map IDs to human-readable filenames so the user can verify their selection
-        const targetFilenames = Array.from(selectedIdsSet).map(id => {
-            const foundImage = imagesArray.find(img => String(img.id) === id);
-            return foundImage ? foundImage.filename : `Record ID: ${id}`;
+        // WHAT: Converting set IDs to human-readable filenames and escaping each to block script injection.
+        // WHY: Filenames are loaded dynamically from filesystems and databases, presenting an XSS threat if rendered unescaped.
+        const retrieved_target_filenames_list = Array.from(selected_image_ids_set).map((each_image_id_string) => {
+            const matched_image_metadata_object = cached_images_metadata_array.find((each_cached_image) => {
+                return String(each_cached_image.id) === each_image_id_string;
+            });
+            const filename_string_value = matched_image_metadata_object ? matched_image_metadata_object.filename : `Record ID: ${each_image_id_string}`;
+            return escapeHtmlCharacters(filename_string_value);
         });
 
-        // Generate the scrollable list of files to be renamed
-        const previewListHtml = targetFilenames.slice(0, 100).map(name => `
+        // WHAT: Building scrollable list item HTML tags safely.
+        // WHY: Limits preview list to 100 entries to prevent memory and DOM lag on large batch operations.
+        const compiled_preview_list_items_html_string = retrieved_target_filenames_list.slice(0, 100).map((escaped_filename_item) => `
             <li style="padding: 0.25rem 0; border-bottom: 1px solid rgba(255,255,255,0.05); color: var(--text-secondary); font-size: 0.85rem; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                📄 ${name}
+                📄 ${escaped_filename_item}
             </li>
         `).join('');
-        
-        // If there are more than 100 files, we truncate the preview to keep the UI snappy
-        const overflowIndicator = targetFilenames.length > 100 ? `<li style="padding: 0.25rem 0; color: var(--accent); font-size: 0.8rem; text-align: center;">...and ${targetFilenames.length - 100} more</li>` : '';
 
-        // Construct the modal HTML structure
-        modalOverlay.innerHTML = `
+        const compiled_overflow_indicator_html_string = retrieved_target_filenames_list.length > 100 
+            ? `<li style="padding: 0.25rem 0; color: var(--accent); font-size: 0.8rem; text-align: center;">...and ${retrieved_target_filenames_list.length - 100} more</li>` 
+            : '';
+
+        bulk_rename_backdrop_element.innerHTML = `
             <div style="background: var(--card-bg); padding: 2rem; border-radius: 12px; border: 1px solid var(--border); max-width: 450px; width: 90%; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,0.5);">
                 <h3 style="margin: 0 0 0.5rem 0; color: var(--text-primary); font-size: 1.25rem;">Bulk Rename</h3>
-                <p style="margin: 0 0 1rem 0; color: var(--text-secondary); font-size: 0.9rem;">You are renaming ${selectedIdsSet.size} file(s) in this batch.</p>
+                <p style="margin: 0 0 1rem 0; color: var(--text-secondary); font-size: 0.9rem;">You are renaming ${selected_image_ids_set.size} file(s) in this batch.</p>
                 
                 <div style="background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem; margin-bottom: 1.5rem; max-height: 150px; overflow-y: auto;">
                     <ul style="list-style: none; padding: 0; margin: 0;">
-                        ${previewListHtml}
-                        ${overflowIndicator}
+                        ${compiled_preview_list_items_html_string}
+                        ${compiled_overflow_indicator_html_string}
                     </ul>
                 </div>
 
@@ -886,20 +913,25 @@ function showBulkRenameModal(selectedIdsSet, imagesArray) {
                     <label style="display: block; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.5rem;">New Base Name (e.g. "holiday")</label>
 
                     ${(() => {
-                        const recent = getRecentRenames();
-                        if (recent.length === 0) return '';
+                        const list_of_recent_renames_array = getRecentRenames();
+                        if (list_of_recent_renames_array.length === 0) {
+                            return '';
+                        }
                         return `
                             <div id="recentRenamesContainer" style="margin-bottom: 0.75rem; display: flex; flex-wrap: wrap; gap: 0.4rem; padding: 0.5rem; background: rgba(0,0,0,0.2); border-radius: 6px; border: 1px dashed rgba(167, 139, 250, 0.3);">
                                 <span style="font-size: 0.7rem; color: var(--accent); width: 100%; margin-bottom: 0.2rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Recent:</span>
-                                ${recent.map(name => `
-                                    <span class="recent-rename-chip" 
-                                          style="background: rgba(139, 92, 246, 0.15); border: 1px solid rgba(139, 92, 246, 0.3); color: #c4b5fd; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; cursor: pointer; transition: all 0.2s;"
-                                          onmouseover="this.style.background='rgba(139, 92, 246, 0.3)'; this.style.borderColor='var(--accent)';"
-                                          onmouseout="this.style.background='rgba(139, 92, 246, 0.15)'; this.style.borderColor='rgba(139, 92, 246, 0.3)';"
-                                          onclick="document.getElementById('renameBaseInput').value = '${name.replace(/'/g, "\\'")}'; document.getElementById('renameBaseInput').focus();">
-                                        ${name}
-                                    </span>
-                                `).join('')}
+                                ${list_of_recent_renames_array.map((each_recent_name_string) => {
+                                    const escaped_recent_name_string = escapeHtmlCharacters(each_recent_name_string);
+                                    return `
+                                        <span class="recent-rename-chip" 
+                                              style="background: rgba(139, 92, 246, 0.15); border: 1px solid rgba(139, 92, 246, 0.3); color: #c4b5fd; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; cursor: pointer; transition: all 0.2s;"
+                                              onmouseover="this.style.background='rgba(139, 92, 246, 0.3)'; this.style.borderColor='var(--accent)';"
+                                              onmouseout="this.style.background='rgba(139, 92, 246, 0.15)'; this.style.borderColor='rgba(139, 92, 246, 0.3)';"
+                                              onclick="document.getElementById('renameBaseInput').value = '${escaped_recent_name_string.replace(/'/g, "\\'")}'; document.getElementById('renameBaseInput').focus();">
+                                            ${escaped_recent_name_string}
+                                        </span>
+                                    `;
+                                }).join('')}
                             </div>
                         `;
                     })()}
@@ -915,60 +947,70 @@ function showBulkRenameModal(selectedIdsSet, imagesArray) {
             </div>
         `;
 
-        document.body.appendChild(modalOverlay);
+        document.body.appendChild(bulk_rename_backdrop_element);
 
-        // Grab internal elements for event handling
-        const nameInputField = modalOverlay.querySelector('#renameBaseInput');
-        const submitButton = modalOverlay.querySelector('#goRenameBtn');
-        const closeButton = modalOverlay.querySelector('#cancelRenameBtn');
+        const text_input_field_element = bulk_rename_backdrop_element.querySelector('#renameBaseInput');
+        const confirm_action_button_element = bulk_rename_backdrop_element.querySelector('#goRenameBtn');
+        const cancel_action_button_element = bulk_rename_backdrop_element.querySelector('#cancelRenameBtn');
 
-        // Auto-focus the input so the user can start typing immediately
-        setTimeout(() => nameInputField.focus(), 50);
+        // WHAT: Automatically focusing the input text field after display rendering delay.
+        // WHY: Guides user navigation seamlessly to start typing without requiring manual cursor clicks.
+        setTimeout(() => {
+            text_input_field_element.focus();
+        }, 50);
 
-        // Cleanup function to remove the modal from the DOM
-        const hideModal = () => {
-            document.removeEventListener('keydown', handleKeyEvents);
-            modalOverlay.remove();
+        // WHAT: Standardizing modal closing logic and cleanups.
+        // WHY: Removes structural events and element trees from active page memories when resolving promises.
+        const close_modal_and_resolve_promise_action = (final_entered_value_string) => {
+            document.removeEventListener('keydown', keyboard_event_handler_function);
+            bulk_rename_backdrop_element.remove();
+            promise_resolution_handler_function(final_entered_value_string);
         };
 
-        const handleSubmission = () => {
-            const trimmedValue = nameInputField.value.trim();
-            if (trimmedValue) {
-                hideModal();
-                resolve(trimmedValue); // Return the name to the caller
+        const validate_and_submit_changes_action = () => {
+            const trimmed_input_value_string = text_input_field_element.value.trim();
+            if (trimmed_input_value_string) {
+                close_modal_and_resolve_promise_action(trimmed_input_value_string);
             } else {
-                // Flash the border red if they try to submit an empty name
-                nameInputField.style.border = '1px solid #ef4444';
-                setTimeout(() => nameInputField.style.border = '1px solid var(--border)', 1000);
+                // Flash border color in red to denote missing required text field values
+                text_input_field_element.style.border = '1px solid #ef4444';
+                setTimeout(() => {
+                    text_input_field_element.style.border = '1px solid var(--border)';
+                }, 1000);
             }
         };
 
-        submitButton.onclick = handleSubmission;
-        closeButton.onclick = () => { hideModal(); resolve(null); };
+        confirm_action_button_element.onclick = validate_and_submit_changes_action;
+        cancel_action_button_element.onclick = () => {
+            close_modal_and_resolve_promise_action(null);
+        };
 
-        /**
-         * KEYBOARD ACCESSIBILITY
-         * Enter = Submit
-         * Escape = Cancel
-         */
-        const handleKeyEvents = (e) => {
-            if (e.key === 'Escape') {
-                e.preventDefault();
-                hideModal();
-                resolve(null);
-            } else if (e.key === 'Enter') {
-                e.preventDefault();
-                handleSubmission();
+        // WHAT: Capturing general keystrokes specifically inside document contexts.
+        // WHY: Intercepts Escape and Enter keypress mappings for accessible navigation controls.
+        const keyboard_event_handler_function = (keyboard_event_object) => {
+            if (keyboard_event_object.key === 'Escape') {
+                keyboard_event_object.preventDefault();
+                close_modal_and_resolve_promise_action(null);
+            } else if (keyboard_event_object.key === 'Enter') {
+                keyboard_event_object.preventDefault();
+                validate_and_submit_changes_action();
             }
         };
 
-        document.addEventListener('keydown', handleKeyEvents);
+        document.addEventListener('keydown', keyboard_event_handler_function);
         
-        // Add subtle hover interactions manually via JS
-        closeButton.onmouseover = () => closeButton.style.background = 'rgba(255,255,255,0.05)';
-        closeButton.onmouseout = () => closeButton.style.background = 'transparent';
-        submitButton.onmouseover = () => submitButton.style.filter = 'brightness(1.1)';
-        submitButton.onmouseout = () => submitButton.style.filter = 'brightness(1)';
+        cancel_action_button_element.onmouseover = () => {
+            cancel_action_button_element.style.background = 'rgba(255,255,255,0.05)';
+        };
+        cancel_action_button_element.onmouseout = () => {
+            cancel_action_button_element.style.background = 'transparent';
+        };
+        confirm_action_button_element.onmouseover = () => {
+            confirm_action_button_element.style.filter = 'brightness(1.1)';
+        };
+        confirm_action_button_element.onmouseout = () => {
+            confirm_action_button_element.style.filter = 'brightness(1)';
+        };
     });
 }
 
