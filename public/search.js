@@ -343,8 +343,11 @@ function processAndDisplayMatches(rawWorkerResults) {
             </div>`;
     } else {
         // 5. Start the batch-rendering process
-        setupInfiniteScrollObserver();
+        // Render the first batch synchronously before setting up the observer.
+        // This ensures the sentinel is pushed down out of the viewport, preventing
+        // an immediate double-trigger of the IntersectionObserver.
         renderNextBatchOfResults();
+        setupInfiniteScrollObserver();
     }
 }
 
@@ -601,7 +604,9 @@ function setupInfiniteScrollObserver() {
     if (observer) observer.disconnect();
 
     observer = new IntersectionObserver((entries) => {
-        if (entries[0].isIntersecting) {
+        // Only trigger rendering if intersecting and not already rendering a batch.
+        // This prevents rapid double-rendering cascades due to layout shifts.
+        if (entries[0].isIntersecting && !isRendering) {
             renderNextBatchOfResults();
         }
     }, { rootMargin: '400px' });
