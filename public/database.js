@@ -10,6 +10,22 @@
 const dbGrid = document.getElementById('dbGrid');
 const loadingDb = document.getElementById('loadingDb');
 
+// WHAT: Escapes special characters within a given string that have semantic meaning in HTML.
+// WHY: We replace characters like '&', '<', '>', '"', and "'" with their corresponding HTML safe entity values.
+// This prevents the web browser from interpreting user-supplied or AI-generated string fields as HTML code,
+// thereby neutralizing potential Cross-Site Scripting (XSS) code injection attempts.
+function escapeHtmlCharacters(input_string_to_be_escaped) {
+    if (!input_string_to_be_escaped) {
+        return '';
+    }
+    return String(input_string_to_be_escaped)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
 // ============================================================================
 // TOAST NOTIFICATIONS
 // ============================================================================
@@ -1634,14 +1650,26 @@ function showDeleteOptionsModal(filename, callback) {
 }
 
 // Custom Input Modal (Replaces prompt)
-function showTagInputModal(title, initialValue, callback) {
-    const modal = document.createElement('div');
-    modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 9999;';
+// WHAT: Creates and displays a modal dialog prompting the user to input or edit a tag value.
+// WHY: We replace native browser prompts with a beautiful, accessible modal dialogue. To ensure security,
+// all dynamic parameter strings like the title or initial tag name are HTML-escaped using our central utility
+// before being injected into the HTML template, preventing any script injection payloads from executing.
+function showTagInputModal(modal_dialogue_title_text, initial_input_field_value_text, tag_submission_callback_function) {
+    // WHAT: Creating the modal container element and styling it to cover the entire screen viewport.
+    // WHY: A full-screen overlay backdrop blocks underlying interactions and focuses user attention on the input task.
+    const tag_input_modal_container_element = document.createElement('div');
+    tag_input_modal_container_element.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 9999;';
 
-    modal.innerHTML = `
+    // WHAT: Safely escaping our inputs and rendering the modal HTML markup structure.
+    // WHY: We HTML-escape both the title text and the initial field value using `escapeHtmlCharacters`
+    // to shield the application from Cross-Site Scripting (XSS) in case they contain malicious tag strings.
+    const escaped_modal_dialogue_title_text = escapeHtmlCharacters(modal_dialogue_title_text);
+    const escaped_initial_input_field_value_text = escapeHtmlCharacters(initial_input_field_value_text);
+
+    tag_input_modal_container_element.innerHTML = `
         <div style="background: var(--card-bg); padding: 2rem; border-radius: 12px; border: 1px solid var(--border); max-width: 400px; width: 90%;">
-            <h3 style="margin: 0 0 1rem 0; color: var(--text-primary);">${title}</h3>
-            <input type="text" id="modalInput" value="${initialValue || ''}" style="width: 100%; padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border); background: #1f2937; color: white; margin-bottom: 1.5rem;">
+            <h3 style="margin: 0 0 1rem 0; color: var(--text-primary);">${escaped_modal_dialogue_title_text}</h3>
+            <input type="text" id="modalInput" value="${escaped_initial_input_field_value_text}" style="width: 100%; padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border); background: #1f2937; color: white; margin-bottom: 1.5rem;">
             <div style="display: flex; gap: 1rem; justify-content: flex-end;">
                 <button id="cancelModalBtn" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer;">Cancel</button>
                 <button id="saveModalBtn" style="background: var(--accent); border: none; color: white; padding: 0.5rem 1.5rem; border-radius: 6px; cursor: pointer; font-weight: 500;">Save</button>
@@ -1649,63 +1677,86 @@ function showTagInputModal(title, initialValue, callback) {
         </div>
     `;
 
-    document.body.appendChild(modal);
+    // WHAT: Appending our new modal dialogue structure to the document body.
+    // WHY: The element must be attached to the active document DOM tree to render visually.
+    document.body.appendChild(tag_input_modal_container_element);
 
-    const input = modal.querySelector('#modalInput');
-    const saveBtn = modal.querySelector('#saveModalBtn');
-    const cancelBtn = modal.querySelector('#cancelModalBtn');
+    // WHAT: Querying and retrieving references to the inner interactive modal DOM elements.
+    // WHY: We need precise control over the text input and action buttons to wire up click and keystroke behaviors.
+    const text_input_field_element = tag_input_modal_container_element.querySelector('#modalInput');
+    const save_changes_button_element = tag_input_modal_container_element.querySelector('#saveModalBtn');
+    const cancel_changes_button_element = tag_input_modal_container_element.querySelector('#cancelModalBtn');
 
-    // Define keyHandler FIRST (only handles Escape at document level)
-    const keyHandler = (e) => {
-        if (e.key === 'Escape') {
-            cleanup();
+    // WHAT: Defining the keydown event listener to close the modal dialogue when Escape is pressed.
+    // WHY: Pressing the Escape key is a universal web accessibility pattern to close dismissible overlays easily.
+    const keyboard_event_handler_function = (keyboard_event_object) => {
+        if (keyboard_event_object.key === 'Escape') {
+            cleanup_modal_and_remove_event_listeners();
         }
     };
-    document.addEventListener('keydown', keyHandler);
+    document.addEventListener('keydown', keyboard_event_handler_function);
 
-    // Define cleanup AFTER keyHandler
-    const cleanup = () => {
-        document.removeEventListener('keydown', keyHandler);
-        modal.remove();
+    // WHAT: Removing keyboard event listeners and destroying the modal container element from the DOM.
+    // WHY: Cleanup prevents memory leaks and ensures that obsolete keyboard listeners do not persist in the global document context.
+    const cleanup_modal_and_remove_event_listeners = () => {
+        document.removeEventListener('keydown', keyboard_event_handler_function);
+        tag_input_modal_container_element.remove();
     };
 
-    const save = () => {
-        const val = input.value;
-        cleanup();
-        callback(val);
+    // WHAT: Extracting the input text, cleaning up modal DOM structures, and returning the value back through the callback trigger.
+    // WHY: We collect the final user input, close the overlay, and invoke the caller's success logic with the entered string.
+    const save_input_value_and_trigger_callback = () => {
+        const retrieved_input_value_string = text_input_field_element.value;
+        cleanup_modal_and_remove_event_listeners();
+        tag_submission_callback_function(retrieved_input_value_string);
     };
 
-    // Focus input after render
+    // WHAT: Setting a minor delay to focus and highlight the text input field automatically.
+    // WHY: Directing user focus to the primary input element immediately upon rendering enhances the overall user experience.
     setTimeout(() => {
-        input.focus();
-        input.select();
+        text_input_field_element.focus();
+        text_input_field_element.select();
     }, 10);
 
-    saveBtn.onclick = save;
-    cancelBtn.onclick = cleanup;
+    save_changes_button_element.onclick = save_input_value_and_trigger_callback;
+    cancel_changes_button_element.onclick = cleanup_modal_and_remove_event_listeners;
 
-    // Handle Enter on the input specifically (not document-wide)
-    input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            save();
+    // WHAT: Binding an Enter keypress listener specifically on the text input field to submit values directly.
+    // WHY: Pressing Enter inside single-line form input fields is a standard user expectation for submitting values quickly.
+    text_input_field_element.addEventListener('keydown', (keyboard_event_object) => {
+        if (keyboard_event_object.key === 'Enter') {
+            keyboard_event_object.preventDefault();
+            save_input_value_and_trigger_callback();
         }
     });
 
-    // Click outside to close
-    modal.onclick = (e) => {
-        if (e.target === modal) cleanup();
+    // WHAT: Binding a click handler on the backdrop itself to dismiss the modal dialogue.
+    // WHY: Clicking outside the dialog boundary represents an intuitive, secondary way to dismiss or cancel the modal overlay.
+    tag_input_modal_container_element.onclick = (mouse_click_event_object) => {
+        if (mouse_click_event_object.target === tag_input_modal_container_element) {
+            cleanup_modal_and_remove_event_listeners();
+        }
     };
 }
 
 // Custom Confirmation Modal
-function showConfirmModal(message, onConfirm) {
-    const modal = document.createElement('div');
-    modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;';
+// WHAT: Creates, styles, and presents a customized double-confirmation modal dialogue overlay.
+// WHY: We replace standard browser alert or confirm prompts with beautiful UI elements. By escaping
+// all dynamic strings (message and confirm text) using `escapeHtmlCharacters`, we prevent potential
+// XSS vulnerabilities if filenames or user metadata contain embedded script blocks.
+function showConfirmModal(dialogue_message_text, action_on_confirmation_callback) {
+    // WHAT: Creating the modal container backdrop overlay.
+    // WHY: Viewport cover creates a clean dark backdrop focusing attention on the choice.
+    const confirmation_modal_container_element = document.createElement('div');
+    confirmation_modal_container_element.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;';
 
-    modal.innerHTML = `
+    // WHAT: Safely escaping variable texts to block XSS and rendering the HTML skeleton.
+    // WHY: Escaping ensures that even if filenames contain custom script tags, they are rendered safely as textual content.
+    const escaped_dialogue_message_text = escapeHtmlCharacters(dialogue_message_text);
+
+    confirmation_modal_container_element.innerHTML = `
         <div style="background: var(--card-bg); padding: 2rem; border-radius: 12px; border: 1px solid var(--border); max-width: 400px; width: 90%; text-align: center;">
-            <p style="margin: 0 0 1.5rem 0; color: var(--text-primary); font-size: 1.1rem;">${message}</p>
+            <p style="margin: 0 0 1.5rem 0; color: var(--text-primary); font-size: 1.1rem;">${escaped_dialogue_message_text}</p>
             <div style="display: flex; gap: 1rem; justify-content: center;">
                 <button id="cancelConfirmBtn" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.5rem 1.5rem; border-radius: 6px; cursor: pointer;">Cancel</button>
                 <button id="okConfirmBtn" style="background: #ef4444; border: none; color: white; padding: 0.5rem 1.5rem; border-radius: 6px; cursor: pointer; font-weight: 500;">Delete</button>
@@ -1713,32 +1764,57 @@ function showConfirmModal(message, onConfirm) {
         </div>
     `;
 
-    document.body.appendChild(modal);
+    // WHAT: Rendering our dynamic container element to the document viewport structure.
+    // WHY: Elements must be added to the live document DOM structure to register visible layout nodes.
+    document.body.appendChild(confirmation_modal_container_element);
 
-    const okBtn = modal.querySelector('#okConfirmBtn');
-    const cancelBtn = modal.querySelector('#cancelConfirmBtn');
+    const ok_confirmation_action_button_element = confirmation_modal_container_element.querySelector('#okConfirmBtn');
+    const cancel_confirmation_action_button_element = confirmation_modal_container_element.querySelector('#cancelConfirmBtn');
 
-    setTimeout(() => okBtn.focus(), 10);
+    // WHAT: Forcing input focus to the active confirmation trigger button.
+    // WHY: Setting default keyboard focus on the main action item ensures quick keyboard-only accessibility.
+    setTimeout(() => {
+        ok_confirmation_action_button_element.focus();
+    }, 10);
 
-    const cleanup = () => {
-        document.removeEventListener('keydown', keyHandler);
-        modal.remove();
+    // WHAT: Dismantling the modal overlay and cleaning up registered document keyboard event listeners.
+    // WHY: Proper cleanups avoid resource bloats and unreferenced listener remnants in global page scopes.
+    const cleanup_modal_and_remove_event_listeners = () => {
+        document.removeEventListener('keydown', keyboard_event_handler_function);
+        confirmation_modal_container_element.remove();
     };
 
-    const keyHandler = (e) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            cleanup();
-            onConfirm();
-        } else if (e.key === 'Escape') {
-            cleanup();
+    // WHAT: Closing the modal first, then launching the supplied success function task.
+    // WHY: Executing callbacks after teardowns ensures clean DOM sequences and prevents double-triggers.
+    const execute_confirmed_action_callback = () => {
+        cleanup_modal_and_remove_event_listeners();
+        action_on_confirmation_callback();
+    };
+
+    ok_confirmation_action_button_element.onclick = execute_confirmed_action_callback;
+    cancel_confirmation_action_button_element.onclick = cleanup_modal_and_remove_event_listeners;
+
+    // WHAT: Permitting modal dismissal via click overlays on the backdrop element.
+    // WHY: Off-dialogue clicks represent an intuitive secondary path for dismissing choices.
+    confirmation_modal_container_element.onclick = (mouse_click_event_object) => {
+        if (mouse_click_event_object.target === confirmation_modal_container_element) {
+            cleanup_modal_and_remove_event_listeners();
         }
     };
 
-    document.addEventListener('keydown', keyHandler);
-    okBtn.onclick = () => { cleanup(); onConfirm(); };
-    cancelBtn.onclick = cleanup;
-    modal.onclick = (e) => { if (e.target === modal) cleanup(); };
+    // WHAT: Capturing global Enter and Escape keyboard keystrokes inside the modal dialogue.
+    // WHY: Enter triggers swift submission, whereas Escape aborts the overlay safely.
+    const keyboard_event_handler_function = (keyboard_event_object) => {
+        if (keyboard_event_object.key === 'Enter') {
+            keyboard_event_object.preventDefault();
+            execute_confirmed_action_callback();
+        } else if (keyboard_event_object.key === 'Escape') {
+            keyboard_event_object.preventDefault();
+            cleanup_modal_and_remove_event_listeners();
+        }
+    };
+
+    document.addEventListener('keydown', keyboard_event_handler_function);
 }
 
 async function regenerateThumbnail(id, cardElement) {
