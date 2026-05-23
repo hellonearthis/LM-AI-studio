@@ -191,20 +191,23 @@ function renderList(data) {
         // Hide alphabet nav for non-alphabetical sort
         alphabetNav.style.display = 'none';
 
-        // Standard list render
-        const html = data.map(item => `
+        // WHAT: Render tags/objects as a standard list when sorted by frequency count (popularity).
+        // WHY: When sorting by count, alphabetical group headers are irrelevant. We generate a simple flat list
+        // of cards, each containing the name, the image count badge, and a link pointing to the search page
+        // with both the term and its active type (tag or object) pre-populated for accurate client-side filtering.
+        const rendered_html_string_list = data.map(individual_tag_item => `
             <div class="tag-list-item">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-weight: 500; font-size: 1.1rem;">${item.name}</span>
-                    <span class="badge">${item.count} images</span>
+                    <span style="font-weight: 500; font-size: 1.1rem;">${individual_tag_item.name}</span>
+                    <span class="badge">${individual_tag_item.count} images</span>
                 </div>
                 <div style="margin-top: 0.5rem; display: flex; justify-content: flex-end;">
-                    <a href="search.html?tag=${encodeURIComponent(item.name)}&type=${currentTab === 'objects' ? 'object' : 'tag'}" class="btn-sm">View Images →</a>
+                    <a href="search.html?tag=${encodeURIComponent(individual_tag_item.name)}&type=${currentTab === 'objects' ? 'object' : 'tag'}" class="btn-sm">View Images →</a>
                 </div>
             </div>
         `).join('');
 
-        contentArea.innerHTML = `<div class="tag-list-container">${html}</div>`;
+        contentArea.innerHTML = `<div class="tag-list-container">${rendered_html_string_list}</div>`;
     }
 }
 

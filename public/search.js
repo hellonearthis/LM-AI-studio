@@ -342,10 +342,10 @@ function processAndDisplayMatches(rawWorkerResults) {
                 <button class="action-btn" style="margin-top: 1rem;" onclick="location.reload()">Clear All Filters</button>
             </div>`;
     } else {
-        // 5. Start the batch-rendering process
-        // Render the first batch synchronously before setting up the observer.
-        // This ensures the sentinel is pushed down out of the viewport, preventing
-        // an immediate double-trigger of the IntersectionObserver.
+        // WHAT: Render the first batch of search results synchronously, and then set up the infinite scroll sentinel observer.
+        // WHY: Setting up the observer while the results container is completely empty immediately schedules a trigger callback
+        // because the sentinel is visible in the viewport. By rendering the first batch of cards first, we push the sentinel
+        // element out of the viewport, ensuring that the observer will only trigger when the user actually scrolls down.
         renderNextBatchOfResults();
         setupInfiniteScrollObserver();
     }
@@ -603,10 +603,14 @@ function refreshData() {
 function setupInfiniteScrollObserver() {
     if (observer) observer.disconnect();
 
-    observer = new IntersectionObserver((entries) => {
-        // Only trigger rendering if intersecting and not already rendering a batch.
-        // This prevents rapid double-rendering cascades due to layout shifts.
-        if (entries[0].isIntersecting && !isRendering) {
+    // WHAT: Creating a new IntersectionObserver to monitor the scroll sentinel.
+    // WHY: We want to trigger loading the next batch of results when the user scrolls near the bottom of the page
+    // (within 400px of the sentinel), but we guard it using 'isRendering' to prevent overlapping asynchronous renders.
+    observer = new IntersectionObserver((intersection_observer_entries) => {
+        // WHAT: Checking if the sentinel is visible and ensuring we are not already busy rendering a batch.
+        // WHY: This acts as a layout guard. Rapid scrolling or dynamic masonry rearranging can cause the sentinel
+        // to intersect multiple times in a short interval. The 'isRendering' check ensures we only execute one render pass at a time.
+        if (intersection_observer_entries[0].isIntersecting && !isRendering) {
             renderNextBatchOfResults();
         }
     }, { rootMargin: '400px' });
