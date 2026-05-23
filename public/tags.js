@@ -199,7 +199,7 @@ function renderList(data) {
                     <span class="badge">${item.count} images</span>
                 </div>
                 <div style="margin-top: 0.5rem; display: flex; justify-content: flex-end;">
-                    <a href="search.html?tag=${encodeURIComponent(item.name)}" class="btn-sm">View Images →</a>
+                    <a href="search.html?tag=${encodeURIComponent(item.name)}&type=${currentTab === 'objects' ? 'object' : 'tag'}" class="btn-sm">View Images →</a>
                 </div>
             </div>
         `).join('');
