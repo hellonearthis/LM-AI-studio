@@ -1478,14 +1478,25 @@ function showTagInputModal(modal_dialogue_title_text, initial_input_field_value_
 }
 
 // Custom Textarea Modal for Summaries
-function showSummaryInputModal(title, initialValue, callback) {
-    const modal = document.createElement('div');
-    modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 9999;';
+// WHAT: Creates and displays a larger modal dialog containing a textarea for editing image summary descriptions.
+// WHY: The AI-generated summaries can be long, requiring a multiline textarea. To ensure security,
+// all dynamic parameter strings like the title or initial summary value are HTML-escaped using our central utility
+// before being injected into the HTML template, preventing XSS injection if a summary contains HTML elements.
+function showSummaryInputModal(modal_dialogue_title_text, initial_text_area_value_text, summary_submission_callback_function) {
+    // WHAT: Creating the modal container element and styling it as a dark full-screen backdrop.
+    // WHY: A full-screen backdrop helps isolate the user's focus on the summary editing task.
+    const summary_input_modal_container_element = document.createElement('div');
+    summary_input_modal_container_element.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 9999;';
 
-    modal.innerHTML = `
+    // WHAT: Safely HTML-escaping dynamic parameters to prevent XSS.
+    // WHY: Escaping shields the application from script injection in case an AI-generated description contains markup.
+    const escaped_modal_dialogue_title_text = escapeHtmlCharacters(modal_dialogue_title_text);
+    const escaped_initial_text_area_value_text = escapeHtmlCharacters(initial_text_area_value_text);
+
+    summary_input_modal_container_element.innerHTML = `
         <div style="background: var(--card-bg); padding: 2rem; border-radius: 12px; border: 1px solid var(--border); max-width: 600px; width: 90%;">
-            <h3 style="margin: 0 0 1rem 0; color: var(--text-primary);">${title}</h3>
-            <textarea id="summaryInput" style="width: 100%; height: 200px; padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary); margin-bottom: 1.5rem; font-size: 0.9rem; line-height: 1.4; font-family: inherit; resize: vertical;">${initialValue || ''}</textarea>
+            <h3 style="margin: 0 0 1rem 0; color: var(--text-primary);">${escaped_modal_dialogue_title_text}</h3>
+            <textarea id="summaryInput" style="width: 100%; height: 200px; padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary); margin-bottom: 1.5rem; font-size: 0.9rem; line-height: 1.4; font-family: inherit; resize: vertical;">${escaped_initial_text_area_value_text}</textarea>
             <div style="display: flex; gap: 1rem; justify-content: flex-end;">
                 <button id="cancelSummaryBtn" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer;">Cancel</button>
                 <button id="saveSummaryBtn" style="background: var(--accent); border: none; color: white; padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; font-weight: 500;">Save Changes</button>
@@ -1493,38 +1504,56 @@ function showSummaryInputModal(title, initialValue, callback) {
         </div>
     `;
 
-    document.body.appendChild(modal);
+    // WHAT: Appending the new modal container structure to the document body.
+    // WHY: The overlay must be added to the live DOM tree to become visible.
+    document.body.appendChild(summary_input_modal_container_element);
 
-    const textarea = modal.querySelector('#summaryInput');
-    const saveBtn = modal.querySelector('#saveSummaryBtn');
-    const cancelBtn = modal.querySelector('#cancelSummaryBtn');
+    // WHAT: Querying and retrieving references to inner interactive input and action elements.
+    // WHY: We need access to these elements to bind listeners and extract values.
+    const summary_text_area_input_element = summary_input_modal_container_element.querySelector('#summaryInput');
+    const save_summary_changes_button_element = summary_input_modal_container_element.querySelector('#saveSummaryBtn');
+    const cancel_summary_changes_button_element = summary_input_modal_container_element.querySelector('#cancelSummaryBtn');
 
-    const cleanup = () => {
-        document.removeEventListener('keydown', keyHandler);
-        modal.remove();
+    // WHAT: Declaring keyboard handler function to close modal on Escape keypress.
+    // WHY: Allows accessible keyboard navigation to dismiss overlay easily.
+    const keyboard_event_handler_function = (keyboard_event_object) => {
+        if (keyboard_event_object.key === 'Escape') {
+            cleanup_modal_and_remove_event_listeners();
+        }
+    };
+    document.addEventListener('keydown', keyboard_event_handler_function);
+
+    // WHAT: Deleting backdrop overlay and clearing document-level keyboard listeners.
+    // WHY: Teardown prevents memory leaks and active event handler conflicts.
+    const cleanup_modal_and_remove_event_listeners = () => {
+        document.removeEventListener('keydown', keyboard_event_handler_function);
+        summary_input_modal_container_element.remove();
     };
 
-    const keyHandler = (e) => {
-        if (e.key === 'Escape') cleanup();
-    };
-    document.addEventListener('keydown', keyHandler);
-
-    const save = () => {
-        const val = textarea.value;
-        cleanup();
-        callback(val);
+    // WHAT: Fetching input summary text, cleaning up elements, and firing success callback.
+    // WHY: Returns the updated multiline summary string back to the database update action.
+    const save_summary_value_and_trigger_callback = () => {
+        const retrieved_summary_value_string = summary_text_area_input_element.value;
+        cleanup_modal_and_remove_event_listeners();
+        summary_submission_callback_function(retrieved_summary_value_string);
     };
 
+    // WHAT: Setting a microsecond timeout to focus and place the cursor at the end of the text.
+    // WHY: Puts the user in the edit flow immediately and positions the cursor at the end of existing text.
     setTimeout(() => {
-        textarea.focus();
-        textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+        summary_text_area_input_element.focus();
+        summary_text_area_input_element.setSelectionRange(summary_text_area_input_element.value.length, summary_text_area_input_element.value.length);
     }, 10);
 
-    saveBtn.onclick = save;
-    cancelBtn.onclick = cleanup;
+    save_summary_changes_button_element.onclick = save_summary_value_and_trigger_callback;
+    cancel_summary_changes_button_element.onclick = cleanup_modal_and_remove_event_listeners;
 
-    modal.onclick = (e) => {
-        if (e.target === modal) cleanup();
+    // WHAT: Permitting backdrop clicks to dismiss summary modal dialogue.
+    // WHY: Replicates standard web modal interface expectations.
+    summary_input_modal_container_element.onclick = (mouse_click_event_object) => {
+        if (mouse_click_event_object.target === summary_input_modal_container_element) {
+            cleanup_modal_and_remove_event_listeners();
+        }
     };
 }
 
