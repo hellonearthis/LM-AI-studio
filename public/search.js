@@ -125,6 +125,15 @@ let allImages = []; // We keep a local copy for filtering date/scene types quick
 let searchWorker = null;
 let isInitialized = false;
 
+// WHAT: Tracking image identifiers currently mounted within the search results DOM grid.
+// WHY: Maintaining a Set of active image IDs provides O(1) deduplication guards, preventing duplicate
+// card elements from ever being injected even if batch pagination or worker messages race.
+const currently_rendered_image_identifier_set = new Set();
+
+// WHAT: Guard flag tracking whether the search worker system is actively in the process of spinning up.
+// WHY: Prevents multiple concurrent initialization attempts from spawning orphan Web Worker threads.
+let is_search_system_currently_initializing = false;
+
 // State for pagination
 let filteredImages = [];
 let currentIndex = 0;
@@ -133,6 +142,7 @@ let selectedIds = new Set();
 const BATCH_SIZE = 50;
 let observer = null;
 const sentinel = document.getElementById('scroll-sentinel');
+
 
 // Toggle Label Update
 const fuzzinessSlider = document.getElementById('fuzzinessSlider');
@@ -246,7 +256,10 @@ if (negativeQuery) {
  * interface responsive during heavy computations.
  */
 function initializeSearchSystem() {
-    if (isInitialized) return;
+    // WHAT: Checking if the search system is already operational or currently in the process of starting.
+    // WHY: Early return prevents creating duplicate background threads or corrupting state.
+    if (isInitialized || is_search_system_currently_initializing) return;
+    is_search_system_currently_initializing = true;
 
     // Give visual feedback that the heavy lifing is starting
     searchBtn.disabled = true;
@@ -261,6 +274,13 @@ function initializeSearchSystem() {
     // Step 1: Handle any filters passed in the URL (e.g. from the Tags page)
     processUrlParams();
 
+    // WHAT: Terminating any preexisting worker before spawning a clean thread.
+    // WHY: Guarantees that only a single worker thread communicates with the main interface.
+    if (searchWorker) {
+        searchWorker.terminate();
+        searchWorker = null;
+    }
+
     // Step 2: Spawn the background thread
     searchWorker = new Worker('search-worker.js');
 
@@ -273,6 +293,7 @@ function initializeSearchSystem() {
                 // The worker has finished parsing the multi-megabyte JSON indexes
                 console.log(`[MAIN] Search Engine Ready. Items: ${payload.count}. Semantic: ${payload.hasEmbeddings}`);
                 isInitialized = true;
+                is_search_system_currently_initializing = false;
                 searchBtn.disabled = false;
                 searchBtn.textContent = 'Search Images';
 
@@ -339,10 +360,21 @@ function processAndDisplayMatches(rawWorkerResults) {
     // because they are lightweight and change frequently based on user clicks.
     const finalFilteredResults = applyLocalClientFilters(rawWorkerResults);
 
+    // WHAT: Disconnecting any active scroll sentinel observer before replacing the results.
+    // WHY: Prevents in-flight intersection callbacks from appending old batches while the DOM is cleared.
+    if (observer) {
+        observer.disconnect();
+        observer = null;
+    }
+
     // 3. Prepare the Infinite Scroll state
     window.currentSearchResults = finalFilteredResults;
     filteredImages = finalFilteredResults;
     currentIndex = 0; // Reset scroll position to the top
+
+    // WHAT: Resetting the tracking set of rendered image identifiers.
+    // WHY: Since searchResults.innerHTML is being cleared, the DOM starts empty, so tracking must reset.
+    currently_rendered_image_identifier_set.clear();
     searchResults.innerHTML = ''; // Wipe the previous grid
 
     // 4. Update the UI Count
@@ -358,10 +390,8 @@ function processAndDisplayMatches(rawWorkerResults) {
                 <button class="action-btn" style="margin-top: 1rem;" onclick="location.reload()">Clear All Filters</button>
             </div>`;
     } else {
-        // WHAT: Render the first batch of search results synchronously, and then set up the infinite scroll sentinel observer.
-        // WHY: Setting up the observer while the results container is completely empty immediately schedules a trigger callback
-        // because the sentinel is visible in the viewport. By rendering the first batch of cards first, we push the sentinel
-        // element out of the viewport, ensuring that the observer will only trigger when the user actually scrolls down.
+        // WHAT: Render the first batch of results directly into the row grid.
+        // WHY: In a row-by-row CSS Grid layout, cards naturally organize into sequential rows.
         renderNextBatchOfResults();
         setupInfiniteScrollObserver();
     }
@@ -476,12 +506,24 @@ function applyLocalClientFilters(baseResultSet) {
         const updateB = secondImage.updated_at ? new Date(secondImage.updated_at).getTime() : dateB;
 
         if (activeSortMode === 'oldest') {
-            return dateA - dateB;
+            const difference_in_creation_timestamps = dateA - dateB;
+            if (difference_in_creation_timestamps !== 0) {
+                return difference_in_creation_timestamps;
+            }
+            return (Number(firstImage.id) || 0) - (Number(secondImage.id) || 0);
         } else if (activeSortMode === 'newest') {
-            return updateB - updateA; // Newest edits/additions first
+            const difference_in_update_timestamps = updateB - updateA;
+            if (difference_in_update_timestamps !== 0) {
+                return difference_in_update_timestamps;
+            }
+            return (Number(secondImage.id) || 0) - (Number(firstImage.id) || 0);
         } else {
             // Default "Relevance" fallback for non-query views is just Newest
-            return updateB - updateA;
+            const difference_in_fallback_timestamps = updateB - updateA;
+            if (difference_in_fallback_timestamps !== 0) {
+                return difference_in_fallback_timestamps;
+            }
+            return (Number(secondImage.id) || 0) - (Number(firstImage.id) || 0);
         }
     });
 
@@ -496,6 +538,14 @@ function applyLocalClientFilters(baseResultSet) {
  */
 async function executeSearchQuery() {
     if (!isInitialized || !searchWorker) return;
+
+    // WHAT: Disconnecting the infinite scroll observer immediately upon issuing a search query.
+    // WHY: If the user scrolls while an async embedding request is pending, this stops old search results
+    // from continuing to paginate into the grid before the new query arrives.
+    if (observer) {
+        observer.disconnect();
+        observer = null;
+    }
 
     // Show a loading spinner so the user knows we are working
     searchBtn.disabled = true;
@@ -617,21 +667,36 @@ function refreshData() {
 }
 
 function setupInfiniteScrollObserver() {
-    if (observer) observer.disconnect();
+    // WHAT: Disconnecting any previously registered IntersectionObserver instance.
+    // WHY: Prevents stale observer callbacks from firing on replaced or obsolete sentinel positions.
+    if (observer) {
+        observer.disconnect();
+        observer = null;
+    }
 
     // WHAT: Creating a new IntersectionObserver to monitor the scroll sentinel.
     // WHY: We want to trigger loading the next batch of results when the user scrolls near the bottom of the page
     // (within 400px of the sentinel), but we guard it using 'isRendering' to prevent overlapping asynchronous renders.
     observer = new IntersectionObserver((intersection_observer_entries) => {
         // WHAT: Checking if the sentinel is visible and ensuring we are not already busy rendering a batch.
-        // WHY: This acts as a layout guard. Rapid scrolling or dynamic masonry rearranging can cause the sentinel
-        // to intersect multiple times in a short interval. The 'isRendering' check ensures we only execute one render pass at a time.
+        // WHY: Rapid scrolling can cause the sentinel to intersect multiple times.
+        // The 'isRendering' guard guarantees that exactly one batch render occurs at a time.
         if (intersection_observer_entries[0].isIntersecting && !isRendering) {
             renderNextBatchOfResults();
         }
     }, { rootMargin: '400px' });
 
-    if (sentinel) observer.observe(sentinel);
+    // WHAT: Deferring sentinel observation across two animation frames.
+    // WHY: In the CSS Grid row layout, cards render and calculate their dimensions across layout passes.
+    // Waiting two animation frames ensures the container height has expanded and pushed the sentinel below the viewport,
+    // preventing the observer from immediately triggering a false-positive second batch on page load.
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            if (sentinel && observer && currentIndex < filteredImages.length) {
+                observer.observe(sentinel);
+            }
+        });
+    });
 }
 
 /**
@@ -639,60 +704,83 @@ function setupInfiniteScrollObserver() {
  * This utilizes infinite scroll via a scroll-sentinel.
  */
 function renderNextBatchOfResults() {
-    // 1. Guards: Prevent double-rendering or rendering past the end of results
+    // WHAT: Guarding against re-entrant rendering or advancing past the total number of filtered images.
+    // WHY: Prevents duplicate simultaneous render operations and cleans up observer when results are exhausted.
     if (isRendering || currentIndex >= filteredImages.length) {
-        if (currentIndex >= filteredImages.length && observer) observer.disconnect();
+        if (currentIndex >= filteredImages.length && observer) {
+            observer.disconnect();
+            observer = null;
+        }
         return;
     }
 
     isRendering = true;
-    const startIndex = currentIndex;
-    const currentBatch = filteredImages.slice(startIndex, startIndex + BATCH_SIZE);
-    currentIndex += currentBatch.length; 
+
+    const batch_start_index = currentIndex;
+    const candidate_batch_images = filteredImages.slice(batch_start_index, batch_start_index + BATCH_SIZE);
+    currentIndex += candidate_batch_images.length; 
+
+    // WHAT: Filtering candidate images against the active rendered identifier set to prevent duplicate cards.
+    // WHY: If pagination events trigger in rapid succession or an index drifts, deduplicating ensures that
+    // an image already present in the DOM grid cannot be rendered a second time.
+    const deduplicated_batch_images = candidate_batch_images.filter(candidate_image_record => {
+        const image_unique_identifier_string = String(candidate_image_record.id);
+        if (currently_rendered_image_identifier_set.has(image_unique_identifier_string)) {
+            return false;
+        }
+        currently_rendered_image_identifier_set.add(image_unique_identifier_string);
+        return true;
+    });
+
+    if (deduplicated_batch_images.length === 0) {
+        isRendering = false;
+        // If there are still more images in filteredImages, trigger next batch
+        if (currentIndex < filteredImages.length) {
+            renderNextBatchOfResults();
+        }
+        return;
+    }
 
     // 2. PRE-MEASUREMENT (The 'Why'):
     // Before rendering, we calculate the exact height of the AI summaries. 
-    // This allows the masonry grid to calculate the positions of all cards 
-    // before the images load, preventing layout shifts (CLS).
+    // Pretext sets min-height on the summary text elements to prevent Cumulative Layout Shift (CLS).
     let summaryHeightsMap = new Map();
     if (window.PretextLayout && window.PretextLayout.ready) {
-        const gridWidth = searchResults.offsetWidth > 0 ? searchResults.offsetWidth : 1000;
-        const colCount = Math.max(1, Math.floor((gridWidth + 16) / (320 + 16)));
-        const actualCardWidth = (gridWidth - (colCount - 1) * 16) / colCount;
-        const textWidth = actualCardWidth - 24; // Card padding (0.75rem * 2)
+        const container_total_pixel_width = searchResults.offsetWidth > 0 ? searchResults.offsetWidth : 1000;
+        const approximate_column_count = Math.max(1, Math.floor((container_total_pixel_width + 16) / (300 + 16)));
+        const estimated_card_pixel_width = (container_total_pixel_width - (approximate_column_count - 1) * 16) / approximate_column_count;
+        const text_usable_pixel_width = Math.max(100, estimated_card_pixel_width - 24); // Card padding (0.75rem * 2)
 
-        const textItemsToMeasure = currentBatch.map(img => {
-            const analysis = img.analysis || {};
-            return { id: img.id, text: analysis.summary || '' };
+        const text_measurement_payload_array = deduplicated_batch_images.map(image_record => {
+            const analysis = image_record.analysis || {};
+            return { id: image_record.id, text: analysis.summary || '' };
         });
 
-        summaryHeightsMap = window.PretextLayout.measureBatch(textItemsToMeasure, textWidth, 'search');
+        summaryHeightsMap = window.PretextLayout.measureBatch(text_measurement_payload_array, text_usable_pixel_width, 'search');
     }
 
-    // 3. HTML GENERATION:
-    // We convert the batch of images into HTML strings.
-    let finalBatchHtml = '';
-    const isFirstPage = (startIndex === 0);
+    // 3. HTML GENERATION & SEQUENTIAL ROW INSERTION:
+    // WHAT: Building HTML for the current batch of cards and appending directly to the grid.
+    // WHY: In CSS Grid row layout, cards flow sequentially from left to right, row by row.
+    // Each newly appended batch adds rows at the bottom of the grid, ensuring previous rows never move.
+    let final_batch_concatenated_html_string = '';
+    const isFirstPage = (batch_start_index === 0);
     
-    currentBatch.forEach((img, index) => {
+    deduplicated_batch_images.forEach((image_record, batch_position_index) => {
         try {
-            const measuredHeight = summaryHeightsMap.get(String(img.id));
+            const measured_summary_height = summaryHeightsMap.get(String(image_record.id));
+            const isPriorityImage = (isFirstPage && batch_position_index === 0);
+            const isEagerLoad = (isFirstPage && batch_position_index < 4);
             
-            // INTELLIGENT LOADING (The 'Why'):
-            // The first few search results are what the user sees first. 
-            // Setting 'eager' load and 'high' priority ensures these images 
-            // are requested immediately by the browser.
-            const isPriorityImage = (isFirstPage && index === 0);
-            const isEagerLoad = (isFirstPage && index < 4);
-            
-            finalBatchHtml += createResultHtml(img, measuredHeight, isPriorityImage, isEagerLoad);
-        } catch (err) {
-            console.error('Error rendering search result card:', img, err);
+            final_batch_concatenated_html_string += createResultHtml(image_record, measured_summary_height, isPriorityImage, isEagerLoad);
+        } catch (card_rendering_error) {
+            console.error('Error rendering search result card:', image_record, card_rendering_error);
         }
     });
 
-    // 4. Final UI Update
-    searchResults.insertAdjacentHTML('beforeend', finalBatchHtml);
+    // 4. Final UI Update: Append new rows directly to the grid
+    searchResults.insertAdjacentHTML('beforeend', final_batch_concatenated_html_string);
+
     isRendering = false;
 }
 
@@ -811,11 +899,7 @@ function createResultHtml(img, summaryHeight, isPriority = false, isEager = fals
     `;
 }
 
-// Override Load Stats to also init search
-// Defer slightly to allow pretext module script to register on window
-requestAnimationFrame(() => initializeSearchSystem());
-
-// Event Listeners
+// Event Listeners for search trigger
 if (searchBtn) {
     searchBtn.addEventListener('click', () => {
         executeSearchQuery();
@@ -823,8 +907,8 @@ if (searchBtn) {
 }
 // Allow Enter key in search box
 if (searchQuery) {
-    searchQuery.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') executeSearchQuery();
+    searchQuery.addEventListener('keydown', (keyboard_event_object) => {
+        if (keyboard_event_object.key === 'Enter') executeSearchQuery();
     });
 }
 
@@ -2444,13 +2528,7 @@ if (clearSimilarBtn) {
 let lastWorkerResults = [];
 
 
-// Event Listeners
-searchBtn.addEventListener('click', executeSearchQuery);
-
-// Allow Enter key to search
-searchQuery.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') executeSearchQuery();
-});
+// Note: searchBtn and searchQuery event listeners are attached in the main event listener setup above.
 
 // Initialize
 loadStats();

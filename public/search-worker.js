@@ -198,89 +198,122 @@ function runKeywordSearch(queryString) {
     });
 }
 
+// WHAT: Threshold constants to eliminate non-relevant images from semantic vector queries.
+// WHY: Without a threshold, every single image in the database is returned regardless of relevance,
+// filling infinite scroll pagination with unrelated images that the user already saw in the catalog.
+const minimum_cosine_similarity_threshold_score = 0.35;
+const maximum_semantic_candidate_results_limit = 250;
+
 /**
- * Semantic Vector Search (Uses Cosine Similarity)
+ * Semantic Vector Search (Uses Cosine Similarity with Threshold Filtering)
  */
-function runSemanticSearch(queryVector) {
+function runSemanticSearch(query_embedding_vector) {
+    // WHAT: Guarding against uninitialized vector embedding index.
+    // WHY: Semantic search cannot proceed without the pre-computed mathematical representations of images.
     if (!semanticEmbeddingsMap) {
         console.error('[WORKER] Semantic search requested but no embeddings loaded.');
         self.postMessage({ type: 'RESULTS', payload: { results: [], isFullList: false } });
         return;
     }
 
-    if (!queryVector || queryVector.length === 0) return;
+    if (!query_embedding_vector || query_embedding_vector.length === 0) return;
 
-    const matchedResultsWithScores = [];
+    const matched_results_with_scores_collection = [];
 
-    // Pre-calculate the mathematical "length" (magnitude) of our search query vector.
-    // We do this once to save CPU time during the loop.
-    const queryMagnitude = Math.sqrt(Math.sumPrecise(queryVector.map(value => value * value)));
+    // WHAT: Pre-calculating the Euclidean vector magnitude of our search query embedding.
+    // WHY: Pre-computing this scalar value once avoids redundant O(N) operations inside the database comparison loop.
+    const query_embedding_magnitude_value = Math.sqrt(Math.sumPrecise(query_embedding_vector.map(dimension_value => dimension_value * dimension_value)));
 
-    // Compare our query against every single image in the database
-    for (const image of globalImageDatabase) {
-        const imageVector = semanticEmbeddingsMap[image.id];
-        if (imageVector) {
-            // "Cosine Similarity" returns a number between 0 and 1.
-            // 1.0 = Perfect match / same concept.
-            // 0.0 = Completely unrelated.
-            const similarity = calculateCosineSimilarity(queryVector, imageVector, queryMagnitude);
-            matchedResultsWithScores.push({ item: image, score: similarity });
+    // WHAT: Iterating through every image record in the database and measuring angular similarity.
+    // WHY: Cosine similarity compares the concept direction between the search prompt and image contents.
+    for (const current_image_record of globalImageDatabase) {
+        const current_image_embedding_vector = semanticEmbeddingsMap[current_image_record.id];
+        if (current_image_embedding_vector) {
+            const calculated_similarity_score = calculateCosineSimilarity(query_embedding_vector, current_image_embedding_vector, query_embedding_magnitude_value);
+            // WHAT: Discarding images below the minimum semantic match threshold.
+            // WHY: Prevents conceptually unrelated images from polluting the search results and pagination stream.
+            if (calculated_similarity_score >= minimum_cosine_similarity_threshold_score) {
+                matched_results_with_scores_collection.push({ item: current_image_record, score: calculated_similarity_score });
+            }
         }
     }
 
-    // Sort the images so the most conceptually similar ones appear first
-    matchedResultsWithScores.sort((a, b) => b.score - a.score);
+    // WHAT: Sorting semantic matches in descending order by similarity score and capping candidates.
+    // WHY: The most relevant images appear first, and capping bounds memory and downstream fusion costs.
+    matched_results_with_scores_collection.sort((first_candidate, second_candidate) => second_candidate.score - first_candidate.score);
 
-    const sortedImages = matchedResultsWithScores.map(match => match.item);
-    self.postMessage({ type: 'RESULTS', payload: { results: sortedImages, isFullList: false } });
+    const filtered_and_sorted_semantic_images = matched_results_with_scores_collection
+        .slice(0, maximum_semantic_candidate_results_limit)
+        .map(matched_candidate_entry => matched_candidate_entry.item);
+
+    self.postMessage({ type: 'RESULTS', payload: { results: filtered_and_sorted_semantic_images, isFullList: false } });
 }
 
 /**
- * Hybrid Search (The "Exa Canon" Pattern)
+ * Hybrid Search (The "Exa Canon" Pattern with Strict Thresholding)
  * Runs keyword and semantic search in parallel and fuses their rankings.
  */
-function runHybridSearch(queryString, queryVector) {
+function runHybridSearch(raw_query_string, query_embedding_vector) {
     if (!isWorkerReady) return;
 
     console.log('[WORKER] Executing Hybrid Retrieval (Keyword + Semantic Paths)');
 
-    // Path A: The Keyword Engine
-    let keywordResults = [];
-    if (fuseInstance && queryString && queryString.trim() !== '') {
-        keywordResults = fuseInstance.search(queryString).map(res => res.item);
+    // WHAT: Path A - Evaluating keyword relevance using Fuse.js fuzzy matching.
+    // WHY: Captures literal token matches (filenames, specific named entities, exact tags).
+    let keyword_matched_image_results = [];
+    if (fuseInstance && raw_query_string && raw_query_string.trim() !== '') {
+        keyword_matched_image_results = fuseInstance.search(raw_query_string).map(search_result_entry => search_result_entry.item);
     }
 
-    // Path B: The Semantic Engine
-    let semanticResults = [];
-    if (semanticEmbeddingsMap && queryVector && queryVector.length > 0) {
-        const matches = [];
-        const queryMag = Math.sqrt(Math.sumPrecise(queryVector.map(v => v * v)));
+    // WHAT: Path B - Evaluating semantic conceptual similarity using embedding vectors.
+    // WHY: Captures abstract concepts and semantic synonyms that keyword fuzzy matching misses.
+    let semantic_matched_image_results = [];
+    if (semanticEmbeddingsMap && query_embedding_vector && query_embedding_vector.length > 0) {
+        const thresholded_semantic_matches = [];
+        const query_embedding_magnitude_value = Math.sqrt(Math.sumPrecise(query_embedding_vector.map(dimension_value => dimension_value * dimension_value)));
 
-        for (const img of globalImageDatabase) {
-            const imgVec = semanticEmbeddingsMap[img.id];
-            if (imgVec) {
-                matches.push({ 
-                    item: img, 
-                    score: calculateCosineSimilarity(queryVector, imgVec, queryMag) 
-                });
+        for (const current_image_record of globalImageDatabase) {
+            const current_image_embedding_vector = semanticEmbeddingsMap[current_image_record.id];
+            if (current_image_embedding_vector) {
+                const calculated_similarity_score = calculateCosineSimilarity(query_embedding_vector, current_image_embedding_vector, query_embedding_magnitude_value);
+                if (calculated_similarity_score >= minimum_cosine_similarity_threshold_score) {
+                    thresholded_semantic_matches.push({ 
+                        item: current_image_record, 
+                        score: calculated_similarity_score 
+                    });
+                }
             }
         }
-        matches.sort((a, b) => b.score - a.score);
-        semanticResults = matches.map(m => m.item);
+        thresholded_semantic_matches.sort((first_candidate, second_candidate) => second_candidate.score - first_candidate.score);
+        semantic_matched_image_results = thresholded_semantic_matches
+            .slice(0, maximum_semantic_candidate_results_limit)
+            .map(matched_candidate_entry => matched_candidate_entry.item);
     }
 
-    // FUSION: Use RRF to decide which results from both paths should be on top.
-    let fusedResults;
-    if (keywordResults.length > 0 && semanticResults.length > 0) {
-        fusedResults = fuseRankedListsUsingRRF(keywordResults, semanticResults);
-        console.log(`[WORKER] RRF Hybrid Fusion: ${keywordResults.length} keyword, ${semanticResults.length} semantic merged.`);
+    // WHAT: Fusing keyword and semantic candidate lists using Reciprocal Rank Fusion (RRF).
+    // WHY: RRF normalizes distinct ranking scoring spaces without requiring arbitrary weight calibration.
+    let fused_hybrid_search_results;
+    if (keyword_matched_image_results.length > 0 && semantic_matched_image_results.length > 0) {
+        fused_hybrid_search_results = fuseRankedListsUsingRRF(keyword_matched_image_results, semantic_matched_image_results);
+        console.log(`[WORKER] RRF Hybrid Fusion: ${keyword_matched_image_results.length} keyword, ${semantic_matched_image_results.length} semantic merged.`);
+    } else if (keyword_matched_image_results.length > 0) {
+        fused_hybrid_search_results = keyword_matched_image_results;
+    } else if (semantic_matched_image_results.length > 0) {
+        fused_hybrid_search_results = semantic_matched_image_results;
     } else {
-        // Fallback: If one path is empty, just use the other.
-        fusedResults = keywordResults.length > 0 ? keywordResults : semanticResults;
-        if (fusedResults.length === 0) fusedResults = globalImageDatabase;
+        // WHAT: Returning an empty result set if neither search path found any matches for the query.
+        // WHY: If a user searches for an unknown term, we must show 0 results rather than dumping
+        // all 11,369 images from the database, which caused previously seen images to flood the pagination.
+        const is_query_string_empty = !raw_query_string || raw_query_string.trim() === '';
+        const is_query_vector_empty = !query_embedding_vector || query_embedding_vector.length === 0;
+        if (is_query_string_empty && is_query_vector_empty) {
+            fused_hybrid_search_results = globalImageDatabase;
+        } else {
+            fused_hybrid_search_results = [];
+        }
     }
 
-    self.postMessage({ type: 'RESULTS', payload: { results: fusedResults, isFullList: false } });
+    self.postMessage({ type: 'RESULTS', payload: { results: fused_hybrid_search_results, isFullList: false } });
 }
 
 // ============================================================================

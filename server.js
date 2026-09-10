@@ -176,8 +176,9 @@ console.log('[DB] Database initialized');
 function generateSearchIndex() {
     console.log('[INDEX] Generating search index and data...');
     try {
-        // Fetch all images for indexing (Must match /images sort order)
-        const sql = `SELECT id, filename, path, analysis, width, height, size, created_at, updated_at FROM images ORDER BY COALESCE(updated_at, created_at) DESC`;
+        // WHAT: Querying all image records sorted deterministically by recency and primary key ID.
+        // WHY: Adding ', id DESC' guarantees stable ordering even when multiple images share identical timestamps.
+        const sql = `SELECT id, filename, path, analysis, width, height, size, created_at, updated_at FROM images ORDER BY COALESCE(updated_at, created_at) DESC, id DESC`;
         const images = db.prepare(sql).all();
 
         // Pre-process data for indexing (parse JSON strings)
@@ -953,14 +954,18 @@ app.get('/images', (req, res) => {
         const limit = parseInt(req.query.limit);
         const sort = req.query.sort || 'recent_update';
 
-        let orderBy = 'ORDER BY COALESCE(updated_at, created_at) DESC';
+        // WHAT: Constructing deterministic SQL sorting clauses for image retrieval.
+        // WHY: Timestamps in SQLite can be identical across multiple batch-imported images.
+        // Appending the primary key 'id' guarantees a consistent, deterministic sort order
+        // across paginated LIMIT/OFFSET queries, preventing rows from shifting across pages.
+        let orderBy = 'ORDER BY COALESCE(updated_at, created_at) DESC, id DESC';
         switch (sort) {
-            case 'newest': orderBy = 'ORDER BY created_at DESC'; break;
-            case 'oldest': orderBy = 'ORDER BY created_at ASC'; break;
-            case 'name_asc': orderBy = 'ORDER BY filename ASC'; break;
-            case 'name_desc': orderBy = 'ORDER BY filename DESC'; break;
+            case 'newest': orderBy = 'ORDER BY created_at DESC, id DESC'; break;
+            case 'oldest': orderBy = 'ORDER BY created_at ASC, id ASC'; break;
+            case 'name_asc': orderBy = 'ORDER BY filename ASC, id ASC'; break;
+            case 'name_desc': orderBy = 'ORDER BY filename DESC, id DESC'; break;
             case 'recent_update':
-            default: orderBy = 'ORDER BY COALESCE(updated_at, created_at) DESC'; break;
+            default: orderBy = 'ORDER BY COALESCE(updated_at, created_at) DESC, id DESC'; break;
         }
 
         if (isNaN(page) || isNaN(limit)) {
