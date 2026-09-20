@@ -78,7 +78,7 @@ if (loadModelBtn) {
 
         loadModelBtn.disabled = true;
         loadModelBtn.textContent = '⏳ Loading Model...';
-        loadStatus.textContent = 'Initiating load in LM Studio...';
+        loadStatus.textContent = 'Initiating model load...';
         loadStatus.style.color = 'var(--accent)';
 
         try {
@@ -97,11 +97,11 @@ if (loadModelBtn) {
             const data = await response.json();
 
             if (response.ok) {
-                loadStatus.textContent = '✅ Model Loaded Successfully!';
+                loadStatus.textContent = data.message ? `ℹ️ ${data.message}` : '✅ Model Loaded Successfully!';
                 loadStatus.style.color = '#4ade80';
                 updateDiagnostics();
             } else {
-                loadStatus.textContent = '❌ Load Failed: ' + (data.error || 'Check LM Studio');
+                loadStatus.textContent = '❌ Load Failed: ' + (data.error || 'Check local AI server');
                 loadStatus.style.color = '#ef4444';
             }
         } catch (err) {
@@ -118,13 +118,8 @@ if (loadModelBtn) {
 
 async function refreshModels() {
     try {
-        // We can proxy this through our server to avoid CORS if needed, 
-        // but let's try direct first or use a new proxy endpoint if we made one?
-        // Actually, let's use a new proxy endpoint for cleaner architecture 
-        // or just hit the LM Studio URL if we are sure about CORS.
-        // Server side proxy is safer.
         const res = await fetch('/api/proxy/models');
-        if (!res.ok) throw new Error('Failed to fetch models');
+        if (!res.ok) throw new Error('Failed to fetch models from local AI server');
 
         const data = await res.json();
         const models = data.data || [];
@@ -157,7 +152,7 @@ async function refreshModels() {
 
     } catch (e) {
         console.error(e);
-        diagnosticsOutput.textContent = 'Error loading models from LM Studio: ' + e.message + '\nEnsure LM Studio is running.';
+        diagnosticsOutput.textContent = 'Error loading models from llama-server: ' + e.message + '\nEnsure llama-server is running on port 8080 (start_llama_server.bat).';
     }
 }
 
@@ -241,3 +236,96 @@ runEvocBtn.addEventListener('click', async () => {
         runEvocBtn.textContent = '🚀 Retry Map Analysis';
     }
 });
+
+// ============================================================================
+// LAYA DECISION ENGINE INTEGRATION HANDLERS
+// ============================================================================
+
+const refreshLayaBtn = document.getElementById('refreshLayaBtn');
+const batchClassifyFacetsBtn = document.getElementById('batchClassifyFacetsBtn');
+const layaStatusDot = document.getElementById('layaStatusDot');
+const layaStatusTitle = document.getElementById('layaStatusTitle');
+const layaStatusSubtitle = document.getElementById('layaStatusSubtitle');
+const layaLogContainer = document.getElementById('layaLogContainer');
+const layaLogOutput = document.getElementById('layaLogOutput');
+
+// WHAT: Queries the backend to determine if the local Laya microservice is reachable.
+// WHY: Gives users immediate visual feedback regarding port 8765 availability and GPU device information.
+async function checkLayaStatus() {
+    if (!layaStatusDot || !layaStatusTitle) return;
+
+    layaStatusTitle.textContent = 'Checking Laya server...';
+    try {
+        const laya_status_http_response = await fetch('/api/laya/status');
+        if (!laya_status_http_response.ok) {
+            throw new Error(`Server returned HTTP ${laya_status_http_response.status}`);
+        }
+
+        const laya_status_payload = await laya_status_http_response.json();
+        const is_service_online = (laya_status_payload.status === 'online');
+
+        if (is_service_online) {
+            layaStatusDot.style.background = '#4ade80';
+            layaStatusTitle.textContent = `Online (${laya_status_payload.device || 'CUDA'})`;
+            layaStatusSubtitle.textContent = `Endpoint: ${laya_status_payload.endpoint} • ${laya_status_payload.cluster_themes_count} Themes • ${laya_status_payload.classified_facets_count} Facets Tagged`;
+            if (batchClassifyFacetsBtn) batchClassifyFacetsBtn.disabled = false;
+        } else {
+            layaStatusDot.style.background = '#ef4444';
+            layaStatusTitle.textContent = 'Offline (Port 8765 unreachable)';
+            layaStatusSubtitle.textContent = 'Launch start_laya_server.bat to start Laya Decision Engine';
+        }
+    } catch (laya_status_check_error) {
+        layaStatusDot.style.background = '#ef4444';
+        layaStatusTitle.textContent = 'Offline (Server unreachable)';
+        layaStatusSubtitle.textContent = 'Run start_laya_server.bat in project root';
+    }
+}
+
+if (refreshLayaBtn) {
+    refreshLayaBtn.addEventListener('click', checkLayaStatus);
+}
+
+if (batchClassifyFacetsBtn) {
+    batchClassifyFacetsBtn.addEventListener('click', async () => {
+        batchClassifyFacetsBtn.disabled = true;
+        batchClassifyFacetsBtn.textContent = '⏳ Classifying Facets...';
+        layaLogContainer.style.display = 'block';
+        layaLogOutput.innerHTML = '<i>Connecting to Laya Decision Engine on port 8765...</i><br>';
+
+        try {
+            const batch_classification_response = await fetch('/api/facets/batch-classify', { method: 'POST' });
+            if (!batch_classification_response.ok) {
+                const error_payload = await batch_classification_response.json();
+                throw new Error(error_payload.error || 'Batch facet classification failed');
+            }
+
+            const stream_reader_instance = batch_classification_response.body.getReader();
+            const text_stream_decoder = new TextDecoder();
+
+            while (true) {
+                const { done, value } = await stream_reader_instance.read();
+                if (done) break;
+
+                const decoded_chunk_text = text_stream_decoder.decode(value, { stream: true });
+                const formatted_log_text = decoded_chunk_text.replace(/\n/g, '<br>');
+                layaLogOutput.innerHTML += formatted_log_text;
+                layaLogContainer.scrollTop = layaLogContainer.scrollHeight;
+            }
+
+            batchClassifyFacetsBtn.innerHTML = '✅ Facets Tagged';
+            checkLayaStatus();
+            setTimeout(() => {
+                batchClassifyFacetsBtn.disabled = false;
+                batchClassifyFacetsBtn.textContent = '⚡ Generate Multi-Facet Tags (Laya)';
+            }, 4000);
+        } catch (batch_classification_error) {
+            console.error(batch_classification_error);
+            layaLogOutput.innerHTML += `<br><span style="color: #ef4444;">Error: ${batch_classification_error.message}</span>`;
+            batchClassifyFacetsBtn.disabled = false;
+            batchClassifyFacetsBtn.textContent = '⚡ Retry Facet Tagging';
+        }
+    });
+}
+
+// Check Laya status on initial page load
+checkLayaStatus();

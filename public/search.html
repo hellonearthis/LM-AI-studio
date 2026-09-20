@@ -112,10 +112,15 @@
                                         <span class="slider round"> </span>
                                     </label>
                                 </span>
+                                <span class="badge" style="font-size: 0.65rem; background: rgba(147, 51, 234, 0.15); color: #c084fc; border: 1px solid rgba(147, 51, 234, 0.3); margin-left: auto;">⚡ Laya Powered</span>
                             </div>
                             <input type="text" id="searchQuery" class="search-input"
-                                placeholder="Search descriptions, objects..." autofocus
-                                title="Enter keywords to search across image descriptions, filenames, tags, and objects. Press Enter to search.">
+                                placeholder="Search descriptions, objects, themes..." autofocus
+                                title="Enter keywords to search across image descriptions, filenames, tags, objects, and Laya themes. Press Enter to search.">
+
+                            <div id="smartIntentIndicator" style="display: none; font-size: 0.75rem; color: #c084fc; margin-bottom: 0.5rem; padding: 0.25rem 0.5rem; background: rgba(147, 51, 234, 0.1); border-radius: 4px; border: 1px solid rgba(147, 51, 234, 0.2);">
+                                ⚡ <span id="smartIntentText">Intent: Detecting...</span>
+                            </div>
 
                             <input type="text" id="negativeQuery" class="negative-input"
                                 placeholder="Exclude terms (e.g. blurry, dark)..."
@@ -198,19 +203,19 @@
                         <div class="filter-section">
                             <!-- Search Scope -->
                             <div class="scope-container" style="border-top: none; padding-top: 0; margin-top: 0;">
-                                <label class="scope-label">Search Scope:</label>
-                                <div class="scope-options">
-                                    <label class="checkbox-label" title="Include AI-generated image descriptions in keyword search">
+                                <label class="scope-label">Search In</label>
+                                <div class="checkbox-group">
+                                    <label class="checkbox-label" title="Search through the AI-generated visual summary paragraphs">
                                         <input type="checkbox" id="scopeAnalysis" class="checkbox-input" checked>
-                                        <span class="checkbox-text">Summaries</span>
+                                        Analysis
                                     </label>
-                                    <label class="checkbox-label" title="Include detected objects (e.g. 'cat', 'car', 'tree') in keyword search">
+                                    <label class="checkbox-label" title="Search detected objects (e.g. car, tree, person)">
                                         <input type="checkbox" id="scopeObjects" class="checkbox-input" checked>
-                                        <span class="checkbox-text">Objects</span>
+                                        Objects
                                     </label>
-                                    <label class="checkbox-label" title="Include extracted tags (e.g. 'sunset', 'portrait') in keyword search">
+                                    <label class="checkbox-label" title="Search general descriptive tags (e.g. vintage, sunset)">
                                         <input type="checkbox" id="scopeTags" class="checkbox-input" checked>
-                                        <span class="checkbox-text">Tags</span>
+                                        Tags
                                     </label>
                                 </div>
                             </div>
@@ -221,6 +226,49 @@
                                     <option value="relevance">Relevance</option>
                                     <option value="newest" selected>Newest First</option>
                                     <option value="oldest">Oldest First</option>
+                                </select>
+                            </div>
+
+                            <div class="dropdown-row">
+                                <label class="dropdown-label">Cluster Theme (EVoC)</label>
+                                <select id="clusterThemeSelect" class="styled-select" title="Filter results by semantic EVoC clusters classified by the Laya Decision Engine.">
+                                    <option value="all">All Cluster Themes</option>
+                                </select>
+                            </div>
+
+                            <div class="dropdown-row">
+                                <label class="dropdown-label">Artistic Medium</label>
+                                <select id="facetMediumSelect" class="styled-select" title="Filter by artistic medium classified by Laya.">
+                                    <option value="all">All Mediums</option>
+                                    <option value="photography">📷 Photography</option>
+                                    <option value="three_dimensional_render">🧊 3D Render / CGI</option>
+                                    <option value="digital_art">🎨 Digital Art / Concept</option>
+                                    <option value="traditional_art">🖌️ Traditional Painting / Sketch</option>
+                                    <option value="sculpture_craft">🗿 Sculpture & Craft</option>
+                                    <option value="diagram_typography">📐 Diagram & Typography</option>
+                                </select>
+                            </div>
+
+                            <div class="dropdown-row">
+                                <label class="dropdown-label">Visual Mood</label>
+                                <select id="facetMoodSelect" class="styled-select" title="Filter by emotional atmosphere classified by Laya.">
+                                    <option value="all">All Moods</option>
+                                    <option value="dark_and_moody">🌑 Dark & Moody</option>
+                                    <option value="bright_and_vibrant">☀️ Bright & Vibrant</option>
+                                    <option value="minimalist_serene">🕊️ Minimalist & Serene</option>
+                                    <option value="whimsical_playful">🎪 Whimsical & Playful</option>
+                                    <option value="dramatic_cinematic">⚡ Dramatic & Cinematic</option>
+                                </select>
+                            </div>
+
+                            <div class="dropdown-row">
+                                <label class="dropdown-label">Composition</label>
+                                <select id="facetCompositionSelect" class="styled-select" title="Filter by camera composition classified by Laya.">
+                                    <option value="all">All Compositions</option>
+                                    <option value="portrait_close_up">👤 Portrait / Close-up</option>
+                                    <option value="wide_landscape">🏞️ Wide Landscape / Exterior</option>
+                                    <option value="macro_texture">🔍 Macro / Texture</option>
+                                    <option value="interior_enclosed">🚪 Interior / Enclosed</option>
                                 </select>
                             </div>
 

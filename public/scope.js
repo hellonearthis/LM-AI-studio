@@ -403,13 +403,15 @@ function showTooltip(point, px, py) {
   const img = document.getElementById("tooltipImg");
   const txt = document.getElementById("tooltipText");
 
-  // Set the text label for the tooltip.
-  txt.textContent = point.label || point.filename;
+  // WHAT: Setting the text label for the tooltip with Laya cluster theme and filename.
+  // WHY: Gives the user immediate thematic awareness when hovering over data clusters on the map.
+  const theme_display_text = point.label ? `🏷️ ${point.label.replace(/_/g, ' ')}` : `Cluster ${point.cluster}`;
+  txt.innerHTML = `<div style="font-weight: 600; color: #c084fc; margin-bottom: 2px;">${theme_display_text}</div><div style="font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px;">${point.filename}</div>`;
 
   // Construct the thumbnail URL using the unique ID
   // Check both 'id' (DB) and 'db_id' (alias) or just 'id'
   const thumbId = point.id;
-  img.src = `http://localhost:3000/thumbnails/id_${thumbId}.avif`;
+  img.src = `thumbnails/id_${thumbId}.avif`;
 
   // Make the tooltip visible so its dimensions can be measured
   tooltip.style.display = "flex";

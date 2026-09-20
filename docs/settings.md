@@ -1,22 +1,29 @@
 # Settings Page (`settings.html`)
 
-The Settings page allows you to configure the core behavior of the application, specifically the integration with LM Studio and other system preferences.
+The Settings page allows you to configure the core behavior of the application, manage connections to local AI microservices (`llama-server.exe` and Laya), and run map analysis pipelines.
 
 ## Key Features
 
-- **LM Studio Integration**:
-  - **Refresh Models**: Reloads the list of available models from the connected LM Studio instance.
-  - **Vision Model**: Choose the AI model used to "see" and describe your images (e.g., Qwen-VL, Gemma-4).
-  - **Connectivity Status**: The system monitors the model's load state in LM Studio. Indicators in the Search sidebar show if it is **🟢 Loaded** or **⚪ Ready to Load**.
-  - **Embedding Model**: Choose the model used to convert text and image concepts into vectors for "Semantic Search".
-  - **Auto-detect**: Intelligent fallback that picks the best available model if no specific selection is made.
+- **Local AI Microservices (`llama.cpp`)**:
+  - **Vision Model (Port 8080)**: Choose the active multimodal vision model used to analyze and describe images (e.g., Qwen 3.5 9B or Qwen3-VL-4B).
+  - **Embedding Model (Port 8081)**: Choose the model used to convert text and visual descriptions into 768-dimensional vectors for Semantic and Hybrid Search (e.g., `nomic-embed-text-v1.5`).
+  - **Connectivity Status**: Real-time status indicators show whether servers are **🟢 Online/Loaded** or **⚪ Offline/Standby**.
+  - **Auto-detect**: Automatically discovers available models from the running `llama-server` instances.
+
+- **Laya Decision Engine (Port 8765)**:
+  - Probes the status of the ModernBERT fast classifier microservice.
+  - Enables sub-15ms multi-faceted image tagging and query intent routing.
+
+- **Data Map Analysis (EVoC Pipeline)**:
+  - **Run Map Analysis**: Triggers unsupervised clustering and UMAP 2D projection using existing embeddings.
+  - Synchronizes cluster coordinates and thematic labels for the Data Map visualization.
 
 - **Diagnostics**:
-  - Displays current configuration and connection status for troubleshooting.
+  - Displays resolved model IDs, configuration sources (Settings, ENV, or Auto-detect), and endpoint URLs for troubleshooting.
 
 ## Usage
 
-1. **Connect**: Ensure LM Studio is running and the server is accessible.
-2. **Refresh**: Click "Refresh Models" to fetch the currently loaded models.
-3. **Select Models**: Choose your preferred Vision and Embedding models, or leave them on "Auto-detect".
-4. **Save**: Click "Save Changes" to apply your configuration.
+1. **Verify Services**: Ensure `Start App.bat` has initialized the Vision (8080), Embeddings (8081), and Laya (8765) servers.
+2. **Refresh**: Click "Refresh Models" to probe connected services.
+3. **Select Models**: Pick custom model overrides or keep "Auto-detect".
+4. **Save**: Click "Save Changes" to persist preferences in `config.json`.

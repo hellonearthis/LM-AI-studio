@@ -1,23 +1,110 @@
 # 🎨 Lumina - AI Image Analysis Studio
 
-An Electron-based desktop application that uses local AI (via LM Studio) to analyze images, extract metadata, and build a searchable database of your visual content.
+An Electron-based desktop application that uses local AI (via `llama-server.exe`) to analyze images, extract metadata, and build a searchable database of your visual content.
 
 ## 🚀 Quick Start
 
-1.  **Launch LM Studio**: Ensure it's running on port `1234`.
-2.  **Install & Run**:
-    ```bash
-    npm install
-    npm start
-    ```
-3.  **Configure**: Go to **Settings ⚙️** and select your Vision and Embedding models.
-4.  **Analyze**: Click "Choose Image" or "Load Folder" to begin your AI-powered library.
+The fastest way to launch the entire studio with all AI services is via **`Start App.bat`**:
+
+```bat
+# Launches Vision (port 8080), Embeddings (port 8081), Laya (port 8765), and Electron:
+Start App.bat
+```
+
+`Start App.bat` automatically probes each microservice and launches missing backends in separate command windows before booting the Electron app.
+
+Alternatively, you can start services manually:
+1. **Launch Local AI Servers**:
+   - `start_llama_server.bat` (Multimodal Vision on port `8080`)
+   - `start_llama_embeddings.bat` (Nomic Embeddings on port `8081`)
+   - `start_laya_server.bat` (Laya Fast Classifier on port `8765`)
+2. **Install & Run**:
+   ```bash
+   npm install
+   npm start
+   ```
+3. **Configure**: Go to **Settings ⚙️** to review detected models or select custom model overrides.
+4. **Analyze**: Click "Choose Image" or "Load Folder" to begin your AI-powered library.
 
 > **Ai Joke** 🤖  
 > Why did the neural network become an artist?  
 > Because it had so many *layers* to express!
 
 ---
+
+## 🦙 Local AI Inference: llama.cpp (`llama-server.exe`)
+
+Lumina is powered directly by local inference through [`llama.cpp`](https://github.com/ggerganov/llama.cpp)'s high-performance `llama-server.exe`, decoupling the app from external dependencies or cloud APIs.
+
+```mermaid
+graph LR
+    subgraph "LM AI Studio (Port 3000)"
+        App["Electron / Express Backend"]
+    end
+
+    subgraph "llama.cpp Microservices"
+        VisionServer["llama-server (Port 8080)<br/>Qwen 3.5 9B / 4B Multimodal<br/>--mmproj --flash-attn --reasoning off"]
+        EmbedServer["llama-server (Port 8081)<br/>Nomic Embed Text v1.5<br/>--embedding -c 2048"]
+    end
+
+    App -->|Image Analysis (POST /v1/chat/completions)| VisionServer
+    App -->|Vector Generation (POST /v1/embeddings)| EmbedServer
+```
+
+### 1. Multimodal Vision Server (Port `8080`)
+- **Default Launcher**: `start_llama_server.bat`
+- **Default Model**: **Qwen 3.5 9B** (`Qwen3.5-9B-Q4_K_M.gguf`) paired with multimodal projector (`mmproj-Qwen3.5-9B-BF16.gguf`).
+- **Low-VRAM Alternative**: `start_llama_vision_4b.bat` runs **Qwen3-VL-4B Instruct** requiring only ~2.5 GB VRAM for background tasks or smaller GPUs.
+- **Key Flags & Optimizations**:
+  - `-ngl 99`: Full GPU layer offloading for maximum throughput.
+  - `--flash-attn on`: Flash Attention enabled for reduced memory bandwidth.
+  - `--reasoning off` and `--reasoning-budget 0`: Strips internal hidden reasoning tokens (`<think>...</think>`), avoiding 1,200+ wasted tokens and dropping latency from ~45 seconds down to **~1.4 seconds**.
+  - **Sharp Pre-Processing**: The backend automatically downscales ultra-high-resolution images (clamped to max 1344×1344) prior to submission, reducing vision token consumption from 4,200+ tokens to ~1,000 tokens while preserving visual fidelity.
+
+### 2. Dedicated Text Embeddings Server (Port `8081`)
+- **Launcher**: `start_llama_embeddings.bat`
+- **Model**: **Nomic Embed Text v1.5** (`nomic-embed-text-v1.5.f16.gguf`) with `--embedding` mode enabled.
+- **Role**: Computes dense 768-dimensional vector representations of image descriptions, summaries, and search queries.
+- **Integration**: Powers **Semantic Search**, **Hybrid RRF (Reciprocal Rank Fusion)** search, and **EVoC / Latent Scope** dimensionality reduction.
+
+---
+
+## ⚡ Fast Classifier & Decision Engine: Laya
+
+Lumina integrates [`convaiinnovations/laya`](https://huggingface.co/convaiinnovations/laya), a non-autoregressive System 1 decision engine based on **ModernBERT**.
+
+```mermaid
+graph LR
+    subgraph "Lumina Core"
+        Express["Express Backend"]
+        SearchUI["Search Interface"]
+    end
+
+    subgraph "Laya Decision Microservice (Port 8765)"
+        LayaEngine["ModernBERT Decision Engine<br/>FastAPI / CUDA"]
+    end
+
+    subgraph "SQLite Persistence"
+        DB[("images.db<br/>image_facets table")]
+    end
+
+    Express -->|Batch Classification (~10ms/record)| LayaEngine
+    LayaEngine -->|Medium, Mood, Framing, Score| DB
+    SearchUI -->|Query Intent Analysis| LayaEngine
+```
+
+- **Launcher**: `start_laya_server.bat` (runs Uvicorn on `http://127.0.0.1:8765`).
+- **Ultra-Fast Speed**: Operates at **~5–15ms per classification** — over 100× faster than generative LLMs.
+- **Taxonomic Image Facet Tagging**:
+  Laya evaluates four core dimensions and saves them to the `image_facets` table:
+  1. **Visual Medium**: Photography, 3D CGI render, digital art, traditional art, sculpture/craft, or diagram/typography.
+  2. **Visual Mood**: Dark & moody, bright & vibrant, minimalist & serene, whimsical & playful, or dramatic & cinematic.
+  3. **Composition & Framing**: Close-up macro, medium shot, wide establishing, bird's eye aerial, or worm's eye low angle.
+  4. **Caption Completeness**: Continuous score (0.0 to 1.0) evaluating how thoroughly the visual prompt was answered.
+- **Search Query Intent Routing (`/api/laya/query-intent`)**:
+  When users submit queries, Laya parses semantic intent in real time, detecting whether the user is querying a style, medium, emotional tone, or specific subject, and dynamically tunes search scoring.
+- **EVoC Cluster Theming**:
+  Categorizes unsupervised UMAP coordinate clusters into human-readable thematic categories for the Data Map.
 
 ## ✨ Features
 
@@ -40,7 +127,7 @@ An Electron-based desktop application that uses local AI (via LM Studio) to anal
 - **Automated Database Repair**: Prune missing records, regenerate deleted thumbnails, and heal broken data.
 - **Inline Tag Management**: Edit, delete, and add tags directly from search results or the database browser via right-click.
 - **Intelligent Image Loading (🚀 New!)**: Optimized for Largest Contentful Paint (LCP). The first few images of any view use `eager` loading and `high` fetch priority to appear instantly, while subsequent content uses `lazy` loading and `async` decoding to maintain smooth scrolling and save bandwidth.
-- **High-Performance Masonry Layout**: Uses a specialized `<masonry-grid-lanes>` component providing a dense, **row-based (A, B, C across)** flow. The grid automatically packs cards to eliminate height gaps while ensuring a minimum of **3 columns** on desktop resolutions.
+- **Stable Row-by-Row CSS Grid Layout**: Both Search and Database views use native CSS Grid with flex column stretching. Cards flow stably row-by-row without odd column shifting, jumping, or flickering during batch loading and infinite scrolling.
 - **Persistent Text Rendering**: Fully integrated with [`@chenglou/pretext`](https://github.com/chenglou/pretext) for arithmetic-based text measurement. This ensures pixel-perfect card heights and eliminates layout shifts during infinite scroll by pre-calculating the summary height before the card is even rendered.
 - **Tag Discovery Row**: A new, horizontal "Discover Tags & Objects" row on the Search page. Features horizontal chip clouds for rapid browsing and a **toggleable visibility** state that persists across sessions.
 - **Robust Thumbnailing**: Efficient **AVIF** thumbnail generation with automatic background regeneration for maximum visual fidelity and minimal file size.
@@ -53,13 +140,14 @@ An Electron-based desktop application that uses local AI (via LM Studio) to anal
 ### Prerequisites
 
 1. **Node.js** (v18 or higher)
-2. **LM Studio** running locally (Port 1234)
-   - **Vision Model**: (e.g., Qwen-VL, LLaVA) for analyzing images.
+2. **Local AI Server**:
+   * **llama-server.exe** (Default port `8080`, PR #26508 standard `9931`) with `--mmproj` projector for multimodal vision.
+   - **Vision Model**: (e.g., Qwen 3.5 VL) for analyzing images.
    - **Embedding Model**: (e.g., Nomic Embed Text) for Semantic Search.
 3. **Python 3.12+** (Optional, for Latent Scope integration)
 
-> **Why LM Studio?**  
-> LM Studio makes it easy to run the latest AI models locally. Lumina connects to it automatically.
+> **Dynamic Server Discovery:**  
+> Lumina automatically probes `llama-server` on ports `8080` and `9931`, checking model capabilities for vision (`multimodal`) and embeddings without requiring hardcoded configuration.
 
 ### Installation
 
@@ -78,7 +166,10 @@ npm run ls:setup
 ### Running the App
 
 ```bash
-# Start the Electron app
+# 1. Start your local AI server (1-click launcher for llama-server)
+start_llama_server.bat
+
+# 2. Start the Electron app
 npm start
 
 # OR for development mode
@@ -88,7 +179,7 @@ npm run dev
 npm run ls:serve
 ```
 
-> **Note**: Start LM Studio (Port 1234) *before* asking Lumina to analyze or embed images.
+> **Note**: Ensure `llama-server.exe` (port 8080) is running before analyzing or embedding images.
 
 ## ⚙️ How it Works (Automation)
 The project uses a custom automation system to keep the frontend high-performance and lightweight:
@@ -140,7 +231,7 @@ Navigate to the **Settings ⚙️** page to select your AI models.
 3.  **Find Similar**: Use the right-click menu to enter "Discovery Mode" for a specific image. Click the banner to reset the search.
 4.  **Semantic Search**: Toggle "Semantic" to find images by concept (requires Embeddings).
     - If needed, click **"Generate Data"** to build embeddings for your library.
-    - Uses a **text embedding model** from LM Studio (e.g. `nomic-embed-text-v1.5`). The model is resolved by priority: Settings config → `.env` variable → auto-detect (first model with "embed" in its name).
+    - Uses a **text embedding model** via `llama-server` (e.g. `nomic-embed-text-v1.5`). The model is resolved by priority: Settings config → `.env` variable → auto-detect.
     - The status line below the button shows the embedding count, file size, and last updated date.
     - Embeddings are also reused by the **EVoC pipeline** (Settings → Run Map Analysis) for clustering and the Data Map visualization.
 5.  **Hybrid Search (⚡ New!)**: When embeddings are available, Hybrid mode is auto-selected. It runs keyword *and* semantic search simultaneously, then merges results using **Reciprocal Rank Fusion (RRF)** for the best of both worlds.
@@ -201,15 +292,17 @@ LM-AI-studio/
 
 ---
 
-## 🔧 Configuration
+## 🔧 Configuration & Microservices
 
 You can configure models via the **Settings UI** or by creating a `.env` file (advanced).
 
-| Variable | Description |
-|----------|-------------|
-| `VISION_MODEL_ID` | Override for the Image Analysis model ID |
-| `EMBEDDING_MODEL_ID` | Override for the Semantic Search model ID |
-| `LM_STUDIO_URL` | Base URL for LM Studio (default: localhost:1234) |
+| Variable | Default Port / URL | Description |
+|----------|--------------------|-------------|
+| `LOCAL_AI_URL` | `http://127.0.0.1:8080` | Base URL for the multimodal vision `llama-server.exe` |
+| `EMBEDDING_SERVER_URL` | `http://127.0.0.1:8081` | Base URL for the text embeddings `llama-server.exe` |
+| `LAYA_SERVER_URL` | `http://127.0.0.1:8765` | Base URL for the Laya ModernBERT fast classifier microservice |
+| `VISION_MODEL_ID` | `qwen3.5-9b` | Model alias/ID for multimodal image analysis |
+| `EMBEDDING_MODEL_ID` | `nomic-embed-text-v1.5` | Model alias/ID for 768-dim semantic search embeddings |
 
 **Customizing Prompts**: Modify `qwen_vl3_prompts.json` to add or edit the analysis strategies available in the dropdown menu.
 
@@ -217,7 +310,7 @@ You can configure models via the **Settings UI** or by creating a `.env` file (a
 
 ## 📦 Building for Windows
 
-Lumina is configured with `electron-builder` to package the app into a standalone Windows installer (`.exe`). This process handles natively compiling dependencies like `sqlite3` and `sharp` so they run outside of the development environment.
+Lumina is configured with `electron-builder` to package the app into a standalone Windows installer (`.exe`). This process handles natively compiling dependencies like `better-sqlite3` and `sharp` so they run outside of the development environment.
 
 To generate the setup file:
 ```bash
@@ -235,10 +328,11 @@ ISC
 
 ## 🙏 Acknowledgments
 
-- [LM Studio](https://lmstudio.ai/) for local AI inference
+- [llama.cpp](https://github.com/ggerganov/llama.cpp) for high-performance, GPU-accelerated local AI inference
+- [convaiinnovations/laya](https://huggingface.co/convaiinnovations/laya) for high-speed ModernBERT decision engine & classification
 - [Electron](https://www.electronjs.org/) for cross-platform desktop apps
-- [Sharp](https://sharp.pixelplumbing.com/) for image processing
-- [exifr](https://github.com/MikeKovarik/exifr) for metadata extraction
-- [ComfyUI-QwenVL](https://github.com/1038lab/ComfyUI-QwenVL.git) for Qwen prompt strategies
-- [Fuse.js](https://fusejs.io/) for powerful fuzzy search capabilities
-- [Latent Scope](https://github.com/enjalot/latent-scope) for semantic visualization
+- [Sharp](https://sharp.pixelplumbing.com/) for high-speed image processing & AVIF compression
+- [exifr](https://github.com/MikeKovarik/exifr) for camera metadata extraction
+- [ComfyUI-QwenVL](https://github.com/1038lab/ComfyUI-QwenVL.git) for prompt strategies
+- [Fuse.js](https://fusejs.io/) for client-side fuzzy search
+- [Latent Scope](https://github.com/enjalot/latent-scope) for semantic cluster map visualization

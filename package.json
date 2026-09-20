@@ -7,6 +7,11 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
+    "test": "node scripts/test_local_ai_client.js",
+    "llama:vision": "start_llama_server.bat",
+    "llama:vision:4b": "start_llama_vision_4b.bat",
+    "llama:embed": "start_llama_embeddings.bat",
+    "laya:serve": "start_laya_server.bat",
     "ls:sync": ".\\venv\\Scripts\\python scripts/sync_ls.py",
     "ls:serve": "scripts\\serve_ls.bat",
     "build": "electron-builder",

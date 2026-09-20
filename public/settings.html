@@ -50,9 +50,9 @@
             </header>
 
             <div class="settings-card">
-                <h2>LM Studio Integration</h2>
+                <h2>Local AI Server Integration (llama-server)</h2>
                 <div class="settings-header-action">
-                    <p>Select which loaded models to use for each task.
+                    <p>Select which models to use for each task (llama-server on port 8080).
                     </p>
                     <button id="refreshModelsBtn" class="refresh-btn">🔄 Refresh Models</button>
                 </div>
@@ -125,6 +125,33 @@
 
                 <div id="evocLogContainer" style="margin-top: 1rem; background: #000; color: #0f0; padding: 1rem; border-radius: 6px; font-family: 'Courier New', Courier, monospace; font-size: 0.85rem; max-height: 300px; overflow-y: auto; display: none; line-height: 1.4;">
                     <div id="evocLogOutput"></div>
+                </div>
+            </div>
+
+            <!-- Laya Decision Engine Integration Card -->
+            <div class="settings-card">
+                <h2>Laya Decision Engine (ModernBERT Fast Classifier)</h2>
+                <div class="settings-header-action">
+                    <p>High-speed non-autoregressive system on port 8765. Computes ~10ms cluster themes, query intent, and multi-faceted tagging.</p>
+                    <button id="refreshLayaBtn" class="refresh-btn">🔄 Check Status</button>
+                </div>
+
+                <div style="display: flex; align-items: center; gap: 0.75rem; margin-top: 1rem; padding: 0.75rem; background: var(--bg-color); border-radius: 6px; border: 1px solid var(--border);">
+                    <span id="layaStatusDot" style="width: 12px; height: 12px; border-radius: 50%; background: #ef4444; display: inline-block;"></span>
+                    <div>
+                        <strong id="layaStatusTitle" style="color: var(--text-primary);">Checking Laya server...</strong>
+                        <div id="layaStatusSubtitle" style="font-size: 0.8rem; color: var(--text-secondary);">Endpoint: http://127.0.0.1:8765</div>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 1rem; margin-top: 1.25rem; flex-wrap: wrap;">
+                    <button id="batchClassifyFacetsBtn" class="primary-btn" style="background: #9333ea; border: none; padding: 0.7rem 1.2rem; color: white; border-radius: 6px; cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 0.5rem;">
+                        ⚡ Generate Multi-Facet Tags (Laya)
+                    </button>
+                </div>
+
+                <div id="layaLogContainer" style="margin-top: 1rem; background: #0b0f19; color: #c084fc; padding: 1rem; border-radius: 6px; font-family: 'Courier New', Courier, monospace; font-size: 0.85rem; max-height: 250px; overflow-y: auto; display: none; line-height: 1.4; border: 1px solid rgba(147, 51, 234, 0.3);">
+                    <div id="layaLogOutput"></div>
                 </div>
             </div>
 

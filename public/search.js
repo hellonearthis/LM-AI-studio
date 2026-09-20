@@ -38,6 +38,15 @@ let allKnownTags = [];    // [{name, count, type:'tag'}, ...]
 let allKnownObjects = [];  // [{name, count, type:'object'}, ...]
 let acActiveIndex = -1;   // Keyboard nav index for autocomplete
 
+// WHAT: DOM element bindings for Laya cluster themes, faceted filters, and smart intent indicator.
+// WHY: Enables interactive filtering by ModernBERT semantic clusters, artistic medium, mood, and composition.
+const clusterThemeSelect = document.getElementById('clusterThemeSelect');
+const facetMediumSelect = document.getElementById('facetMediumSelect');
+const facetMoodSelect = document.getElementById('facetMoodSelect');
+const facetCompositionSelect = document.getElementById('facetCompositionSelect');
+const smartIntentIndicator = document.getElementById('smartIntentIndicator');
+const smartIntentText = document.getElementById('smartIntentText');
+
 // WHAT: Escapes special characters within a given string that have semantic meaning in HTML.
 // WHY: We replace characters like '&', '<', '>', '"', and "'" with their corresponding HTML safe entity values.
 // This prevents the web browser from interpreting user-supplied or AI-generated string fields as HTML code,
@@ -200,20 +209,41 @@ document.querySelectorAll('input[name="searchMode"]').forEach(radio => {
 });
 
 // Update Search on Scope/Filter Change
-[scopeAnalysis, scopeObjects, scopeTags, sortOrder, negativeQuery, document.getElementById('dataStatus')].forEach(el => {
-    if (el) {
-        el.addEventListener('change', () => {
-            if (el === sortOrder || el === negativeQuery) {
-                executeSearchQuery();
-            } else {
-                const mode = getSearchMode();
-                if (mode === 'keyword' || mode === 'hybrid') {
-                    executeSearchQuery();
-                }
-            }
+[
+    scopeAnalysis, scopeObjects, scopeTags, sortOrder, negativeQuery, 
+    document.getElementById('dataStatus'), sceneType,
+    clusterThemeSelect, facetMediumSelect, facetMoodSelect, facetCompositionSelect
+].forEach(filter_input_element => {
+    if (filter_input_element) {
+        filter_input_element.addEventListener('change', () => {
+            executeSearchQuery();
         });
     }
 });
+
+// WHAT: Asynchronously fetches EVoC cluster themes from Laya and populates the theme dropdown.
+// WHY: Gives the user immediate access to semantic visual categories discovered across the library.
+async function loadClusterThemesIntoFilterDropdown() {
+    if (!clusterThemeSelect) return;
+    try {
+        const cluster_themes_http_response = await fetch('/api/clusters/themes');
+        if (!cluster_themes_http_response.ok) return;
+        const { themes } = await cluster_themes_http_response.json();
+        if (!themes || !Array.isArray(themes)) return;
+
+        // Reset to default option
+        clusterThemeSelect.innerHTML = '<option value="all">All Cluster Themes</option>';
+        themes.forEach(theme_record => {
+            const theme_option_element = document.createElement('option');
+            theme_option_element.value = theme_record.theme_name;
+            const human_readable_theme_name = theme_record.theme_name.replace(/_/g, ' ');
+            theme_option_element.textContent = `${human_readable_theme_name} (${theme_record.item_count})`;
+            clusterThemeSelect.appendChild(theme_option_element);
+        });
+    } catch (load_themes_error) {
+        console.warn('[SEARCH] Could not populate cluster themes dropdown:', load_themes_error.message);
+    }
+}
 
 function updateSearchModeUI() {
     const mode = getSearchMode();
@@ -273,6 +303,7 @@ function initializeSearchSystem() {
 
     // Step 1: Handle any filters passed in the URL (e.g. from the Tags page)
     processUrlParams();
+    loadClusterThemesIntoFilterDropdown();
 
     // WHAT: Terminating any preexisting worker before spawning a clean thread.
     // WHY: Guarantees that only a single worker thread communicates with the main interface.
@@ -488,6 +519,32 @@ function applyLocalClientFilters(baseResultSet) {
             if (dataStatusFilter === 'missing-summary' && hasSummary) return false;
         }
 
+        // --- FILTER 6: Cluster Theme Filter (EVoC + Laya) ---
+        const activeClusterTheme = clusterThemeSelect ? clusterThemeSelect.value : 'all';
+        if (activeClusterTheme !== 'all') {
+            const imageClusterTheme = imageRecord.theme_name || '';
+            if (imageClusterTheme !== activeClusterTheme) return false;
+        }
+
+        // --- FILTER 7: Visual Facet Filters (Laya) ---
+        const activeFacetMedium = facetMediumSelect ? facetMediumSelect.value : 'all';
+        if (activeFacetMedium !== 'all') {
+            const imageMedium = imageRecord.facet_medium || '';
+            if (imageMedium !== activeFacetMedium) return false;
+        }
+
+        const activeFacetMood = facetMoodSelect ? facetMoodSelect.value : 'all';
+        if (activeFacetMood !== 'all') {
+            const imageMood = imageRecord.facet_mood || '';
+            if (imageMood !== activeFacetMood) return false;
+        }
+
+        const activeFacetComposition = facetCompositionSelect ? facetCompositionSelect.value : 'all';
+        if (activeFacetComposition !== 'all') {
+            const imageComposition = imageRecord.facet_composition || '';
+            if (imageComposition !== activeFacetComposition) return false;
+        }
+
         return true;
     });
 
@@ -554,6 +611,36 @@ async function executeSearchQuery() {
     const rawQueryString = searchQuery.value.trim();
     const activeSearchMode = getSearchMode();
 
+    // Fast Laya Query Intent Check in background
+    if (rawQueryString && smartIntentIndicator && smartIntentText) {
+        fetch('/api/laya/query-intent', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: rawQueryString })
+        })
+        .then(intent_http_response => intent_http_response.json())
+        .then(intent_payload => {
+            if (intent_payload && intent_payload.suggested_filters && Object.keys(intent_payload.suggested_filters).length > 0) {
+                const detected_filter_descriptions = [];
+                if (intent_payload.suggested_filters.medium) {
+                    detected_filter_descriptions.push(`Medium: ${intent_payload.suggested_filters.medium.replace(/_/g, ' ')}`);
+                }
+                if (intent_payload.suggested_filters.mood) {
+                    detected_filter_descriptions.push(`Mood: ${intent_payload.suggested_filters.mood.replace(/_/g, ' ')}`);
+                }
+                smartIntentText.textContent = `Laya Intent: ${detected_filter_descriptions.join(', ')}`;
+                smartIntentIndicator.style.display = 'block';
+            } else {
+                smartIntentIndicator.style.display = 'none';
+            }
+        })
+        .catch(() => {
+            smartIntentIndicator.style.display = 'none';
+        });
+    } else if (smartIntentIndicator) {
+        smartIntentIndicator.style.display = 'none';
+    }
+
     // SCENARIO 1: HYBRID MODE (Keyword + Semantic)
     if (activeSearchMode === 'hybrid' && rawQueryString) {
         try {
@@ -566,7 +653,7 @@ async function executeSearchQuery() {
                 body: JSON.stringify({ text: rawQueryString })
             });
 
-            if (!embedResponse.ok) throw new Error('LM Studio failed to generate a search vector.');
+            if (!embedResponse.ok) throw new Error('Local AI server failed to generate a search vector.');
             const vectorData = await embedResponse.json();
 
             // Now we send BOTH the text and the vector to the Worker.
@@ -609,7 +696,7 @@ async function executeSearchQuery() {
 
         } catch (err) {
             console.error('Semantic Search Failed:', err);
-            showAlertModal('AI search failed. Please ensure LM Studio is running. Error: ' + err.message, 'Concept Search Error');
+            showAlertModal('AI search failed. Please ensure llama-server is running on port 8080. Error: ' + err.message, 'Concept Search Error');
             searchBtn.disabled = false;
             searchBtn.textContent = 'Search Images';
         }
@@ -857,8 +944,11 @@ function createResultHtml(img, summaryHeight, isPriority = false, isEager = fals
                                 <button class="delete-btn" data-id="${img.id}" style="background: transparent; border: 1px solid #ef4444; color: #ef4444; padding: 0.25rem 0.5rem; border-radius: 6px; cursor: pointer; font-size: 0.7rem; transition: all 0.2s; margin-left: 0.5rem;">X</button>
                             </div>
                             <small style="color: var(--text-secondary);">${date}</small>
-                            <div style="margin-top: 0.25rem;">
+                            <div style="margin-top: 0.25rem; display: flex; flex-wrap: wrap; gap: 0.25rem;">
                                 <span class="badge" style="font-size: 0.7rem;">${escapeHtml(analysis.scene_type) || 'Unknown'}</span>
+                                ${img.theme_name ? `<span class="badge" style="font-size: 0.65rem; background: rgba(147, 51, 234, 0.2); color: #c084fc; border: 1px solid rgba(147, 51, 234, 0.4);" title="EVoC Cluster Theme by Laya">🏷️ ${escapeHtml(img.theme_name.replace(/_/g, ' '))}</span>` : ''}
+                                ${img.facet_medium ? `<span class="badge" style="font-size: 0.65rem; background: rgba(59, 130, 246, 0.15); color: #60a5fa;" title="Artistic Medium">🎨 ${escapeHtml(img.facet_medium.replace(/_/g, ' '))}</span>` : ''}
+                                ${img.facet_mood ? `<span class="badge" style="font-size: 0.65rem; background: rgba(245, 158, 11, 0.15); color: #fbbf24;" title="Visual Mood">✨ ${escapeHtml(img.facet_mood.replace(/_/g, ' '))}</span>` : ''}
                             </div>
                         </div>
                     </div>
@@ -1193,7 +1283,7 @@ const genProgress = document.getElementById('genProgress');
 
 if (generateEmbeddingsBtn) {
     generateEmbeddingsBtn.addEventListener('click', async () => {
-        showConfirmModal('This will generate embeddings for all images using LM Studio. This may take a while. Ensure LM Studio server is running with a TEXT EMBEDDING model loaded. Continue?', async () => {
+        showConfirmModal('This will generate embeddings for all images using llama-server. This may take a while. Ensure llama-server is running with an embedding model loaded. Continue?', async () => {
 
             generateEmbeddingsBtn.disabled = true;
             generateEmbeddingsBtn.textContent = 'Generating...';
@@ -2546,28 +2636,45 @@ async function updateModelIndicator() {
         const configRes = await fetch('/api/config');
         if (!configRes.ok) return;
         const config = await configRes.json();
-        const activeModel = config.visionModel || "qwen2.5-vl-7b-instruct";
-        
-        nameLabel.textContent = activeModel;
-        nameLabel.title = activeModel;
+        const configuredModel = config.visionModel || "";
 
-        // 2. Get LM Studio's current loaded models
+        // 2. Query dynamic model discovery via server proxy
         const statusRes = await fetch('/api/proxy/models');
         if (!statusRes.ok) {
             statusDot.style.background = '#ff4444'; // Red for error/offline
+            nameLabel.textContent = configuredModel || 'llama-server Offline';
+            nameLabel.title = 'llama-server is offline (Probe port 8080 failed)';
             return;
         }
-        
+
         const data = await statusRes.json();
         const loadedModels = data.data || [];
-        const isLoaded = loadedModels.some(m => m.id === activeModel);
+        const rawModels = data.models || [];
+
+        // Check if the configured model is running, or auto-detect the active model
+        let activeModelId = configuredModel;
+        let isLoaded = false;
+
+        if (configuredModel) {
+            isLoaded = loadedModels.some(m => m.id === configuredModel || (m.aliases && m.aliases.includes(configuredModel))) ||
+                       rawModels.some(m => m.name === configuredModel || (m.aliases && m.aliases.includes(configuredModel)));
+        } else if (loadedModels.length > 0 || rawModels.length > 0) {
+            // In auto-detect mode, the server's first loaded model is active
+            isLoaded = true;
+            const primaryRaw = rawModels[0];
+            const primaryData = loadedModels[0];
+            activeModelId = primaryRaw?.name || primaryRaw?.aliases?.[0] || primaryData?.id || 'Active Model';
+        }
+
+        nameLabel.textContent = activeModelId || 'Local AI Connected';
+        nameLabel.title = `Active Model: ${activeModelId}`;
 
         if (isLoaded) {
-            statusDot.style.background = '#00ff00'; // Pure Green for Loaded
-            statusDot.title = 'Model is loaded in memory';
+            statusDot.style.background = '#00ff00'; // Pure Green for Loaded/Active
+            statusDot.title = `Model is active and ready: ${activeModelId}`;
         } else {
-            statusDot.style.background = '#666666'; // Gray for Available (Standby)
-            statusDot.title = 'Model on standby (will JIT load)';
+            statusDot.style.background = '#f59e0b'; // Amber for Standby / Available
+            statusDot.title = 'Model on standby (will JIT load or needs selection)';
         }
 
     } catch (e) {

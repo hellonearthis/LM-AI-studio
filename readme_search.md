@@ -31,10 +31,15 @@ This hybrid approach ensures high precision for known items and high recall for 
 - **Role**: Keyword and Fuzzy matching.
 - **Why?**: Lightweight, zero-dependency, runs entirely in browser. Perfect for rapid filtering of metadata.
 
-### Semantic Engine: **Vector Embeddings**
-- **Provider**: **LM Studio** (local API) running models like `nomic-embed-text`.
+### Semantic Engine: **Vector Embeddings via llama.cpp**
+- **Provider**: **llama-server.exe** on port `8081` running dedicated embedding models (e.g., `nomic-embed-text-v1.5`).
 - **Storage**: `public/search-embeddings.json` (Static map of ImageID -> Vector).
-- **Computation**: **Cosine Similarity** calculated in a **Web Worker** to prevent UI freezing.
+- **Computation**: **Cosine Similarity** calculated in a **Web Worker** (`search-worker.js`) to prevent UI freezing.
+
+### Fast Decision & Intent Engine: **Laya**
+- **Provider**: **Laya Decision Engine** (`convaiinnovations/laya`) running on port `8765`.
+- **Query Intent Analysis**: Intercepts search queries (`/api/laya/query-intent`) in ~10ms to classify whether the query targets an artistic medium, mood, framing style, or subject, intelligently tuning search weights.
+- **Taxonomic Filtering**: Powers instant faceted filtering via indexed columns in `image_facets`.
 
 ### Frontend Performance: **IntersectionObserver & @chenglou/pretext**
 - **Infinite Scroll**: Renders items in batches of 50 to maintain high frame rates.
@@ -44,8 +49,9 @@ This hybrid approach ensures high precision for known items and high recall for 
 ### Backend Support: **Node.js (Express)**
 - **Endpoints**:
     - `GET /images`: Serves raw metadata index.
-    - `POST /api/embed`: Proxies user query to LM Studio for vectorization.
-    - `POST /maintenance/generate-embeddings`: Batch process for generating embeddings for the library.
+    - `POST /api/embed`: Proxies query vectorization to `llama-server` (port 8081).
+    - `POST /api/laya/query-intent`: Proxies query intent classification to Laya (port 8765).
+    - `POST /maintenance/generate-embeddings`: Batch process for generating embeddings for the entire library.
 
 ---
 
@@ -56,10 +62,12 @@ This hybrid approach ensures high precision for known items and high recall for 
 graph TD
     User[User] -->|Input Query| UI["Search UI (search.html)"]
     
-    subgraph "Server (Node/Express)"
+    subgraph "Server (Node/Express Port 3000)"
         API_Img[GET /images] -->|JSON| Cache
-        API_Embed[POST /api/embed] -->|Proxy| LMS[LM Studio]
-        LMS -->|Vector| API_Embed
+        API_Embed[POST /api/embed] -->|Proxy| LLEmbed["llama-server Embeddings (Port 8081)"]
+        LLEmbed -->|Vector| API_Embed
+        API_Intent[POST /api/laya/query-intent] -->|Proxy| LayaEngine["Laya Fast Classifier (Port 8765)"]
+        LayaEngine -->|Intent Badges| API_Intent
     end
 
     subgraph "Client Browser"
@@ -74,7 +82,7 @@ graph TD
         Engine1 -->|Ranked List A| RRF["RRF Merge (k=60)"]
         Engine2 -->|Ranked List B| RRF
         
-        RRF -->|Fused Results| Filters[Client-Side Filters]
+        RRF -->|Fused Results| Filters[Client-Side & Facet Filters]
         Filters -->|Final Results| UI
     end
 ```
@@ -88,19 +96,22 @@ sequenceDiagram
     participant Server
     
     U->>S: Types "Sunset beach"
-    S->>W: postMessage({ type: 'search', query: 'Sunset beach' })
-    
-    par Fuzzy Search
-        W->>W: Fuse.search('Sunset beach')
-    and Semantic Search (If Enabled)
-        W->>Server: POST /api/embed ('Sunset beach')
-        Server-->>W: Returns Vector [0.1, -0.5, ...]
-        W->>W: Calculate Cosine Similarity (Vector vs All Images)
+    par Intent Classification
+        S->>Server: POST /api/laya/query-intent ('Sunset beach')
+        Server-->>S: Query Intent (e.g., Landscape/Nature)
+    and Worker Execution
+        S->>W: postMessage({ type: 'search', query: 'Sunset beach' })
+        par Fuzzy Search
+            W->>W: Fuse.search('Sunset beach')
+        and Semantic Search (If Enabled)
+            W->>Server: POST /api/embed ('Sunset beach')
+            Server-->>W: Returns Vector [0.1, -0.5, ...]
+            W->>W: Calculate Cosine Similarity (Vector vs All Images)
+        end
+        W->>W: Merge & Sort Results via RRF
+        W-->>S: Returns Top Matches
     end
-    
-    W->>W: Merge & Sort Results
-    W-->>S: Returns Top Matches
-    S->>U: Renders Grid
+    S->>U: Renders Row-by-Row Grid
 ```
 
 ---
@@ -132,25 +143,25 @@ const options = {
 ```
 
 ### Semantic Search Workflow
-1.  **Generation**: User clicks **"Generate Data"**. The server iterates all images with analysis data, constructs a text string from each image's description, tags, objects, and scene type, and sends it to LM Studio's `/v1/embeddings` endpoint. The resulting vector is saved to `search-embeddings.json`.
+1.  **Generation**: User clicks **"Generate Data"**. The server iterates all images with analysis data, constructs a text string from each image's description, tags, objects, and scene type, and sends it to `llama-server`'s `/v1/embeddings` endpoint (Port 8081). The resulting vector is saved to `search-embeddings.json`.
 2.  **Querying**: User types "Peaceful". Semantic or Hybrid mode is active.
-3.  **Vectorization**: Application sends "Peaceful" to `/api/embed`.
+3.  **Vectorization**: Application sends "Peaceful" to `/api/embed` (proxied to `llama-server` on Port 8081).
 4.  **Comparison**: The resulting vector is compared against all cached vectors using dot product (Cosine Similarity).
 5.  **Threshold**: Matches with similarity > 0.4 are returned.
 
 ### Embedding Model Selection
 
-The **Generate Data** button and the `/api/embed` proxy both select an embedding model using the same priority chain:
+The **Generate Data** button and the `/api/embed` proxy both select an embedding model using the following priority chain:
 
 | Priority | Source | How to Configure |
 |----------|--------|-----------------|
 | 1st | `config.embeddingModel` | Settings page → Embedding Model dropdown → saved in `config.json` |
 | 2nd | `EMBEDDING_MODEL_ID` | Environment variable in `.env` file |
-| 3rd | **Auto-detect** | Queries LM Studio `/v1/models` and picks the first model with `"embed"` in its ID |
-| 4th | **Fallback** | Uses the first available model (may not be an embedding model) |
+| 3rd | **Auto-detect** | Queries `llama-server` `/v1/models` (Port 8081 / 8080) and picks the first model with `"embed"` in its ID |
+| 4th | **Fallback** | Uses the default alias (`nomic-embed-text-v1.5`) |
 
 > [!TIP]
-> Lock the embedding model via **Settings → Embedding Model** so it doesn't change depending on what's loaded in LM Studio at the time. Common models: `nomic-embed-text-v1.5`, `text-embedding-3-small`.
+> Run `start_llama_embeddings.bat` to launch the dedicated embeddings server on port 8081. Common models: `nomic-embed-text-v1.5.f16.gguf`.
 
 > [!IMPORTANT]
 > Run `GET /api/diagnostics` to see which Vision and Embedding models are currently resolved, and where they came from (Settings, ENV, or Auto-detect).

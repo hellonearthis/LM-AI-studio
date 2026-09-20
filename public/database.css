@@ -68,3 +68,41 @@
     cursor: pointer;
     font-weight: 500;
 }
+
+/* ============================================================================
+   ROW-BY-ROW DATABASE RESULTS GRID (STABLE INCREMENTAL PAGINATION)
+   ============================================================================ */
+.analysis-grid.database-results-grid {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+    align-items: stretch;
+    width: 100%;
+}
+
+.analysis-grid.database-results-grid > .card {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    margin: 0;
+}
+
+.analysis-grid.database-results-grid > .card .card-inner {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.analysis-grid.database-results-grid > .card .card-front {
+    flex: 1;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.scroll-sentinel {
+    height: 20px;
+    width: 100%;
+    pointer-events: none;
+    visibility: hidden;
+}

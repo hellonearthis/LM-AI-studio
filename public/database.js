@@ -61,6 +61,7 @@ function showToast(message, type = 'info') {
 const API_BASE_URL = 'http://localhost:3000';
 
 // State for infinite scroll
+const currently_rendered_database_image_identifier_set = new Set();
 let imagesData = [];
 let currentPage = 1;
 const PAGE_SIZE = 50;
@@ -72,14 +73,14 @@ let selectedIds = new Set();
 let observer = null;
 
 /**
- * Initializes the database viewer.
- * - Resets all pagination state.
- * - Clears the current grid.
- * - Triggers the first page load via `loadNextPage()`.
+ * WHAT: Initializes the database viewer.
+ * WHY: Resets pagination state and cache, prepares Pretext font measurement,
+ *      and kicks off the initial batch load.
  */
 async function initDatabase() {
     try {
         // Reset state
+        currently_rendered_database_image_identifier_set.clear();
         imagesData = [];
         currentPage = 1;
         isLoading = false;
@@ -104,11 +105,8 @@ async function initDatabase() {
 }
 
 /**
- * Loads the next page of images from the server.
- * - Checks if already loading or if no more pages exist.
- * - Appends new data to `imagesData` cache.
- * - Renders the new batch of images to the DOM.
- * - Updates the sentinel for infinite scrolling.
+ * WHAT: Loads the next batch page of images from the server.
+ * WHY: Supports incremental row-by-row pagination with deduplication to prevent duplicate cards or layout jumps.
  */
 async function loadNextPage() {
     if (isLoading || !hasMore) return;
@@ -124,14 +122,25 @@ async function loadNextPage() {
         if (!response.ok) throw new Error('Failed to load images');
 
         const data = await response.json();
-        const newImages = data.images.map(img => {
-            if (typeof img.analysis === 'string') {
-                try { img.analysis = JSON.parse(img.analysis || '{}'); } catch (e) { img.analysis = {}; }
+        const incoming_image_records = data.images.map(image_record => {
+            if (typeof image_record.analysis === 'string') {
+                try { image_record.analysis = JSON.parse(image_record.analysis || '{}'); } catch (e) { image_record.analysis = {}; }
             }
-            return img;
+            return image_record;
         });
 
-        imagesData.push(...newImages); // Keep local cache in sync for tag updates
+        // WHAT: Deduplicating incoming images against the rendered set.
+        // WHY: Prevents duplicate cards from appearing in the grid when rapid scrolling occurs.
+        const deduplicated_new_images = incoming_image_records.filter((candidate_image_record) => {
+            const image_unique_identifier_string = String(candidate_image_record.id);
+            if (currently_rendered_database_image_identifier_set.has(image_unique_identifier_string)) {
+                return false;
+            }
+            currently_rendered_database_image_identifier_set.add(image_unique_identifier_string);
+            return true;
+        });
+
+        imagesData.push(...deduplicated_new_images); // Keep local cache in sync for tag updates
 
         totalImages = data.total;
         hasMore = currentPage < data.totalPages;
@@ -146,7 +155,9 @@ async function loadNextPage() {
             return;
         }
 
-        renderBatch(newImages);
+        if (deduplicated_new_images.length > 0) {
+            renderBatch(deduplicated_new_images);
+        }
 
         currentPage++;
         loadingDb.style.display = 'none';
@@ -156,89 +167,99 @@ async function loadNextPage() {
             setupSentinel();
         }
 
-    } catch (err) {
-        console.error('[DB] Page Load Error:', err);
+    } catch (page_load_error) {
+        console.error('[DB] Page Load Error:', page_load_error);
     } finally {
         isLoading = false;
     }
 }
 
 /**
- * Sets up an invisible 'sentinel' element at the bottom of the grid.
- * When this element enters the viewport, the IntersectionObserver triggers 
- * the next page of results to load, creating an 'infinite scroll' effect.
+ * WHAT: Sets up the scroll sentinel element for infinite scrolling.
+ * WHY: Detects when the user scrolls near the bottom and automatically requests the next batch of images.
  */
 function setupSentinel() {
-    let scrollSentinel = document.getElementById('scroll-sentinel');
-    if (!scrollSentinel) {
-        scrollSentinel = document.createElement('div');
-        scrollSentinel.id = 'scroll-sentinel';
-        scrollSentinel.style.width = '100%';
-        scrollSentinel.style.height = '100px'; // Tall enough to trigger reliably
-        scrollSentinel.style.marginTop = '20px';
-        dbGrid.parentNode.appendChild(scrollSentinel);
+    let scroll_sentinel_element = document.getElementById('scroll-sentinel');
+    if (!scroll_sentinel_element) {
+        scroll_sentinel_element = document.createElement('div');
+        scroll_sentinel_element.id = 'scroll-sentinel';
+        scroll_sentinel_element.className = 'scroll-sentinel';
+        dbGrid.parentNode.appendChild(scroll_sentinel_element);
     }
-    setupIntersectionObserver(scrollSentinel);
+    setupIntersectionObserver(scroll_sentinel_element);
 }
 
 /**
- * Renders a list of image objects into the DOM.
- * This function handles two critical performance tasks:
- * 1. Pre-measuring text height via Pretext to prevent layout shifts.
- * 2. Applying intelligent lazy loading to optimize LCP.
+ * WHAT: Renders a batch of image cards directly into the row-by-row CSS grid.
+ * WHY: Pre-measures text heights using PretextLayout to prevent Cumulative Layout Shift (CLS),
+ *      then appends new card elements at the bottom of the grid without disturbing preceding rows.
  */
-function renderBatch(newImages) {
-    // PRE-MEASUREMENT STEP (The 'Why'):
+function renderBatch(deduplicated_batch_images) {
+    // PRE-MEASUREMENT STEP:
     // We use PretextLayout to calculate exactly how many pixels of height the 
     // AI summary text will need BEFORE we actually put it in the DOM. 
-    // This allows the masonry grid to calculate the correct card positions 
-    // instantly, preventing the page from 'jumping' as text renders.
     let summaryHeightsMap = new Map();
     if (window.PretextLayout && window.PretextLayout.ready) {
-        const gridWidth = dbGrid.offsetWidth > 0 ? dbGrid.offsetWidth : 1000;
-        // Calculate responsive column count to match CSS breakpoints
-        const colCount = Math.max(1, Math.floor((gridWidth + 16) / (320 + 16)));
-        const actualCardWidth = (gridWidth - (colCount - 1) * 16) / colCount;
-        const textWidth = actualCardWidth - 24; // Account for card padding (0.75rem * 2)
+        const grid_container_pixel_width = dbGrid.offsetWidth > 0 ? dbGrid.offsetWidth : 1000;
+        // Calculate responsive column count matching minmax(300px, 1fr)
+        const responsive_column_count = Math.max(1, Math.floor((grid_container_pixel_width + 16) / (300 + 16)));
+        const calculated_card_pixel_width = (grid_container_pixel_width - (responsive_column_count - 1) * 16) / responsive_column_count;
+        const text_usable_pixel_width = Math.max(100, calculated_card_pixel_width - 24); // Account for card padding (0.75rem * 2)
 
-        const textItemsToMeasure = newImages.map(img => {
-            const analysis = (typeof img.analysis === 'string')
-                ? JSON.parse(img.analysis || '{}') : (img.analysis || {});
-            return { id: img.id, text: analysis.summary || '' };
+        const text_measurement_payload_array = deduplicated_batch_images.map(image_record => {
+            const analysis = (typeof image_record.analysis === 'string')
+                ? JSON.parse(image_record.analysis || '{}') : (image_record.analysis || {});
+            return { id: image_record.id, text: analysis.summary || '' };
         });
 
-        summaryHeightsMap = window.PretextLayout.measureBatch(textItemsToMeasure, textWidth, 'database');
+        summaryHeightsMap = window.PretextLayout.measureBatch(text_measurement_payload_array, text_usable_pixel_width, 'database');
     }
 
     // HTML GENERATION STEP:
     // We map over our image data and convert each record into a string of HTML.
-    const batchHtml = newImages.map((img, index) => {
-        const measuredHeight = summaryHeightsMap.get(String(img.id));
+    const batchHtml = deduplicated_batch_images.map((image_record, batch_position_index) => {
+        const measured_summary_height = summaryHeightsMap.get(String(image_record.id));
         
-        // INTELLIGENT LOADING (The 'Why'):
-        // Images at the top of the first page are visible immediately (LCP). 
-        // We set the first image to 'fetchpriority=high' and the first row to 'loading=eager'
-        // so the browser downloads them instantly rather than waiting for JS to finish.
-        const isPriorityImage = (currentPage === 1 && index === 0);
-        const isEagerLoad = (currentPage === 1 && index < 4);
+        // INTELLIGENT LOADING:
+        // First visible images use eager loading and high priority
+        const isPriorityImage = (currentPage === 1 && batch_position_index === 0);
+        const isEagerLoad = (currentPage === 1 && batch_position_index < 4);
         
-        return createCardHtml(img, measuredHeight, isPriorityImage, isEagerLoad);
+        return createCardHtml(image_record, measured_summary_height, isPriorityImage, isEagerLoad);
     }).join('');
 
-    // Final DOM injection
+    // Final DOM injection directly into the row grid
     dbGrid.insertAdjacentHTML('beforeend', batchHtml);
 }
 
-function setupIntersectionObserver(sentinel) {
-    if (observer) observer.disconnect();
+/**
+ * WHAT: Attaches an IntersectionObserver to the scroll sentinel.
+ * WHY: Uses double requestAnimationFrame delay to ensure the browser has finished painting
+ *      the newly inserted rows before observing, eliminating false-positive trigger loops.
+ */
+function setupIntersectionObserver(scroll_sentinel_element) {
+    if (observer) {
+        observer.disconnect();
+        observer = null;
+    }
 
-    observer = new IntersectionObserver((entries) => {
-        if (entries[0].isIntersecting && !isLoading && hasMore) {
+    observer = new IntersectionObserver((intersection_observer_entries) => {
+        if (intersection_observer_entries[0].isIntersecting && !isLoading && hasMore) {
             loadNextPage();
         }
     }, { rootMargin: '400px' }); // Load early
 
-    observer.observe(sentinel);
+    // WHAT: Deferring sentinel observation across two animation frames.
+    // WHY: In the CSS Grid row layout, cards render and calculate their dimensions across layout passes.
+    // Waiting two animation frames ensures the container height has expanded and pushed the sentinel below the viewport,
+    // preventing the observer from immediately triggering a false-positive second batch on page load.
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            if (scroll_sentinel_element && observer && hasMore) {
+                observer.observe(scroll_sentinel_element);
+            }
+        });
+    });
 }
 
 /**
