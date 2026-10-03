@@ -32,7 +32,7 @@ This hybrid approach ensures high precision for known items and high recall for 
 - **Why?**: Lightweight, zero-dependency, runs entirely in browser. Perfect for rapid filtering of metadata.
 
 ### Semantic Engine: **Vector Embeddings via llama.cpp**
-- **Provider**: **llama-server.exe** on port `8081` running dedicated embedding models (e.g., `nomic-embed-text-v1.5`).
+- **Provider**: **llama-server.exe** on port `8083` running dedicated embedding models (e.g., `nomic-embed-text-v1.5`).
 - **Storage**: `public/search-embeddings.json` (Static map of ImageID -> Vector).
 - **Computation**: **Cosine Similarity** calculated in a **Web Worker** (`search-worker.js`) to prevent UI freezing.
 
@@ -40,6 +40,12 @@ This hybrid approach ensures high precision for known items and high recall for 
 - **Provider**: **Laya Decision Engine** (`convaiinnovations/laya`) running on port `8765`.
 - **Query Intent Analysis**: Intercepts search queries (`/api/laya/query-intent`) in ~10ms to classify whether the query targets an artistic medium, mood, framing style, or subject, intelligently tuning search weights.
 - **Taxonomic Filtering**: Powers instant faceted filtering via indexed columns in `image_facets`.
+
+### Omni-Modal Visual & Zero-Shot Engine: **Ovis-Omni (Port 8082)**
+- **Provider**: **Ovis-Omni-Embedding-3B** running as a dedicated CUDA microservice on port `8082`.
+- **Role**: Direct raw-image vectorization, zero-shot visual facet classification, and cross-modal query embedding.
+- **Storage**: `public/ovis-embeddings.json` (2048-dimensional normalized image vectors).
+- **Benefits**: Completely bypasses text captioning bottlenecks; compares images by their optical and stylistic features directly.
 
 ### Frontend Performance: **IntersectionObserver & @chenglou/pretext**
 - **Infinite Scroll**: Renders items in batches of 50 to maintain high frame rates.
@@ -49,9 +55,13 @@ This hybrid approach ensures high precision for known items and high recall for 
 ### Backend Support: **Node.js (Express)**
 - **Endpoints**:
     - `GET /images`: Serves raw metadata index.
-    - `POST /api/embed`: Proxies query vectorization to `llama-server` (port 8081).
+    - `POST /api/embed`: Proxies query vectorization to `llama-server` (port 8083).
     - `POST /api/laya/query-intent`: Proxies query intent classification to Laya (port 8765).
-    - `POST /maintenance/generate-embeddings`: Batch process for generating embeddings for the entire library.
+    - `POST /maintenance/generate-embeddings`: Batch process for generating text-based embeddings for the library.
+    - `GET /api/ovis/health`: Probes Ovis-Omni CUDA microservice status on port 8082.
+    - `POST /api/ovis/classify-image`: Zero-shot visual classification of image into medium, mood, and composition.
+    - `POST /api/ovis/find-similar`: Computes direct image-to-image optical similarity via 2048-dim vectors.
+    - `POST /api/maintenance/generate-ovis-embeddings`: Batch process for generating raw-image embeddings into `public/ovis-embeddings.json`.
 
 ---
 
@@ -157,11 +167,11 @@ The **Generate Data** button and the `/api/embed` proxy both select an embedding
 |----------|--------|-----------------|
 | 1st | `config.embeddingModel` | Settings page → Embedding Model dropdown → saved in `config.json` |
 | 2nd | `EMBEDDING_MODEL_ID` | Environment variable in `.env` file |
-| 3rd | **Auto-detect** | Queries `llama-server` `/v1/models` (Port 8081 / 8080) and picks the first model with `"embed"` in its ID |
+| 3rd | **Auto-detect** | Queries `llama-server` `/v1/models` (Port 8083 / 8081) and picks the first model with `"embed"` in its ID |
 | 4th | **Fallback** | Uses the default alias (`nomic-embed-text-v1.5`) |
 
 > [!TIP]
-> Run `start_llama_embeddings.bat` to launch the dedicated embeddings server on port 8081. Common models: `nomic-embed-text-v1.5.f16.gguf`.
+> Run `start_llama_embeddings.bat` to launch the dedicated embeddings server on port 8083. Common models: `nomic-embed-text-v1.5.f16.gguf`.
 
 > [!IMPORTANT]
 > Run `GET /api/diagnostics` to see which Vision and Embedding models are currently resolved, and where they came from (Settings, ENV, or Auto-detect).

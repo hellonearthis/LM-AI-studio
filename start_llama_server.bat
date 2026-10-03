@@ -1,5 +1,5 @@
 @echo off
-title "llama-server (LM AI Studio Vision on Port 8080)"
+title "llama-server (LM AI Studio Vision on Port 8081)"
 
 :: WHAT: Launch script for llama-server.exe configured for LM AI Studio.
 :: WHY: Provides 1-click startup with GPU offloading, Flash Attention, multimodal vision projector,
@@ -17,7 +17,7 @@ if not exist "%LLAMA_DIR%\llama-server.exe" (
 cd /d "%LLAMA_DIR%"
 
 echo ======================================================================
-echo Starting llama-server for LM AI Studio on port 8080...
+echo Starting llama-server for LM AI Studio on port 8081...
 echo Model: Qwen 3.5 9B with Multimodal Vision Projector
 echo ======================================================================
 
@@ -28,7 +28,7 @@ llama-server.exe ^
   -c 8192 ^
   --flash-attn on ^
   --host 127.0.0.1 ^
-  --port 8080 ^
+  --port 8081 ^
   --image-min-tokens 1024 ^
   --reasoning off ^
   --reasoning-budget 0 ^

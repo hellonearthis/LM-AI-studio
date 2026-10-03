@@ -7,7 +7,7 @@ An Electron-based desktop application that uses local AI (via `llama-server.exe`
 The fastest way to launch the entire studio with all AI services is via **`Start App.bat`**:
 
 ```bat
-# Launches Vision (port 8080), Embeddings (port 8081), Laya (port 8765), and Electron:
+# Launches Vision (port 8081), Embeddings (port 8083), Laya (port 8765), and Electron:
 Start App.bat
 ```
 
@@ -15,9 +15,10 @@ Start App.bat
 
 Alternatively, you can start services manually:
 1. **Launch Local AI Servers**:
-   - `start_llama_server.bat` (Multimodal Vision on port `8080`)
-   - `start_llama_embeddings.bat` (Nomic Embeddings on port `8081`)
+   - `start_llama_server.bat` (Multimodal Vision on port `8081`)
+   - `start_llama_embeddings.bat` (Nomic Embeddings on port `8083`)
    - `start_laya_server.bat` (Laya Fast Classifier on port `8765`)
+   - `start_ovis_server.bat` (Ovis-Omni Multimodal Engine on port `8082`)
 2. **Install & Run**:
    ```bash
    npm install
@@ -43,15 +44,15 @@ graph LR
     end
 
     subgraph "llama.cpp Microservices"
-        VisionServer["llama-server (Port 8080)<br/>Qwen 3.5 9B / 4B Multimodal<br/>--mmproj --flash-attn --reasoning off"]
-        EmbedServer["llama-server (Port 8081)<br/>Nomic Embed Text v1.5<br/>--embedding -c 2048"]
+        VisionServer["llama-server (Port 8081)<br/>Qwen 3.5 9B / 4B Multimodal<br/>--mmproj --flash-attn --reasoning off"]
+        EmbedServer["llama-server (Port 8083)<br/>Nomic Embed Text v1.5<br/>--embedding -c 2048"]
     end
 
     App -->|Image Analysis (POST /v1/chat/completions)| VisionServer
     App -->|Vector Generation (POST /v1/embeddings)| EmbedServer
 ```
 
-### 1. Multimodal Vision Server (Port `8080`)
+### 1. Multimodal Vision Server (Port `8081`)
 - **Default Launcher**: `start_llama_server.bat`
 - **Default Model**: **Qwen 3.5 9B** (`Qwen3.5-9B-Q4_K_M.gguf`) paired with multimodal projector (`mmproj-Qwen3.5-9B-BF16.gguf`).
 - **Low-VRAM Alternative**: `start_llama_vision_4b.bat` runs **Qwen3-VL-4B Instruct** requiring only ~2.5 GB VRAM for background tasks or smaller GPUs.
@@ -61,7 +62,7 @@ graph LR
   - `--reasoning off` and `--reasoning-budget 0`: Strips internal hidden reasoning tokens (`<think>...</think>`), avoiding 1,200+ wasted tokens and dropping latency from ~45 seconds down to **~1.4 seconds**.
   - **Sharp Pre-Processing**: The backend automatically downscales ultra-high-resolution images (clamped to max 1344×1344) prior to submission, reducing vision token consumption from 4,200+ tokens to ~1,000 tokens while preserving visual fidelity.
 
-### 2. Dedicated Text Embeddings Server (Port `8081`)
+### 2. Dedicated Text Embeddings Server (Port `8083`)
 - **Launcher**: `start_llama_embeddings.bat`
 - **Model**: **Nomic Embed Text v1.5** (`nomic-embed-text-v1.5.f16.gguf`) with `--embedding` mode enabled.
 - **Role**: Computes dense 768-dimensional vector representations of image descriptions, summaries, and search queries.
@@ -106,6 +107,41 @@ graph LR
 - **EVoC Cluster Theming**:
   Categorizes unsupervised UMAP coordinate clusters into human-readable thematic categories for the Data Map.
 
+---
+
+## 🧠 Omni-Modal Vector & Classification Engine: Ovis-Omni (Port `8082`)
+
+Lumina integrates [`ATH-MaaS/Ovis-Omni-Embedding-3B`](https://huggingface.co/ATH-MaaS/Ovis-Omni-Embedding-3B), a state-of-the-art multimodal embedding model that encodes **text and raw visual images into a unified 2048-dimensional vector space**.
+
+```mermaid
+graph LR
+    subgraph "Lumina UI"
+        Card["Image Card (database.html)"]
+        Search["Search Interface"]
+    end
+
+    subgraph "Ovis-Omni Microservice (Port 8082)"
+        Ovis["Ovis-Omni-Embedding-3B<br/>FastAPI / CUDA (bfloat16)"]
+    end
+
+    subgraph "Storage & Indexing"
+        Facets[("images.db<br/>image_facets")]
+        Vectors["public/ovis-embeddings.json"]
+    end
+
+    Card -->|Right-Click: Ovis Zero-Shot Classify| Ovis
+    Ovis -->|Medium, Mood, Framing Softmax| Facets
+    Search -->|Direct Image Vectorization| Ovis
+    Ovis -->|2048-dim Normalized Vectors| Vectors
+    Vectors -->|Visual Cosine Similarity| Card
+```
+
+- **Launcher**: `start_ovis_server.bat` or `npm run ovis:serve` (runs on `http://127.0.0.1:8082` with CUDA `bfloat16` acceleration).
+- **Direct Visual Ingestion**: Encodes raw physical image files on disk into normalized 2048-dim vectors without requiring generative LLM captioning first.
+- **Zero-Shot Taxonomic Classification**: Classifies images into artistic medium, emotional mood, and camera composition via dot-product cosine similarity against cached taxonomy embeddings.
+- **Visual "Find Similar"**: Ranks visually matching images by optical and stylistic similarity directly through vectors stored in `public/ovis-embeddings.json`.
+- **Batch Processing**: Streams background vector generation via `POST /api/maintenance/generate-ovis-embeddings`.
+
 ## ✨ Features
 
 - **Unified Lumina Navigation**: A consistent sidebar architecture across all pages (**Analysis, Database, Search, Tags, Map, Settings**).
@@ -141,13 +177,13 @@ graph LR
 
 1. **Node.js** (v18 or higher)
 2. **Local AI Server**:
-   * **llama-server.exe** (Default port `8080`, PR #26508 standard `9931`) with `--mmproj` projector for multimodal vision.
+   * **llama-server.exe** (Default port `8081`, PR #26508 standard `9931`) with `--mmproj` projector for multimodal vision.
    - **Vision Model**: (e.g., Qwen 3.5 VL) for analyzing images.
    - **Embedding Model**: (e.g., Nomic Embed Text) for Semantic Search.
 3. **Python 3.12+** (Optional, for Latent Scope integration)
 
 > **Dynamic Server Discovery:**  
-> Lumina automatically probes `llama-server` on ports `8080` and `9931`, checking model capabilities for vision (`multimodal`) and embeddings without requiring hardcoded configuration.
+> Lumina automatically probes `llama-server` on ports `8081` and `9931`, checking model capabilities for vision (`multimodal`) and embeddings without requiring hardcoded configuration.
 
 ### Installation
 
@@ -179,7 +215,7 @@ npm run dev
 npm run ls:serve
 ```
 
-> **Note**: Ensure `llama-server.exe` (port 8080) is running before analyzing or embedding images.
+> **Note**: Ensure `llama-server.exe` (port 8081) is running before analyzing or embedding images.
 
 ## ⚙️ How it Works (Automation)
 The project uses a custom automation system to keep the frontend high-performance and lightweight:
@@ -298,8 +334,8 @@ You can configure models via the **Settings UI** or by creating a `.env` file (a
 
 | Variable | Default Port / URL | Description |
 |----------|--------------------|-------------|
-| `LOCAL_AI_URL` | `http://127.0.0.1:8080` | Base URL for the multimodal vision `llama-server.exe` |
-| `EMBEDDING_SERVER_URL` | `http://127.0.0.1:8081` | Base URL for the text embeddings `llama-server.exe` |
+| `LOCAL_AI_URL` | `http://127.0.0.1:8081` | Base URL for the multimodal vision `llama-server.exe` |
+| `EMBEDDING_SERVER_URL` | `http://127.0.0.1:8083` | Base URL for the text embeddings `llama-server.exe` |
 | `LAYA_SERVER_URL` | `http://127.0.0.1:8765` | Base URL for the Laya ModernBERT fast classifier microservice |
 | `VISION_MODEL_ID` | `qwen3.5-9b` | Model alias/ID for multimodal image analysis |
 | `EMBEDDING_MODEL_ID` | `nomic-embed-text-v1.5` | Model alias/ID for 768-dim semantic search embeddings |

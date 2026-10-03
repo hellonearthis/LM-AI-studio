@@ -1373,6 +1373,10 @@ function showContextMenu(e, id, type, tag = null, card = null, dataType = null) 
 
     document.getElementById('ctxRegenThumb').style.display = type === 'thumbnail' ? 'block' : 'none';
     document.getElementById('ctxFindSimilar').style.display = (type === 'thumbnail' || type === 'tag') ? 'block' : 'none';
+    const ovis_classify_menu_item = document.getElementById('ctxOvisClassify');
+    if (ovis_classify_menu_item) {
+        ovis_classify_menu_item.style.display = type === 'thumbnail' ? 'block' : 'none';
+    }
     document.getElementById('ctxSearch').style.display = type === 'tag' ? 'block' : 'none';
     document.getElementById('ctxEdit').style.display = type === 'tag' ? 'block' : 'none';
     document.getElementById('ctxDelete').style.display = type === 'tag' ? 'block' : 'none';
@@ -1508,6 +1512,45 @@ if (ctxFindSimilar) {
         const targetId = ctxTarget.id;
         hideContextMenu();
         window.location.href = `search.html?similar=${targetId}`;
+    });
+}
+
+// WHAT: Event listener for Ovis-Omni Zero-Shot Visual Classification.
+// WHY: Allows the user to trigger immediate zero-shot facet classification for an image directly from the UI,
+//      evaluating medium, mood, and composition using raw vision embeddings without requiring full Qwen captioning.
+const context_menu_ovis_classify_button = document.getElementById('ctxOvisClassify');
+if (context_menu_ovis_classify_button) {
+    context_menu_ovis_classify_button.addEventListener('click', async (mouse_click_event) => {
+        mouse_click_event.stopPropagation();
+        if (!ctxTarget || !ctxTarget.id) return;
+        const target_image_database_identifier = ctxTarget.id;
+        hideContextMenu();
+
+        showToast('🧠 Running Ovis-Omni zero-shot visual classification...', 'info');
+
+        try {
+            const http_classification_response = await fetch('/api/ovis/classify-image', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    image_id: target_image_database_identifier,
+                    persist_to_database: true
+                })
+            });
+
+            if (!http_classification_response.ok) {
+                const error_response_payload = await http_classification_response.json();
+                throw new Error(error_response_payload.error || 'Classification failed');
+            }
+
+            const classification_result_payload = await http_classification_response.json();
+            const visual_medium_name = classification_result_payload.medium;
+            const visual_mood_name = classification_result_payload.mood;
+            showToast(`🧠 Facets Saved: ${visual_medium_name} • ${visual_mood_name}`, 'success');
+        } catch (zero_shot_classification_error) {
+            console.error('[OVIS-CLIENT] Classification error:', zero_shot_classification_error);
+            showToast(`Ovis classification failed: ${zero_shot_classification_error.message}`, 'error');
+        }
     });
 }
 

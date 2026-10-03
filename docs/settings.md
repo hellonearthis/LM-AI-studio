@@ -14,6 +14,13 @@ The Settings page allows you to configure the core behavior of the application, 
   - Probes the status of the ModernBERT fast classifier microservice.
   - Enables sub-15ms multi-faceted image tagging and query intent routing.
 
+- **Ovis-Omni Multimodal Engine (Port 8082)**:
+  - Serves `ATH-MaaS/Ovis-Omni-Embedding-3B` on CUDA for unified 2048-dimensional multimodal embeddings.
+  - **Zero-Shot Visual Classification**: Classifies images into artistic medium, mood, and composition directly from raw image tensors without generative text captioning.
+  - **Visual Find Similar**: Real-time image-to-image cosine similarity ranking.
+  - **Direct Batch Embedding**: Ingests image files into `public/ovis-embeddings.json`.
+  - Launch with `start_ovis_server.bat` or `npm run ovis:serve`.
+
 - **Data Map Analysis (EVoC Pipeline)**:
   - **Run Map Analysis**: Triggers unsupervised clustering and UMAP 2D projection using existing embeddings.
   - Synchronizes cluster coordinates and thematic labels for the Data Map visualization.

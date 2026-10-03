@@ -7,6 +7,149 @@
     align-items: center;
 }
 
+/* Thumbnail display controls (toggle + size slider) */
+.thumbnail-display-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.75rem;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+
+.thumbnail-toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+#thumbnailSizeSlider, #spatialSpacingSlider {
+    width: 75px;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+
+/* Cluster multi-select dropdown */
+.cluster-filter-dropdown {
+    position: relative;
+}
+
+.cluster-filter-button {
+    padding: 0.5rem 1rem;
+    background: var(--card-bg);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: border-color 0.2s;
+}
+
+.cluster-filter-button:hover,
+.cluster-filter-button[aria-expanded="true"] {
+    border-color: var(--accent);
+}
+
+.cluster-filter-panel {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    width: 320px;
+    background: rgba(18, 18, 32, 0.97);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+    z-index: 50;
+    padding: 0.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.cluster-filter-panel[hidden] {
+    display: none;
+}
+
+.cluster-filter-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.cluster-filter-actions button {
+    flex: 1;
+    padding: 0.4rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: background 0.2s;
+}
+
+.cluster-filter-actions button:hover {
+    background: var(--accent);
+    color: white;
+}
+
+.cluster-filter-search {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.4rem 0.6rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-color);
+    color: var(--text-primary);
+    font-size: 0.85rem;
+}
+
+.cluster-filter-list {
+    max-height: 360px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.cluster-filter-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.3rem 0.4rem;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 0.82rem;
+    color: var(--text-primary);
+}
+
+.cluster-filter-row:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.cluster-colour-swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    flex-shrink: 0;
+}
+
+.cluster-row-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cluster-row-count {
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+}
+
 /* Visualization Container */
 .scope-page-container {
     display: flex;
@@ -124,6 +267,55 @@
     max-width: 150px;
     text-align: center;
     word-break: break-word;
+}
+
+/* Right-click Context Menu */
+.scope-context-menu {
+    position: absolute;
+    background: rgba(18, 18, 32, 0.98);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.4rem;
+    z-index: 40;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.65);
+    display: flex;
+    flex-direction: column;
+    min-width: 180px;
+    gap: 0.25rem;
+}
+
+.context-menu-header {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 0.2rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
+}
+
+.context-menu-item {
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    padding: 0.45rem 0.65rem;
+    border-radius: 5px;
+    text-align: left;
+    cursor: pointer;
+    font-size: 0.82rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: background 0.15s, color 0.15s;
+}
+
+.context-menu-item:hover {
+    background: var(--accent);
+    color: white;
 }
 
 /* Buttons specifically for scope page if not global */

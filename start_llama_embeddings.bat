@@ -1,7 +1,7 @@
 @echo off
-title "llama-server (Text Embeddings on Port 8081)"
+title "llama-server (Text Embeddings on Port 8083)"
 
-:: WHAT: Launch script for llama-server.exe dedicated to Nomic text embeddings on port 8081.
+:: WHAT: Launch script for llama-server.exe dedicated to Nomic text embeddings on port 8083.
 :: WHY: Provides fast vector embedding generation for semantic search using llama.cpp with GPU offload.
 
 set "LLAMA_DIR=C:\llamaCPP"
@@ -15,7 +15,7 @@ if not exist "%LLAMA_DIR%\llama-server.exe" (
 cd /d "%LLAMA_DIR%"
 
 echo ======================================================================
-echo Starting llama-server for Text Embeddings on port 8081...
+echo Starting llama-server for Text Embeddings on port 8083...
 echo Model: Nomic Embed Text v1.5 (F16)
 echo ======================================================================
 
@@ -25,7 +25,7 @@ llama-server.exe ^
   -ngl 99 ^
   -c 2048 ^
   --host 127.0.0.1 ^
-  --port 8081 ^
+  --port 8083 ^
   --alias nomic-embed-text-v1.5,default-embed
 
 if %errorlevel% neq 0 (

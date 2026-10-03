@@ -16,6 +16,8 @@ public/search-index.json
 
 public/search-data.json
 public/search-embeddings.json
+public/*-embeddings.json
+public/ovis-embeddings.json
 images_clustered*.csv
 tmp/
 config.json

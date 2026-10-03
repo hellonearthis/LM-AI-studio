@@ -5,9 +5,9 @@ cd /d "%~dp0"
 
 :: ============================================================================
 :: WHAT: Automated launcher for LM AI Studio and its local AI microservices.
-:: WHY: Ensures that the local vision server (port 8080), embedding server
-::      (port 8081), and Laya classifier (port 8765) are active before launching
-::      the Electron interface, so all image analysis and vector search work.
+:: WHY: Ensures that the local vision server (port 8081), embedding server
+::      (port 8083), Ovis engine (port 8082), and Laya classifier (port 8765)
+::      are active before launching the Electron interface.
 :: ============================================================================
 
 :: Configurable Vision Model launch script:
@@ -22,31 +22,45 @@ echo Verifying local AI backend services...
 echo.
 
 :: ----------------------------------------------------------------------------
-:: 1. Vision Server Probe & Startup (Port 8080)
-:: ----------------------------------------------------------------------------
-curl.exe -s -f -o NUL http://127.0.0.1:8080/health
-if errorlevel 1 (
-    echo [INFO] Vision Server on port 8080 is offline.
-    echo Starting llama-server with Vision Model in a new window...
-    start "llama-server-vision" cmd /k "call %VISION_LAUNCH_SCRIPT%"
-) else (
-    echo [OK] Vision Server on port 8080 is online.
-)
-
-:: ----------------------------------------------------------------------------
-:: 2. Embeddings Server Probe & Startup (Port 8081)
+:: 1. Vision Server Probe & Startup (Port 8081)
 :: ----------------------------------------------------------------------------
 curl.exe -s -f -o NUL http://127.0.0.1:8081/health
 if errorlevel 1 (
-    echo [INFO] Embedding Server on port 8081 is offline.
-    echo Starting llama-server with Nomic Embeddings in a new window...
-    start "llama-server-embeddings" cmd /k "call start_llama_embeddings.bat"
+    echo [INFO] Vision Server on port 8081 is offline.
+    echo Starting llama-server with Vision Model in a new window...
+    start "llama-server-vision" cmd /k "call %VISION_LAUNCH_SCRIPT%"
 ) else (
-    echo [OK] Embedding Server on port 8081 is online.
+    echo [OK] Vision Server on port 8081 is online.
 )
 
 :: ----------------------------------------------------------------------------
-:: 3. Laya Classifier Server Probe & Startup (Port 8765)
+:: 2. Embeddings Server Probe & Startup (Port 8083)
+:: ----------------------------------------------------------------------------
+curl.exe -s -f -o NUL http://127.0.0.1:8083/health
+if errorlevel 1 (
+    echo [INFO] Embedding Server on port 8083 is offline.
+    echo Starting llama-server with Nomic Embeddings in a new window...
+    start "llama-server-embeddings" cmd /k "call start_llama_embeddings.bat"
+) else (
+    echo [OK] Embedding Server on port 8083 is online.
+)
+
+:: ----------------------------------------------------------------------------
+:: 3. Ovis-Omni Multimodal Microservice Probe & Startup (Port 8082)
+:: ----------------------------------------------------------------------------
+if exist "start_ovis_server.bat" (
+    curl.exe -s -f -o NUL http://127.0.0.1:8082/health
+    if errorlevel 1 (
+        echo [INFO] Ovis-Omni Engine on port 8082 is offline.
+        echo Starting Ovis-Omni Multimodal Server in a new window...
+        start "ovis-omni-server" cmd /k "call start_ovis_server.bat"
+    ) else (
+        echo [OK] Ovis-Omni Engine on port 8082 is online.
+    )
+)
+
+:: ----------------------------------------------------------------------------
+:: 4. Laya Classifier Server Probe & Startup (Port 8765)
 :: ----------------------------------------------------------------------------
 if exist "start_laya_server.bat" (
     curl.exe -s -f -o NUL http://127.0.0.1:8765/health

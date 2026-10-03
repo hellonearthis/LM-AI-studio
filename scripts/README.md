@@ -42,6 +42,10 @@ Synchronizes your local SQLite database with Latent Scope's native Parquet forma
 ### `inspect_parquet.py`
 - **Purpose**: Quick utility to print the schema and first few rows of a `.parquet` file for debugging data alignment issues.
 
+### `test_ovis_integration.js`
+- **Purpose**: Probes the Ovis-Omni Multimodal microservice on port 8082, verifies CUDA device detection, and tests zero-shot classification taxonomies.
+- **Usage**: `node scripts/test_ovis_integration.js`
+
 ---
 
 ## 📋 Requirements

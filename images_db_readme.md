@@ -70,9 +70,10 @@ This is the core table that tracks all physical image files successfully ingeste
 | `mtime` | INTEGER | | The native filesystem 'Modified Time' for tracking file system updates. |
 
 ### 2. `image_facets`
-A structured taxonomic table populated at lightning speed (~10ms/record) by the **Laya Decision Engine** (`convaiinnovations/laya` running on port 8765).
+A structured taxonomic table populated at lightning speed (~10–30ms/record) by either the **Laya Decision Engine** (via text analysis, port 8765) or the **Ovis-Omni Multimodal Engine** (via direct zero-shot raw image inference, port 8082).
 - **Indices**: Dedicated B-Tree indices on `medium`, `mood`, and `composition` for instant faceted filtering.
 - **Foreign Key**: `image_id` references `images(id)` with `ON DELETE CASCADE`.
+- **Zero-Shot Direct Visual Classification**: Ovis-Omni enables classifying newly ingested images into these facets before running any generative text descriptions.
 
 | Column | Type | Description |
 | :--- | :--- | :--- |

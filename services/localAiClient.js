@@ -9,7 +9,7 @@
 export class LocalAIClient {
     /**
      * WHAT: Initializes the LocalAIClient instance with candidate endpoints and default fallback state.
-     * WHY: Applications need a reliable list of standard ports (8080 for llama-server, 1234 for LM Studio,
+     * WHY: Applications need a reliable list of standard ports (8081 for llama-server, 1234 for LM Studio,
      *      and 9931 for upcoming llama.cpp standards) to automatically establish contact without manual user setup.
      */
     constructor() {
@@ -18,8 +18,8 @@ export class LocalAIClient {
 
         const standard_candidate_endpoints = [
             environment_specified_endpoint,
-            'http://127.0.0.1:8080',
-            'http://localhost:8080',
+            'http://127.0.0.1:8081',
+            'http://localhost:8081',
             'http://127.0.0.1:9931',
             'http://localhost:9931'
         ];
@@ -35,14 +35,14 @@ export class LocalAIClient {
         );
 
         // WHAT: Initializing candidate endpoints dedicated for vector text embeddings.
-        // WHY: Users running llama.cpp typically run a separate lightweight instance on port 8081 for fast embeddings.
+        // WHY: Users running llama.cpp typically run a separate lightweight instance on port 8083 for fast embeddings.
         const environment_specified_embedding_endpoint = process.env.LOCAL_EMBEDDING_URL;
         const standard_candidate_embedding_endpoints = [
             environment_specified_embedding_endpoint,
+            'http://127.0.0.1:8083',
+            'http://localhost:8083',
             'http://127.0.0.1:8081',
-            'http://localhost:8081',
-            'http://127.0.0.1:8080',
-            'http://localhost:8080'
+            'http://localhost:8081'
         ];
 
         this.candidate_embedding_endpoint_urls = Array.from(
@@ -253,7 +253,7 @@ export class LocalAIClient {
             }
         }
 
-        // Fallback: If 8081 is not running, but 8080 is online, use 8080
+        // Fallback: If 8083 is not running, but 8081 is online, use 8081
         if (this.active_endpoint_url) {
             this.active_embedding_endpoint_url = this.active_endpoint_url;
             return this.active_embedding_endpoint_url;
@@ -285,7 +285,7 @@ export class LocalAIClient {
     }
 
     /**
-     * WHAT: Aggregates model lists from both the vision server (e.g., port 8080) and dedicated embedding server (port 8081).
+     * WHAT: Aggregates model lists from both the vision server (e.g., port 8081) and dedicated embedding server (port 8083).
      * WHY: In the UI settings, users need to see and configure both the vision model and the embedding model
      *      even when they are served by separate llama-server processes running on distinct ports.
      * 
@@ -333,7 +333,7 @@ export class LocalAIClient {
     }
 
     /**
-     * WHAT: Returns the base endpoint URL of the active server (e.g., "http://127.0.0.1:8080").
+     * WHAT: Returns the base endpoint URL of the active server (e.g., "http://127.0.0.1:8081").
      * WHY: Needed when formulating sub-routes such as /v1/chat/completions or /v1/embeddings.
      */
     getActiveEndpointUrl() {
@@ -372,19 +372,19 @@ export class LocalAIClient {
      * WHY: Centralizes endpoint construction so consumers never hardcode '/v1/chat/completions'.
      */
     getChatCompletionsUrl() {
-        const base_url = this.active_endpoint_url || 'http://127.0.0.1:8080';
+        const base_url = this.active_endpoint_url || 'http://127.0.0.1:8081';
         return `${base_url}/v1/chat/completions`;
     }
 
     /**
      * WHAT: Returns the full HTTP URL for Text Embeddings.
-     * WHY: Centralizes endpoint construction for semantic vector indexing, pointing to port 8081 if dedicated or 8080 fallback.
+     * WHY: Centralizes endpoint construction for semantic vector indexing, pointing to port 8083 if dedicated or 8081 fallback.
      */
     getEmbeddingsUrl() {
         if (this.active_embedding_endpoint_url) {
             return `${this.active_embedding_endpoint_url}/v1/embeddings`;
         }
-        const base_url = this.active_endpoint_url || 'http://127.0.0.1:8080';
+        const base_url = this.active_endpoint_url || 'http://127.0.0.1:8081';
         return `${base_url}/v1/embeddings`;
     }
 
@@ -393,7 +393,7 @@ export class LocalAIClient {
      * WHY: Provides proxy routes with the upstream /v1/models endpoint location.
      */
     getModelsUrl() {
-        const base_url = this.active_endpoint_url || 'http://127.0.0.1:8080';
+        const base_url = this.active_endpoint_url || 'http://127.0.0.1:8081';
         return `${base_url}/v1/models`;
     }
 
@@ -422,7 +422,7 @@ export class LocalAIClient {
         } else {
             diagnostic_lines.push(
                 'VISION SERVER: OFFLINE',
-                '  Status: No active vision server listening on port 8080.',
+                '  Status: No active vision server listening on port 8081.',
                 '  Recommended Action: Run start_llama_server.bat (or start_llama_vision_4b.bat for low-VRAM).'
             );
         }
@@ -439,8 +439,8 @@ export class LocalAIClient {
         } else {
             diagnostic_lines.push(
                 'EMBEDDING SERVER: OFFLINE',
-                '  Status: No dedicated embedding server listening on port 8081.',
-                '  Recommended Action: Run start_llama_embeddings.bat on port 8081.'
+                '  Status: No dedicated embedding server listening on port 8083.',
+                '  Recommended Action: Run start_llama_embeddings.bat on port 8083.'
             );
         }
 

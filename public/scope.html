@@ -49,6 +49,9 @@
                 <span class="nav-icon">🗺️</span> Map <span
                     style="font-size: 0.7em; opacity: 0.7; margin-left: 5px;">(β)</span>
             </a>
+            <a href="settings.html" class="nav-item">
+                <span class="nav-icon">⚙️</span> Settings
+            </a>
         </div>
     </nav>
 
@@ -67,6 +70,36 @@
                 </div>
 
                 <div class="scope-header-controls" style="display: flex; align-items: center;">
+                    <!-- Thumbnail display controls -->
+                    <div class="thumbnail-display-controls">
+                        <label class="thumbnail-toggle-label" for="showThumbnailsCheckbox">
+                            <input type="checkbox" id="showThumbnailsCheckbox" checked> 🖼️ Thumbnails
+                        </label>
+                        <span style="font-size: 0.75rem; color: var(--text-secondary); margin-left: 0.25rem;">Size:</span>
+                        <input type="range" id="thumbnailSizeSlider" min="8" max="72" value="16" step="2"
+                            title="Thumbnail size">
+                        <span style="font-size: 0.75rem; color: var(--text-secondary); margin-left: 0.5rem;">Spacing:</span>
+                        <input type="range" id="spatialSpacingSlider" min="1" max="10" value="2.5" step="0.5"
+                            title="Spread / spacing between images">
+                    </div>
+
+                    <!-- Cluster multi-select dropdown -->
+                    <div class="cluster-filter-dropdown" id="clusterFilterDropdown">
+                        <button id="clusterFilterButton" class="cluster-filter-button" type="button"
+                            aria-haspopup="true" aria-expanded="false">
+                            🎨 Clusters: <span id="clusterFilterSummary">All</span> ▾
+                        </button>
+                        <div id="clusterFilterPanel" class="cluster-filter-panel" hidden>
+                            <div class="cluster-filter-actions">
+                                <button id="clusterSelectAllButton" type="button">Select All</button>
+                                <button id="clusterSelectNoneButton" type="button">Select None</button>
+                            </div>
+                            <input type="search" id="clusterFilterSearchInput" class="cluster-filter-search"
+                                placeholder="Filter clusters...">
+                            <div id="clusterFilterList" class="cluster-filter-list"></div>
+                        </div>
+                    </div>
+
                     <div class="toggle-group" style="display: flex; background: var(--card-bg); border-radius: 6px; overflow: hidden; border: 1px solid var(--border); margin-right: 1rem;">
                         <button id="toggleParquetBtn" style="padding: 0.5rem 1rem; border: none; background: var(--accent); color: white; cursor: pointer; transition: background 0.2s;">Latent Scope</button>
                         <button id="toggleDbBtn" style="padding: 0.5rem 1rem; border: left 1px solid var(--border); background: transparent; color: var(--text-primary); cursor: pointer; transition: background 0.2s;">Evoc DB</button>
@@ -94,6 +127,20 @@
                 <div id="vizTooltip" class="viz-tooltip" style="display: none;">
                     <img id="tooltipImg" src="" alt="">
                     <div id="tooltipText" class="tooltip-label"></div>
+                </div>
+
+                <!-- Custom Right-Click Context Menu -->
+                <div id="scopeContextMenu" class="scope-context-menu" style="display: none;">
+                    <div id="contextMenuHeader" class="context-menu-header"></div>
+                    <button id="contextMenuHideClusterBtn" class="context-menu-item" type="button">
+                        🚫 Hide this cluster
+                    </button>
+                    <button id="contextMenuIsolateClusterBtn" class="context-menu-item" type="button">
+                        🎯 Only show this cluster
+                    </button>
+                    <button id="contextMenuOpenFileBtn" class="context-menu-item" type="button">
+                        📂 Show in folder
+                    </button>
                 </div>
 
                 <!-- Loading Overlay -->

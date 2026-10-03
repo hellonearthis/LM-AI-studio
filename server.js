@@ -16,6 +16,7 @@ import util from 'util';
 
 import { local_ai_client_instance } from './services/localAiClient.js';
 import { laya_client_instance } from './services/layaClient.js';
+import { ovis_omni_client_instance } from './services/ovisOmniClient.js';
 
 // ... [Inside existing routes, add generateSearchIndex() calls]
 
@@ -29,7 +30,7 @@ const app = express();
 const PORT = 3000;
 
 // WHAT: Initializing the dynamic Local AI Client for port and model discovery.
-// WHY: We automatically connect to llama-server on port 8080 (or 9931).
+// WHY: We automatically connect to llama-server on port 8081 (or 9931).
 local_ai_client_instance.discoverActiveModel().catch((initial_discovery_error) => {
     console.warn('[SERVER] Initial llama-server discovery warning:', initial_discovery_error.message);
 });
@@ -447,7 +448,7 @@ function deduplicateTags(analysis) {
 
 /**
  * WHAT: Performs AI vision analysis on an image buffer using dynamic llama-server discovery.
- * WHY: Discovers llama-server (port 8080), verifies that the loaded model supports multimodal projector features,
+ * WHY: Discovers llama-server (port 8081), verifies that the loaded model supports multimodal projector features,
  *      and dispatches OpenAI-compatible requests.
  */
 async function performImageAnalysis(imageData, promptType) {
@@ -459,7 +460,7 @@ async function performImageAnalysis(imageData, promptType) {
     });
 
     if (!discovered_model_summary) {
-        throw new Error('llama-server is offline. Please launch start_llama_server.bat on port 8080.');
+        throw new Error('llama-server is offline. Please launch start_llama_server.bat on port 8081.');
     }
 
     if (!discovered_model_summary.has_multimodal_vision) {
@@ -1638,7 +1639,7 @@ app.post('/regenerate-thumbnail', async (req, res) => {
 });
 
 // WHAT: Semantic Search Embedding Proxy endpoint.
-// WHY: Proxies client vectorization requests to the active llama-server instance (port 8080),
+// WHY: Proxies client vectorization requests to the active llama-server instance (port 8083),
 //      enabling concept-based image searching without hardcoded endpoints.
 app.post('/api/embed', async (http_incoming_request, http_server_response) => {
     const text_content_to_embed = http_incoming_request.body.text;
@@ -1727,20 +1728,20 @@ app.post('/api/config', (req, res) => {
 });
 
 // WHAT: OpenAI-compatible Model Discovery Proxy endpoint.
-// WHY: Returns the combined list of models exposed by active llama-server instances (port 8080 and port 8081),
+// WHY: Returns the combined list of models exposed by active llama-server instances (port 8081 and port 8083),
 //      so the frontend settings dropdown and search status indicator reflect all running models.
 app.get('/api/proxy/models', async (http_incoming_request, http_server_response) => {
     try {
         const combined_models_payload = await local_ai_client_instance.fetchCombinedModelsList();
         if (!combined_models_payload.data || combined_models_payload.data.length === 0) {
             return http_server_response.status(502).json({
-                error: 'No active llama-server instances detected. Ensure llama-server is running on port 8080 or 8081.'
+                error: 'No active llama-server instances detected. Ensure llama-server is running on port 8081 or 8083.'
             });
         }
         http_server_response.json(combined_models_payload);
     } catch (models_proxy_error) {
         http_server_response.status(502).json({
-            error: 'Failed to fetch models from llama-server. Ensure llama-server (port 8080 / 8081) is running.'
+            error: 'Failed to fetch models from llama-server. Ensure llama-server (port 8081 / 8083) is running.'
         });
     }
 });
@@ -1756,7 +1757,7 @@ app.post('/api/proxy/load', async (http_incoming_request, http_server_response) 
             success: true,
             message: discovered_model_summary
                 ? `Active model is managed by llama-server: ${discovered_model_summary.model_identifier}. llama-server loads weights via startup flags.`
-                : 'llama-server is currently offline. Please launch start_llama_server.bat on port 8080.'
+                : 'llama-server is currently offline. Please launch start_llama_server.bat on port 8081.'
         });
     } catch (model_load_error) {
         console.error('[PROXY] Load error:', model_load_error.message);
@@ -2027,6 +2028,306 @@ app.post('/api/facets/batch-classify', async (http_incoming_request, http_server
     }
 });
 
+// ============================================================================
+// OVIS-OMNI MULTIMODAL EMBEDDING & ZERO-SHOT CLASSIFICATION ENDPOINTS
+// ============================================================================
+
+/**
+ * ENDPOINT: Get Ovis-Omni Service Status
+ * 
+ * WHAT: Probes the health and GPU status of the Ovis-Omni microservice on port 8082.
+ * WHY: The UI and diagnostics need to know if the 3B multimodal model is loaded and ready.
+ */
+app.get('/api/ovis/health', async (http_incoming_request, http_server_response) => {
+    try {
+        const is_ovis_service_online = await ovis_omni_client_instance.checkHealth(true);
+        http_server_response.json({
+            online: is_ovis_service_online,
+            endpoint_url: ovis_omni_client_instance.active_endpoint_url,
+            hardware_device: ovis_omni_client_instance.detected_hardware_device_name,
+            embedding_dimensions: ovis_omni_client_instance.embedding_vector_dimensions
+        });
+    } catch (health_probe_error) {
+        http_server_response.status(500).json({
+            online: false,
+            error: health_probe_error.message
+        });
+    }
+});
+
+/**
+ * ENDPOINT: Zero-Shot Visual Classification for a Single Image
+ * 
+ * WHAT: Classifies an image directly from disk into medium, mood, and composition using Ovis-Omni.
+ * WHY: Unlike LLM text captioning, this compares visual features directly against category embeddings
+ *      in a single forward pass (~30ms), allowing instant classification even without text descriptions.
+ */
+app.post('/api/ovis/classify-image', async (http_incoming_request, http_server_response) => {
+    const target_image_identifier = http_incoming_request.body.image_id;
+    const should_persist_to_database = http_incoming_request.body.persist_to_database ?? true;
+
+    if (!target_image_identifier) {
+        return http_server_response.status(400).json({ error: 'Image ID is required for classification.' });
+    }
+
+    try {
+        const candidate_image_record = db.prepare('SELECT id, filename, path FROM images WHERE id = ?').get(target_image_identifier);
+        if (!candidate_image_record) {
+            return http_server_response.status(404).json({ error: `Image with ID ${target_image_identifier} was not found.` });
+        }
+
+        const physical_image_file_path = candidate_image_record.path;
+        if (!fs.existsSync(physical_image_file_path)) {
+            return http_server_response.status(404).json({ error: `Source image file missing on disk: ${physical_image_file_path}` });
+        }
+
+        // Run classifications across the standard visual taxonomies
+        const medium_classification_result = await ovis_omni_client_instance.classifyImageZeroShot(
+            physical_image_file_path,
+            ovis_omni_client_instance.standard_classification_taxonomies.visual_medium,
+            'medium'
+        );
+
+        const mood_classification_result = await ovis_omni_client_instance.classifyImageZeroShot(
+            physical_image_file_path,
+            ovis_omni_client_instance.standard_classification_taxonomies.visual_mood,
+            'mood'
+        );
+
+        const composition_classification_result = await ovis_omni_client_instance.classifyImageZeroShot(
+            physical_image_file_path,
+            ovis_omni_client_instance.standard_classification_taxonomies.composition_framing,
+            'composition'
+        );
+
+        const classification_summary_payload = {
+            image_id: candidate_image_record.id,
+            filename: candidate_image_record.filename,
+            medium: medium_classification_result.top_label,
+            confidence_medium: medium_classification_result.top_confidence,
+            mood: mood_classification_result.top_label,
+            confidence_mood: mood_classification_result.top_confidence,
+            composition: composition_classification_result.top_label,
+            confidence_composition: composition_classification_result.top_confidence,
+            detail_score: 1.0,
+            full_predictions: {
+                medium: medium_classification_result.predictions,
+                mood: mood_classification_result.predictions,
+                composition: composition_classification_result.predictions
+            }
+        };
+
+        if (should_persist_to_database) {
+            const upsert_facet_statement = db.prepare(`
+                INSERT OR REPLACE INTO image_facets (
+                    image_id, medium, mood, composition, detail_score,
+                    confidence_medium, confidence_mood, confidence_composition
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            `);
+
+            upsert_facet_statement.run(
+                candidate_image_record.id,
+                classification_summary_payload.medium,
+                classification_summary_payload.mood,
+                classification_summary_payload.composition,
+                classification_summary_payload.detail_score,
+                classification_summary_payload.confidence_medium,
+                classification_summary_payload.confidence_mood,
+                classification_summary_payload.confidence_composition
+            );
+        }
+
+        http_server_response.json(classification_summary_payload);
+    } catch (zero_shot_classification_error) {
+        console.error('[OVIS-CLASSIFY] Error:', zero_shot_classification_error);
+        http_server_response.status(500).json({
+            error: 'Failed to execute zero-shot classification',
+            details: zero_shot_classification_error.message
+        });
+    }
+});
+
+/**
+ * ENDPOINT: Visual "Find Similar" via Direct Multimodal Cosine Similarity
+ * 
+ * WHAT: Finds the closest images to a target image by comparing Ovis 2048-dim vectors.
+ * WHY: Provides true optical/stylistic visual matching without depending on text keywords or tag overlap.
+ */
+app.post('/api/ovis/find-similar', async (http_incoming_request, http_server_response) => {
+    const target_image_identifier = http_incoming_request.body.image_id;
+    const requested_result_limit = http_incoming_request.body.limit || 20;
+
+    if (!target_image_identifier) {
+        return http_server_response.status(400).json({ error: 'Image ID is required.' });
+    }
+
+    try {
+        const target_image_record = db.prepare('SELECT id, filename, path FROM images WHERE id = ?').get(target_image_identifier);
+        if (!target_image_record) {
+            return http_server_response.status(404).json({ error: 'Target image not found.' });
+        }
+
+        const OVIS_EMBEDDINGS_FILE_PATH = path.join(__dirname, 'public', 'ovis-embeddings.json');
+        let existing_ovis_embeddings_map = {};
+
+        if (fs.existsSync(OVIS_EMBEDDINGS_FILE_PATH)) {
+            try {
+                existing_ovis_embeddings_map = JSON.parse(fs.readFileSync(OVIS_EMBEDDINGS_FILE_PATH, 'utf8'));
+            } catch (file_read_error) {
+                console.warn('[OVIS-SIMILAR] Could not parse existing ovis-embeddings.json:', file_read_error.message);
+            }
+        }
+
+        // If target image doesn't have an embedding cached, generate it on the fly
+        let target_image_vector = existing_ovis_embeddings_map[String(target_image_record.id)];
+        if (!target_image_vector) {
+            target_image_vector = await ovis_omni_client_instance.generateImageEmbedding(target_image_record.path);
+            existing_ovis_embeddings_map[String(target_image_record.id)] = target_image_vector;
+            fs.writeFileSync(OVIS_EMBEDDINGS_FILE_PATH, JSON.stringify(existing_ovis_embeddings_map));
+        }
+
+        // Calculate cosine similarity against all other cached image vectors
+        const similarity_ranking_candidates = [];
+        const candidate_image_identifiers = Object.keys(existing_ovis_embeddings_map);
+
+        for (const candidate_identifier_string of candidate_image_identifiers) {
+            if (candidate_identifier_string === String(target_image_identifier)) continue;
+
+            const candidate_vector = existing_ovis_embeddings_map[candidate_identifier_string];
+            if (!Array.isArray(candidate_vector) || candidate_vector.length !== target_image_vector.length) continue;
+
+            // Dot product between normalized vectors equals cosine similarity
+            let calculated_dot_product_accumulator = 0.0;
+            for (let vector_dimension_index = 0; vector_dimension_index < target_image_vector.length; vector_dimension_index++) {
+                calculated_dot_product_accumulator += target_image_vector[vector_dimension_index] * candidate_vector[vector_dimension_index];
+            }
+
+            similarity_ranking_candidates.push({
+                image_id: parseInt(candidate_identifier_string, 10),
+                similarity_score: calculated_dot_product_accumulator
+            });
+        }
+
+        // Sort descending by similarity
+        similarity_ranking_candidates.sort((first_candidate, second_candidate) => second_candidate.similarity_score - first_candidate.similarity_score);
+        const top_ranked_similar_images = similarity_ranking_candidates.slice(0, requested_result_limit);
+
+        // Fetch image metadata for the top results
+        const enriched_similar_images = [];
+        for (const ranking_entry of top_ranked_similar_images) {
+            const matched_image_metadata = db.prepare('SELECT id, filename, path, analysis FROM images WHERE id = ?').get(ranking_entry.image_id);
+            if (matched_image_metadata) {
+                enriched_similar_images.push({
+                    id: matched_image_metadata.id,
+                    filename: matched_image_metadata.filename,
+                    similarity_score: Math.round(ranking_entry.similarity_score * 1000) / 1000,
+                    analysis: matched_image_metadata.analysis
+                });
+            }
+        }
+
+        http_server_response.json({
+            target_image_id: target_image_record.id,
+            total_compared_count: candidate_image_identifiers.length,
+            similar_images: enriched_similar_images
+        });
+
+    } catch (find_similar_error) {
+        console.error('[OVIS-SIMILAR] Error:', find_similar_error);
+        http_server_response.status(500).json({
+            error: 'Failed to compute visual similarity',
+            details: find_similar_error.message
+        });
+    }
+});
+
+/**
+ * ENDPOINT: Batch Generate Ovis-Omni Multimodal Embeddings
+ * 
+ * WHAT: Scans local image files on disk and streams real-time generation of 2048-dim vectors.
+ * WHY: Writes to public/ovis-embeddings.json, creating a dedicated visual vector database
+ *      for instant image-to-image similarity, cross-modal retrieval, and perceptual UMAP maps.
+ */
+app.post('/api/maintenance/generate-ovis-embeddings', async (http_incoming_request, http_server_response) => {
+    const is_ovis_service_online = await ovis_omni_client_instance.checkHealth(true);
+    if (!is_ovis_service_online) {
+        return http_server_response.status(503).json({
+            error: 'Ovis-Omni microservice is offline on port 8082. Please launch start_ovis_server.bat.'
+        });
+    }
+
+    http_server_response.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    http_server_response.setHeader('Transfer-Encoding', 'chunked');
+
+    try {
+        http_server_response.write('[OVIS-MAINTENANCE] Starting background multimodal image embedding...\n');
+
+        const all_registered_images = db.prepare('SELECT id, filename, path FROM images').all();
+        http_server_response.write(`Found ${all_registered_images.length} images registered in the database.\n`);
+
+        const OVIS_EMBEDDINGS_FILE_PATH = path.join(__dirname, 'public', 'ovis-embeddings.json');
+        let existing_ovis_embeddings_map = {};
+
+        if (fs.existsSync(OVIS_EMBEDDINGS_FILE_PATH)) {
+            try {
+                existing_ovis_embeddings_map = JSON.parse(fs.readFileSync(OVIS_EMBEDDINGS_FILE_PATH, 'utf8'));
+                http_server_response.write(`Resume mode: Found ${Object.keys(existing_ovis_embeddings_map).length} existing embeddings. Skipping already processed files.\n`);
+            } catch (json_parse_error) {
+                http_server_response.write('Existing ovis-embeddings.json was unreadable. Starting fresh.\n');
+            }
+        }
+
+        let successfully_embedded_images_count = 0;
+        let skipped_existing_images_count = 0;
+        let failed_images_count = 0;
+
+        for (const candidate_image_record of all_registered_images) {
+            if (http_server_response.writableEnded || http_server_response.closed) {
+                console.log('[OVIS-MAINTENANCE] Client disconnected. Terminating generation loop.');
+                break;
+            }
+
+            if (existing_ovis_embeddings_map[String(candidate_image_record.id)]) {
+                skipped_existing_images_count++;
+                continue;
+            }
+
+            if (!fs.existsSync(candidate_image_record.path)) {
+                failed_images_count++;
+                continue;
+            }
+
+            try {
+                const generated_image_vector = await ovis_omni_client_instance.generateImageEmbedding(candidate_image_record.path);
+                existing_ovis_embeddings_map[String(candidate_image_record.id)] = generated_image_vector;
+                successfully_embedded_images_count++;
+
+                if (successfully_embedded_images_count % 10 === 0) {
+                    http_server_response.write(`Progress: Embedded ${successfully_embedded_images_count} new images...\n`);
+                }
+
+                // Checkpoint save every 25 images
+                if (successfully_embedded_images_count % 25 === 0) {
+                    fs.writeFileSync(OVIS_EMBEDDINGS_FILE_PATH, JSON.stringify(existing_ovis_embeddings_map));
+                }
+            } catch (single_image_embedding_error) {
+                failed_images_count++;
+                http_server_response.write(`! Warning on ID ${candidate_image_record.id}: ${single_image_embedding_error.message}\n`);
+            }
+        }
+
+        // Final save
+        fs.writeFileSync(OVIS_EMBEDDINGS_FILE_PATH, JSON.stringify(existing_ovis_embeddings_map));
+        http_server_response.write(`\n[COMPLETE] Successfully generated ${successfully_embedded_images_count} Ovis-Omni visual embeddings (Skipped: ${skipped_existing_images_count}, Errors: ${failed_images_count}).\n`);
+        http_server_response.end();
+
+    } catch (batch_generation_error) {
+        console.error('[OVIS-MAINTENANCE] Critical error:', batch_generation_error);
+        http_server_response.write(`\nCRITICAL ERROR: ${batch_generation_error.message}\n`);
+        http_server_response.end();
+    }
+});
+
 // WHAT: System Diagnostics endpoint.
 // WHY: Returns comprehensive runtime diagnostics detailing active local AI server discovery,
 //      multimodal vision projector status, context window sizes, and configuration sources.
@@ -2035,6 +2336,11 @@ app.get('/api/diagnostics', async (http_incoming_request, http_server_response) 
     const discovered_model_summary = await local_ai_client_instance.discoverActiveModel({
         force_refresh: true
     });
+
+    const is_ovis_service_online = await ovis_omni_client_instance.checkHealth();
+    const ovis_status_description = is_ovis_service_online
+        ? `ONLINE on ${ovis_omni_client_instance.active_endpoint_url} (${ovis_omni_client_instance.detected_hardware_device_name}, 2048-dim)`
+        : 'OFFLINE (Run start_ovis_server.bat on port 8082)';
 
     let active_vision_source_description = 'Auto-detect (Dynamic Local AI Discovery)';
     let active_vision_model_identifier = 'Offline (Server unreachable)';
@@ -2068,7 +2374,7 @@ app.get('/api/diagnostics', async (http_incoming_request, http_server_response) 
 
     const server_status_description = discovered_model_summary
         ? `${discovered_model_summary.backend_type} on ${discovered_model_summary.endpoint_url}`
-        : 'OFFLINE (Probe failed on ports 8080, 9931)';
+        : 'OFFLINE (Probe failed on ports 8081, 9931)';
 
     const vision_support_status_description = discovered_model_summary
         ? (discovered_model_summary.has_multimodal_vision ? 'Supported (Multimodal projector verified)' : 'Missing vision capability (--mmproj needed)')
@@ -2086,6 +2392,8 @@ Vision Source:     ${active_vision_source_description}
 
 Embedding Model:   ${active_embedding_model_identifier}
 Embedding Source:  ${active_embedding_source_description}
+
+Ovis-Omni Engine:  ${ovis_status_description}
 
 Config Path:       ${CONFIG_PATH}
     `;
