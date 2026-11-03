@@ -1,0 +1,56 @@
+version: "1.0.0"
+domain: "Lumina Studio Semantic Media Intelligence"
+terms:
+  image_facet_taxonomy:
+    definition: "Curated categorical schema classifying visual assets across visual_medium, mood, and composition facets."
+    sources: ["services/layaClient.js", "public/search.js"]
+
+  pure_transformation:
+    definition: "Deterministic mathematical mapping accepting immutable inputs and yielding outputs with zero external side effects or state mutations."
+    sources: ["public/search-worker.js", "public/pretext-layout.js"]
+
+  imperative_shell:
+    definition: "Outermost execution boundary handling side effects including DOM manipulation, SQLite storage, IPC messaging, and network I/O."
+    sources: ["server.js", "main.js", "public/database.js", "public/scope.js"]
+
+  reciprocal_rank_fusion:
+    definition: "Hybrid information retrieval algorithm harmonizing disparate rank lists from fuzzy text matching and semantic vector cosine similarity."
+    sources: ["public/search-worker.js", "public/search.js"]
+
+  pretext_layout_engine:
+    definition: "Reflow-free text measurement engine calculating exact line breaks and card heights purely via mathematical typography buffers."
+    sources: ["public/pretext-layout.js"]
+
+  semantic_embedding_vector:
+    definition: "Normalized high-dimensional floating-point array encoding multimodal image semantics for nearest-neighbor retrieval."
+    sources: ["public/search-worker.js", "public/scope.js"]
+
+  scope_map_projection:
+    definition: "Dimensionality reduction rendering pipeline projecting 768-dimensional visual vectors onto a 2D interactive canvas via UMAP."
+    sources: ["public/scope.js"]
+
+  duckdb_wasm_bridge:
+    definition: "In-browser WebAssembly analytical database engine executing columnar SQL queries over local Parquet and Arrow binary files."
+    sources: ["public/scope.js"]
+
+  html_sanitization_pipe:
+    definition: "Deterministic pure string replacement filter converting HTML control characters to entity representations to prevent XSS injection."
+    sources: ["public/search.js", "public/database.js"]
+
+  can_be_long_protocol:
+    definition: "Architecture standard mandating expressive, semantic variable names while strictly prohibiting shorthand abbreviations."
+    sources: [".agent/rules/refactor.md", "public/scope.js", "services/layaClient.js"]
+
+  tutorial_protocol:
+    definition: "Documentation methodology requiring comprehensive WHAT and WHY explanatory annotations for every logic branch and function."
+    sources: [".agent/rules/refactor.md", "services/layaClient.js", "services/localAiClient.js"]
+
+  graphmemory_knowledge_graph:
+    definition: "Embedded DuckDB heterogeneous graph model linking Image, Topic, Tag, and Facet nodes through typed relational edges."
+    sources: ["scripts/build_graph_memory.py", "scripts/associative_retrieval.py"]
+
+  associative_retrieval_engine:
+    definition: "Multi-hop graph traversal engine discovering conceptually resonant assets and cluster bridges via shared concept weighting."
+    sources: ["scripts/associative_retrieval.py", "server.js"]
+
+

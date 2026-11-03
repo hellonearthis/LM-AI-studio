@@ -297,7 +297,7 @@ export class LocalAIClient {
         await this.discoverActiveModel();
         await this.discoverActiveEmbeddingModel();
 
-        const aggregated_model_records = [];
+        let aggregated_model_records = [];
         const seen_model_identifiers = new Set();
         const endpoints_to_query = Array.from(new Set([
             this.active_endpoint_url,
@@ -316,7 +316,7 @@ export class LocalAIClient {
                         const model_identifier = model_record.id || model_record.name;
                         if (model_identifier && !seen_model_identifiers.has(model_identifier)) {
                             seen_model_identifiers.add(model_identifier);
-                            aggregated_model_records.push(model_record);
+                            aggregated_model_records = [...aggregated_model_records, model_record];
                         }
                     }
                 }
@@ -402,15 +402,16 @@ export class LocalAIClient {
      * WHY: Displayed on diagnostic pages and terminal logs to troubleshoot configuration issues.
      */
     getDiagnosticReport() {
-        const diagnostic_lines = [
+        // WHAT: Constructing diagnostic report via pure array composition without in-place mutation.
+        // WHY: Pure functional array concatenation guarantees deterministic formatting and zero side effects.
+        const header_banner_lines = [
             '======================================================================',
             '                   LOCAL AI SERVER DIAGNOSTIC REPORT                  ',
             '======================================================================'
         ];
 
-        // Vision Server Status
-        if (this.active_endpoint_url) {
-            diagnostic_lines.push(
+        const vision_server_diagnostic_lines = this.active_endpoint_url
+            ? [
                 'VISION SERVER: ONLINE',
                 `  Endpoint:          ${this.active_endpoint_url}`,
                 `  Backend Type:      ${this.discovered_server_backend_type}`,
@@ -418,34 +419,38 @@ export class LocalAIClient {
                 `  Aliases:           ${this.active_model_aliases.length > 0 ? this.active_model_aliases.join(', ') : 'None'}`,
                 `  Multimodal Vision: ${this.has_multimodal_vision_capability ? 'YES (Supported)' : 'NO (Missing --mmproj)'}`,
                 `  Context Window:    ${this.active_context_window_size} tokens`
-            );
-        } else {
-            diagnostic_lines.push(
+            ]
+            : [
                 'VISION SERVER: OFFLINE',
                 '  Status: No active vision server listening on port 8081.',
                 '  Recommended Action: Run start_llama_server.bat (or start_llama_vision_4b.bat for low-VRAM).'
-            );
-        }
+            ];
 
-        diagnostic_lines.push('----------------------------------------------------------------------');
+        const section_divider_line = ['----------------------------------------------------------------------'];
 
-        // Embedding Server Status
-        if (this.active_embedding_endpoint_url) {
-            diagnostic_lines.push(
+        const embedding_server_diagnostic_lines = this.active_embedding_endpoint_url
+            ? [
                 'EMBEDDING SERVER: ONLINE',
                 `  Endpoint:          ${this.active_embedding_endpoint_url}`,
                 `  Active Model:      ${this.active_embedding_model_identifier}`
-            );
-        } else {
-            diagnostic_lines.push(
+            ]
+            : [
                 'EMBEDDING SERVER: OFFLINE',
                 '  Status: No dedicated embedding server listening on port 8083.',
                 '  Recommended Action: Run start_llama_embeddings.bat on port 8083.'
-            );
-        }
+            ];
 
-        diagnostic_lines.push('======================================================================');
-        return diagnostic_lines.join('\n');
+        const footer_banner_line = ['======================================================================'];
+
+        const complete_diagnostic_lines_collection = [
+            ...header_banner_lines,
+            ...vision_server_diagnostic_lines,
+            ...section_divider_line,
+            ...embedding_server_diagnostic_lines,
+            ...footer_banner_line
+        ];
+
+        return complete_diagnostic_lines_collection.join('\n');
     }
 }
 

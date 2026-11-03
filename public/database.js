@@ -457,12 +457,12 @@ dbGrid.addEventListener('click', async (e) => {
                 const data = await response.json();
                 // Find grid item and update image src to force reload
                 const card = btn.closest('.card');
-                const img = card.querySelector('.thumbnail-preview');
+                const thumbnail_image_element = card.querySelector('.thumbnail-preview');
                 const fallback = card.querySelector('.thumb-fallback');
 
                 // Add timestamp to force browser cache bypass
                 img.src = `${data.thumbPath}?t=${Date.now()}`;
-                img.style.display = 'block';
+                thumbnail_image_element.style.display = 'block';
                 fallback.style.display = 'none';
 
             } else {
@@ -533,9 +533,9 @@ async function showImagePreview(imagePath) {
         `;
 
         // Create image element
-        const img = document.createElement('img');
-        img.src = url;
-        img.style.cssText = `
+        const modal_lightbox_image_element = document.createElement('img');
+        modal_lightbox_image_element.src = url;
+        modal_lightbox_image_element.style.cssText = `
             max-width: 95vw;
             max-height: 95vh;
             width: auto;
@@ -547,7 +547,7 @@ async function showImagePreview(imagePath) {
         `;
 
         // Error handling
-        img.onerror = () => {
+        modal_lightbox_image_element.onerror = () => {
             console.error('Failed to load image:', imagePath);
             modal.remove();
             URL.revokeObjectURL(url);
@@ -609,11 +609,11 @@ async function showImagePreview(imagePath) {
 // FILE LINK HANDLER
 // ============================================================================
 // Allow clicking filenames to show file in folder (Electron integration)
-document.addEventListener("click", (e) => {
-    const el = e.target.closest(".file-link");
-    if (!el) return;
+document.addEventListener("click", (click_event) => {
+    const file_link_anchor_element = click_event.target.closest(".file-link");
+    if (!file_link_anchor_element) return;
 
-    const fullPath = el.dataset.path;
+    const fullPath = file_link_anchor_element.dataset.path;
 
     // Check if Electron API is available
     if (window.electronAPI && window.electronAPI.showInFolder) {
@@ -1039,7 +1039,7 @@ function showBulkRenameModal(selected_image_ids_set, cached_images_metadata_arra
 if (selectMissingBtn) {
     selectMissingBtn.addEventListener('click', () => {
         let count = 0;
-        imagesData.forEach(img => {
+        imagesData.forEach(single_image_record => {
             let analysis = {};
             try {
                 analysis = typeof img.analysis === 'string' ? JSON.parse(img.analysis) : (img.analysis || {});
@@ -1047,7 +1047,7 @@ if (selectMissingBtn) {
 
             // Criteria: Missing Summary OR Missing Tags OR Missing Objects OR Missing Resolution
             if (!analysis.summary || !analysis.tags || analysis.tags.length === 0 || !analysis.objects || analysis.objects.length === 0 || !img.width || !img.height) {
-                selectedIds.add(String(img.id));
+                selectedIds.add(String(single_image_record.id));
                 count++;
 
                 // Updates visual check
@@ -1249,13 +1249,13 @@ if (processSelectedBtn) {
                         const updated = result.updatedImages[0];
 
                         // Update Local Cache
-                        const localImg = imagesData.find(img => img.id == updated.id);
-                        if (localImg) {
-                            localImg.analysis = updated.analysis;
-                            localImg.updated_at = updated.updated_at;
-                            if (updated.width) localImg.width = updated.width;
-                            if (updated.height) localImg.height = updated.height;
-                            if (updated.size) localImg.size = updated.size;
+                        const local_image_record = imagesData.find(single_image_record => single_image_record.id == updated.id);
+                        if (local_image_record) {
+                            local_image_record.analysis = updated.analysis;
+                            local_image_record.updated_at = updated.updated_at;
+                            if (updated.width) local_image_record.width = updated.width;
+                            if (updated.height) local_image_record.height = updated.height;
+                            if (updated.size) local_image_record.size = updated.size;
 
                             // Update DOM
                             const existingCard = document.querySelector(`.card[data-id="${updated.id}"]`);
@@ -1471,10 +1471,10 @@ if (ctxRename) {
                         fileLink.textContent = data.newFilename;
                         fileLink.dataset.path = data.newPath;
                     }
-                    const img = imagesData.find(i => i.id == id);
-                    if (img) {
-                        img.filename = data.newFilename;
-                        img.path = data.newPath;
+                    const matched_image_record = imagesData.find(single_image_record => single_image_record.id == id);
+                    if (matched_image_record) {
+                        matched_image_record.filename = data.newFilename;
+                        matched_image_record.path = data.newPath;
                     }
                 }
             } catch (err) {
@@ -1616,7 +1616,7 @@ async function addTag(id, type) {
 // Update Tag Backend Call
 async function updateTag(id, type, oldTag, newTag, action) {
     try {
-        const image = imagesData.find(img => img.id == id);
+        const image = imagesData.find(single_image_record => single_image_record.id == id);
         if (!image) throw new Error('Image not found in local cache');
 
         let analysis = image.analysis || {};

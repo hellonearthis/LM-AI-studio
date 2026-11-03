@@ -1,11 +1,30 @@
-Look at using gemma 4 or qwen 3.5 for the ai work.
+# Lumina Studio - Project Roadmap & Progress
 
-Add more image clustering and vector database for that.
+[x] Look at using gemma or qwen 3.5 for the ai work:
+    - Added Qwen 3.5 9B vision configuration with --mmproj in start_llama_server.bat
+    - Added Google Gemma / PaliGemma 1-click startup in start_llama_gemma.bat
+    - Cleaned and extended qwen_vl3_prompts.json with UTF-8 styles, qwen_3_5, and gemma prompts
 
-Use Evog and Latent space
+[x] Add more image clustering and vector database for that (Toponymy + EVoC):
+    - Installed TutteInstitute/toponymy v0.5.4 and verified compatibility with evoc and umap
+    - Built scripts/toponymy_clustering.py to extract semantic topics and keyphrases from EVoC clusters
+    - Successfully labeled all 316 visual clusters into image_cluster_topics table in images.db
+    - Connected image_cluster_topics to server.js (/api/scope/db-data and /api/clusters/themes) for rich label display
 
-https://github.com/bradAGI/GraphMemory
+[x] Use Evoc and Latent space:
+    - Verified evoc_pipeline.py for high-dimensional UMAP 2D manifold projection
+    - Scope visualizer (public/scope.js) renders high-dimensional starfield projection via DuckDB WASM and SQLite DB
 
-https://github.com/TutteInstitute/toponymy
+[x] Handwired High-Throughput Vector Search Worker:
+    - Pre-normalized contiguous Float32Array matrix table (38.8 MB for 12,637 items x 768 dimensions)
+    - WebGPU WGSL compute shader for parallel dot-product cosine similarity
+    - Zero-allocation contiguous CPU loop fallback (~8 ms vs ~208 ms legacy map/reduce)
+    - Pure functional Reciprocal Rank Fusion (RRF) combining fuzzy keyword and vector ranking
 
-https://github.com/TutteInstitute/evoc
+[x] GraphMemory Associative Retrieval (bradAGI/GraphMemory):
+    - Installed and integrated graphmemory 1.4.0 + DuckDB 2.0.0
+    - Built scripts/build_graph_memory.py generating graph_memory.duckdb (17,220 nodes, 151,497 edges, 11,080 768-dim vectors in 12.6s)
+    - Deterministic UUIDv5 entity namespace for Image, Topic, Tag, and Facet nodes
+    - Built scripts/associative_retrieval.py for multi-hop associative search, ego-subgraph extraction, and cluster bridge detection
+    - Exposed REST endpoints in server.js: /api/graph/associative-related, /api/graph/subgraph, /api/graph/bridges
+    - Added OpenSpec BDD feature 04_graphmemory_associative_retrieval.feature and passing unit tests

@@ -1267,9 +1267,9 @@ document.addEventListener('contextmenu', (e) => {
         e.stopPropagation();
         const id = summaryEl.dataset.id;
         // Try to get clean text from cache instead of scraping innerText
-        const img = (allImages.find(i => i.id == id)) || 
-                    (window.currentSearchResults && window.currentSearchResults.find(i => i.id == id));
-        const text = img ? img.analysis.summary : summaryEl.innerText.replace('Copy', '').trim();
+        const matched_image_record = (allImages.find(single_image => single_image.id == id)) || 
+                    (window.currentSearchResults && window.currentSearchResults.find(single_image => single_image.id == id));
+        const text = matched_image_record ? matched_image_record.analysis.summary : summaryEl.innerText.replace('Copy', '').trim();
         showContextMenu(e, id, 'summary', text);
         return;
     }
@@ -1398,7 +1398,7 @@ if (ctxRename) {
                         fileLink.dataset.path = data.newPath;
                     }
                     // Search specific: update cache if needed
-                    const img = allImages.find(i => i.id == id);
+                    const matched_image_record = allImages.find(single_image => single_image.id == id);
                     if (img) {
                         img.filename = data.newFilename;
                         img.path = data.newPath;
@@ -2123,10 +2123,10 @@ function showBulkRenameModal(selected_image_ids_set, cached_images_metadata_arra
 async function updateTag(id, type, oldTag, newTag, action) {
     try {
         // 1. Update master list (allImages)
-        const masterImage = allImages.find(img => img.id == id);
+        const masterImage = allImages.find(single_image_record => single_image_record.id == id);
 
         // 2. Update current search results (if exists)
-        const resultImage = window.currentSearchResults ? window.currentSearchResults.find(img => img.id == id) : null;
+        const resultImage = window.currentSearchResults ? window.currentSearchResults.find(single_image_record => single_image_record.id == id) : null;
 
         const image = masterImage || resultImage;
         if (!image) throw new Error('Image not found in any local cache');
@@ -2156,7 +2156,7 @@ async function updateTag(id, type, oldTag, newTag, action) {
         if (resultImage) resultImage.analysis = analysis;
 
         // Also update filteredImages if it exists (for pagination consistency)
-        const filteredImage = filteredImages ? filteredImages.find(img => img.id == id) : null;
+        const filteredImage = filteredImages ? filteredImages.find(single_image_record => single_image_record.id == id) : null;
         if (filteredImage) filteredImage.analysis = analysis;
 
         // 3. Send update to server
@@ -2222,9 +2222,9 @@ async function showImagePreview(imagePath) {
         `;
 
         // Create image element
-        const img = document.createElement('img');
-        img.src = url;
-        img.style.cssText = `
+        const modal_lightbox_image_element = document.createElement('img');
+        modal_lightbox_image_element.src = url;
+        modal_lightbox_image_element.style.cssText = `
             max-width: 95vw;
             max-height: 95vh;
             width: auto;
@@ -2236,7 +2236,7 @@ async function showImagePreview(imagePath) {
         `;
 
         // Error handling
-        img.onerror = () => {
+        modal_lightbox_image_element.onerror = () => {
             console.error('Failed to load image:', imagePath);
             modal.remove();
             URL.revokeObjectURL(url);
@@ -2448,9 +2448,9 @@ function showAutocomplete(query) {
     tagAutocomplete.style.display = 'block';
 
     // Click handlers
-    tagAutocomplete.querySelectorAll('.tag-autocomplete-item').forEach(el => {
+    tagAutocomplete.querySelectorAll('.tag-autocomplete-item').forEach(autocomplete_option_element => {
         el.addEventListener('click', () => {
-            addTagFilter(el.dataset.name, el.dataset.type);
+            addTagFilter(autocomplete_option_element.dataset.name, autocomplete_option_element.dataset.type);
         });
     });
 }
@@ -2466,10 +2466,10 @@ function hideAutocomplete() {
 // Wire up the filter input
 if (tagFilterInput) {
     tagFilterInput.addEventListener('input', () => {
-        const val = tagFilterInput.value.trim();
+        const filter_query_trimmed_value = tagFilterInput.value.trim();
         acActiveIndex = -1;
-        if (val.length > 0) {
-            showAutocomplete(val);
+        if (filter_query_trimmed_value.length > 0) {
+            showAutocomplete(filter_query_trimmed_value);
         } else {
             hideAutocomplete();
         }
@@ -2489,7 +2489,7 @@ if (tagFilterInput) {
             e.preventDefault();
             if (acActiveIndex >= 0 && items[acActiveIndex]) {
                 const el = items[acActiveIndex];
-                addTagFilter(el.dataset.name, el.dataset.type);
+                addTagFilter(autocomplete_option_element.dataset.name, autocomplete_option_element.dataset.type);
             }
         } else if (e.key === 'Escape') {
             hideAutocomplete();
@@ -2520,7 +2520,7 @@ document.querySelectorAll('input[name="tagLogic"]').forEach(radio => {
 async function findSimilar(imageId) {
     // 1. Try to find in lastWorkerResults
     let allData = lastWorkerResults || [];
-    let source = allData.find(img => img.id == imageId);
+    let source = allData.find(single_image_record => single_image_record.id == imageId);
 
     // 2. If not found (e.g., initial load), fetch from server
     if (!source) {
@@ -2687,10 +2687,10 @@ async function updateModelIndicator() {
 
 // File Link Handler (Show in Folder)
 document.addEventListener("click", (e) => {
-    const el = e.target.closest(".file-link");
-    if (!el) return;
+    const file_link_anchor_element = click_event.target.closest(".file-link");
+    if (!file_link_anchor_element) return;
 
-    const fullPath = el.dataset.path;
+    const fullPath = file_link_anchor_element.dataset.path;
 
     if (window.electronAPI && window.electronAPI.showInFolder) {
         window.electronAPI.showInFolder(fullPath);
@@ -2799,10 +2799,10 @@ if (bulkRenameBtn) {
 if (selectMissingBtn) {
     selectMissingBtn.addEventListener('click', () => {
         let count = 0;
-        filteredImages.forEach(img => {
+        filteredImages.forEach(single_image_record => {
             const analysis = img.analysis || {};
             if (!analysis.summary || !analysis.tags || analysis.tags.length === 0 || !analysis.objects || analysis.objects.length === 0) {
-                selectedIds.add(String(img.id));
+                selectedIds.add(String(single_image_record.id));
                 count++;
 
                 const cb = document.querySelector(`.card-select-cb[data-id="${img.id}"]`);

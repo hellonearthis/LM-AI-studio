@@ -34,22 +34,26 @@ const API_BASE_URL = 'http://localhost:3000';
 // HELPER FUNCTIONS
 // ============================================================================
 
-function showStatus(message, type = 'info') {
-    statusArea.textContent = message;
-    statusArea.className = `status-area ${type}`;
+// WHAT: Updates the status message banner in the UI with styled alert feedback.
+// WHY: Informs the user of asynchronous state progressions, file selections, and server errors.
+function showStatus(status_message_text, alert_status_type = 'info') {
+    statusArea.textContent = status_message_text;
+    statusArea.className = `status-area ${alert_status_type}`;
     statusArea.style.display = 'block';
 
-    if (type === 'success') {
+    if (alert_status_type === 'success') {
         setTimeout(() => {
             statusArea.style.display = 'none';
         }, 5000);
     }
 }
 
-async function calculateFileHash(fileBuffer) {
-    const hashBuffer = await crypto.subtle.digest('SHA-256', fileBuffer);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+// WHAT: Generates a SHA-256 cryptographic hash from a binary buffer.
+// WHY: Uniquely identifies image contents regardless of file path or renaming.
+async function calculateFileHash(image_binary_buffer) {
+    const hash_array_buffer = await crypto.subtle.digest('SHA-256', image_binary_buffer);
+    const hash_byte_array = Array.from(new Uint8Array(hash_array_buffer));
+    return hash_byte_array.map(single_byte_value => single_byte_value.toString(16).padStart(2, '0')).join('');
 }
 
 // ============================================================================
@@ -78,13 +82,13 @@ selectFileBtn.addEventListener('click', async () => {
             fileMsg.textContent = `${filePaths.length} files selected`;
             const filesToProcess = filePaths.map(filePath => ({
                 path: filePath,
-                name: filePath.split('\\').pop()
+                name: filePath.split('\\').slice(-1)[0]
             }));
             await processBatch(filesToProcess);
         } else {
             // Single file - process it
             const filePath = filePaths[0];
-            const fileName = filePath.split('\\').pop();
+            const fileName = filePath.split('\\').slice(-1)[0];
 
             fileMsg.textContent = fileName;
 
@@ -92,7 +96,7 @@ selectFileBtn.addEventListener('click', async () => {
             const fileBuffer = await window.electronAPI.readFile(filePath);
 
             // Detect MIME type from file extension
-            const ext = fileName.split('.').pop().toLowerCase();
+            const ext = fileName.split('.').slice(-1)[0].toLowerCase();
             const mimeTypes = {
                 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
                 'png': 'image/png', 'gif': 'image/gif',
@@ -346,17 +350,17 @@ async function processBatch(files) {
     }
 
     // 2. Process each file
-    for (let i = 0; i < totalFiles; i++) {
-        const fileData = files[i];
+    for (let file_iteration_index = 0; file_iteration_index < totalFiles; file_iteration_index++) {
+        const fileData = files[file_iteration_index];
         const filePath = fileData.path;
-        const filename = filePath.split(/[\\\/]/).pop();
+        const filename = filePath.split(/[\\\/]/).slice(-1)[0];
 
         // Update progress UI
-        const percent = Math.round((i / totalFiles) * 100);
+        const percent = Math.round((file_iteration_index / totalFiles) * 100);
         progressBar.style.width = `${percent}%`;
         progressPercent.textContent = `${percent}%`;
         currentFileEl.textContent = `Processing: ${filename}`;
-        statProcessed.textContent = `${i + 1}/${totalFiles}`;
+        statProcessed.textContent = `${file_iteration_index + 1}/${totalFiles}`;
 
         // CHECK BATCH RESULTS
         if (existingRecords[filePath] === 'exact') {

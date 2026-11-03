@@ -4,76 +4,250 @@
  * TUTORIAL PROTOCOL & "CAN_BE_LONG" NAMING RULES:
  * All variables follow semantic, long naming conventions without shorthand abbreviations.
  * Functions and logic branches contain WHAT and WHY annotations explaining the mechanics.
+ * Pure functional core with thin delegation wrapper for backward-compatible call boundaries.
  */
 
-export class OvisOmniClient {
-    /**
-     * WHAT: Initializes the OvisOmniClient instance with candidate endpoints and taxonomy definitions.
-     * WHY: Ovis-Omni runs as a dedicated Python FastAPI service on port 8082, handling multimodal
-     *      image vectorization, cross-modal query embedding, and zero-shot visual classification.
-     */
-    constructor() {
-        const environment_specified_endpoint = process.env.OVIS_SERVER_URL;
-        const default_candidate_endpoints = [
-            environment_specified_endpoint,
-            'http://127.0.0.1:8082',
-            'http://localhost:8082'
-        ];
+// ============================================================================
+// TAXONOMY SPECIFICATIONS (IMMUTABLE CONSTANTS)
+// ============================================================================
 
-        // WHAT: Deduplicating candidate URLs and trimming trailing slashes.
-        // WHY: Ensures clean, reliable network requests without double-slash routing issues.
-        this.candidate_endpoint_urls = Array.from(
+// WHAT: Standard visual taxonomy definitions for zero-shot visual classification.
+// WHY: Standardized categories allow instant zero-shot categorization into image facets.
+export const STANDARD_CLASSIFICATION_TAXONOMIES = Object.freeze({
+    visual_medium: Object.freeze([
+        'real-world photography',
+        '3D CGI digital render',
+        'digital concept illustration',
+        'traditional oil or watercolor painting',
+        'handcrafted sculpture or physical craft',
+        'diagrammatic graphic layout or typography'
+    ]),
+    visual_mood: Object.freeze([
+        'dark, moody and atmospheric',
+        'bright, vibrant and luminous',
+        'minimalist, calm and serene',
+        'whimsical, playful and colorful',
+        'dramatic, epic and cinematic'
+    ]),
+    composition_framing: Object.freeze([
+        'tight macro close-up focus',
+        'portrait headshot character framing',
+        'wide scenic panoramic landscape vista',
+        'interior architectural room space',
+        'birds-eye aerial overhead perspective'
+    ])
+});
+
+// ============================================================================
+// PURE FUNCTIONAL CONFIGURATION FACTORY
+// ============================================================================
+
+/**
+ * WHAT: Produces an immutable configuration record for the Ovis-Omni multimodal service.
+ * WHY: Replaces mutable class instances with frozen records.
+ * 
+ * @param {string|null} optional_custom_endpoint_override - Explicit URL override.
+ * @returns {Readonly<Object>} Frozen client configuration record.
+ */
+export const create_ovis_omni_configuration = (optional_custom_endpoint_override = null) => {
+    const environment_specified_endpoint = process.env.OVIS_SERVER_URL;
+    const default_candidate_endpoints = [
+        optional_custom_endpoint_override,
+        environment_specified_endpoint,
+        'http://127.0.0.1:8082',
+        'http://localhost:8082'
+    ];
+
+    const candidate_endpoint_urls = Object.freeze(
+        Array.from(
             new Set(
                 default_candidate_endpoints
                     .filter((candidate_url) => typeof candidate_url === 'string' && candidate_url.trim().length > 0)
                     .map((candidate_url) => candidate_url.replace(/\/+$/, ''))
             )
-        );
+        )
+    );
 
-        this.active_endpoint_url = this.candidate_endpoint_urls[0] || 'http://127.0.0.1:8082';
+    return Object.freeze({
+        candidate_endpoint_urls,
+        active_endpoint_url: candidate_endpoint_urls[0] || 'http://127.0.0.1:8082',
+        embedding_vector_dimensions: 2048,
+        health_check_cache_duration_milliseconds: 5000,
+        standard_classification_taxonomies: STANDARD_CLASSIFICATION_TAXONOMIES
+    });
+};
+
+// ============================================================================
+// PURE FUNCTIONAL DOMAIN PROCEDURES
+// ============================================================================
+
+/**
+ * WHAT: Probes the health and readiness of the Ovis-Omni microservice on port 8082.
+ * WHY: Verifies server availability and model readiness without mutating global state.
+ * 
+ * @param {Readonly<Object>} client_configuration - The frozen client configuration.
+ * @returns {Promise<{ is_online: boolean, responsive_endpoint_url: string, hardware_device_name: string }>}
+ */
+export const probe_ovis_server_health = async (client_configuration) => {
+    for (const candidate_endpoint_url of client_configuration.candidate_endpoint_urls) {
+        try {
+            const target_health_url = `${candidate_endpoint_url}/health`;
+            const abort_controller_instance = new AbortController();
+            const timeout_handle = setTimeout(() => abort_controller_instance.abort(), 2000);
+
+            const http_health_response = await fetch(target_health_url, {
+                method: 'GET',
+                headers: { 'Accept': 'application/json' },
+                signal: abort_controller_instance.signal
+            });
+            clearTimeout(timeout_handle);
+
+            if (http_health_response.ok) {
+                const parsed_health_payload = await http_health_response.json();
+                return {
+                    is_online: parsed_health_payload.status === 'online',
+                    responsive_endpoint_url: candidate_endpoint_url,
+                    hardware_device_name: parsed_health_payload.gpu_device_name || parsed_health_payload.device || 'unknown'
+                };
+            }
+        } catch (network_connection_error) {
+            continue;
+        }
+    }
+
+    return {
+        is_online: false,
+        responsive_endpoint_url: client_configuration.active_endpoint_url,
+        hardware_device_name: 'unknown'
+    };
+};
+
+/**
+ * WHAT: Generates a 2048-dimensional normalized embedding directly from an image file.
+ * WHY: Encodes raw optical textures and composition directly into high-dimensional vector space.
+ * 
+ * @param {Readonly<Object>} client_configuration - The frozen client configuration.
+ * @param {string} physical_image_file_path - Absolute path to the image on local storage.
+ * @returns {Promise<ReadonlyArray<number>>} 2048-dimensional normalized float vector.
+ */
+export const generate_image_multimodal_embedding = async (client_configuration, physical_image_file_path) => {
+    const health_status = await probe_ovis_server_health(client_configuration);
+    if (!health_status.is_online) {
+        throw new Error(`Ovis-Omni microservice is offline at ${client_configuration.active_endpoint_url}. Launch start_ovis_server.bat to start it.`);
+    }
+
+    const target_image_embed_url = `${health_status.responsive_endpoint_url}/embed/image`;
+    const http_embed_response = await fetch(target_image_embed_url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            image_file_path: physical_image_file_path,
+            instruction_prefix: 'Represent this image for retrieval'
+        })
+    });
+
+    if (!http_embed_response.ok) {
+        const error_message_text = await http_embed_response.text();
+        throw new Error(`Ovis-Omni Image Embed Error (${http_embed_response.status}): ${error_message_text}`);
+    }
+
+    const parsed_response_payload = await http_embed_response.json();
+    return Object.freeze(parsed_response_payload.embedding);
+};
+
+/**
+ * WHAT: Generates a 2048-dimensional normalized embedding for a text search query.
+ * WHY: Projects text queries into the exact multimodal vector space as visual embeddings.
+ * 
+ * @param {Readonly<Object>} client_configuration - The frozen client configuration.
+ * @param {string} text_search_query - The conceptual search query typed by the user.
+ * @returns {Promise<ReadonlyArray<number>>} 2048-dimensional float vector.
+ */
+export const generate_text_multimodal_embedding = async (client_configuration, text_search_query) => {
+    const health_status = await probe_ovis_server_health(client_configuration);
+    if (!health_status.is_online) {
+        throw new Error(`Ovis-Omni microservice is offline at ${client_configuration.active_endpoint_url}. Launch start_ovis_server.bat to start it.`);
+    }
+
+    const target_text_embed_url = `${health_status.responsive_endpoint_url}/embed/text`;
+    const http_embed_response = await fetch(target_text_embed_url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            text_content: text_search_query,
+            instruction_prefix: 'Represent this query for retrieving relevant images: '
+        })
+    });
+
+    if (!http_embed_response.ok) {
+        const error_message_text = await http_embed_response.text();
+        throw new Error(`Ovis-Omni Text Embed Error (${http_embed_response.status}): ${error_message_text}`);
+    }
+
+    const parsed_response_payload = await http_embed_response.json();
+    return Object.freeze(parsed_response_payload.embedding);
+};
+
+/**
+ * WHAT: Classifies an image into candidate labels via zero-shot cosine similarity.
+ * WHY: Pure functional classification evaluating image embeddings against label embeddings.
+ * 
+ * @param {Readonly<Object>} client_configuration - The client configuration record.
+ * @param {string} physical_image_file_path - Path to the image file.
+ * @param {Array<string>} candidate_taxonomic_labels - Labels to classify against.
+ * @param {string} classification_facet_name - Name of the facet category.
+ * @returns {Promise<Object>} Formatted classification payload.
+ */
+export const classify_image_zero_shot = async (
+    client_configuration,
+    physical_image_file_path,
+    candidate_taxonomic_labels,
+    classification_facet_name = 'visual_facet'
+) => {
+    const health_status = await probe_ovis_server_health(client_configuration);
+    if (!health_status.is_online) {
+        throw new Error(`Ovis-Omni microservice is offline at ${client_configuration.active_endpoint_url}. Launch start_ovis_server.bat to start it.`);
+    }
+
+    const target_classify_url = `${health_status.responsive_endpoint_url}/classify/zero-shot`;
+    const http_classify_response = await fetch(target_classify_url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            image_file_path: physical_image_file_path,
+            candidate_taxonomic_labels: candidate_taxonomic_labels,
+            classification_facet_name: classification_facet_name
+        })
+    });
+
+    if (!http_classify_response.ok) {
+        const error_message_text = await http_classify_response.text();
+        throw new Error(`Ovis-Omni Classification Error (${http_classify_response.status}): ${error_message_text}`);
+    }
+
+    return await http_classify_response.json();
+};
+
+// ============================================================================
+// THIN DELEGATION WRAPPER (BACKWARD-COMPATIBLE BOUNDARY ADAPTER)
+// ============================================================================
+
+/**
+ * WHAT: Thin backward-compatible adapter delegating calls to pure functional routines.
+ * WHY: Supports existing callers expecting class-like method signatures without violating pure functional architecture.
+ */
+export class OvisOmniClient {
+    constructor(optional_endpoint_override = null) {
+        this.configuration = create_ovis_omni_configuration(optional_endpoint_override);
+        this.active_endpoint_url = this.configuration.active_endpoint_url;
+        this.detected_hardware_device_name = 'unknown';
+        this.embedding_vector_dimensions = this.configuration.embedding_vector_dimensions;
         this.is_server_online = false;
         this.last_health_check_timestamp_milliseconds = 0;
         this.health_check_cache_duration_milliseconds = 5000;
-        this.detected_hardware_device_name = 'unknown';
-        this.embedding_vector_dimensions = 2048;
-
-        // WHAT: Standard visual taxonomy definitions for zero-shot classification.
-        // WHY: Pre-defining standardized visual categories allows instant classification of newly ingested
-        //      images into image_facets (medium, mood, framing) without waiting for slow autoregressive LLM captions.
-        this.standard_classification_taxonomies = {
-            visual_medium: [
-                'real-world photography',
-                '3D CGI digital render',
-                'digital concept illustration',
-                'traditional oil or watercolor painting',
-                'handcrafted sculpture or physical craft',
-                'diagrammatic graphic layout or typography'
-            ],
-            visual_mood: [
-                'dark, moody and atmospheric',
-                'bright, vibrant and luminous',
-                'minimalist, calm and serene',
-                'whimsical, playful and colorful',
-                'dramatic, epic and cinematic'
-            ],
-            composition_framing: [
-                'tight macro close-up focus',
-                'portrait headshot character framing',
-                'wide scenic panoramic landscape vista',
-                'interior architectural room space',
-                'birds-eye aerial overhead perspective'
-            ]
-        };
+        this.standard_classification_taxonomies = this.configuration.standard_classification_taxonomies;
     }
 
-    /**
-     * WHAT: Checks the health and readiness of the Ovis-Omni microservice on port 8082.
-     * WHY: Caching the result for 5 seconds avoids spamming the service during rapid UI interactions
-     *      while still accurately tracking whether the model weights are loaded and ready.
-     * 
-     * @param {boolean} force_refresh_probe - Whether to bypass cache and re-probe immediately.
-     * @returns {Promise<boolean>} True if the service is online and model is loaded.
-     */
     async checkHealth(force_refresh_probe = false) {
         const current_timestamp_milliseconds = Date.now();
         const is_health_cache_still_valid = (
@@ -85,137 +259,27 @@ export class OvisOmniClient {
             return this.is_server_online;
         }
 
-        for (const candidate_endpoint_url of this.candidate_endpoint_urls) {
-            try {
-                const target_health_url = `${candidate_endpoint_url}/health`;
-                const abort_controller = new AbortController();
-                const timeout_handle = setTimeout(() => abort_controller.abort(), 2000);
-
-                const http_health_response = await fetch(target_health_url, {
-                    method: 'GET',
-                    headers: { 'Accept': 'application/json' },
-                    signal: abort_controller.signal
-                });
-
-                clearTimeout(timeout_handle);
-
-                if (http_health_response.ok) {
-                    const parsed_health_payload = await http_health_response.json();
-                    this.active_endpoint_url = candidate_endpoint_url;
-                    this.is_server_online = (parsed_health_payload.status === 'online');
-                    this.detected_hardware_device_name = parsed_health_payload.gpu_device_name || parsed_health_payload.device || 'unknown';
-                    this.last_health_check_timestamp_milliseconds = current_timestamp_milliseconds;
-                    return this.is_server_online;
-                }
-            } catch (network_connection_error) {
-                // Continue probing next endpoint candidate
-                continue;
-            }
-        }
-
-        this.is_server_online = false;
+        const probe_result = await probe_ovis_server_health(this.configuration);
+        this.is_server_online = probe_result.is_online;
+        this.active_endpoint_url = probe_result.responsive_endpoint_url;
+        this.detected_hardware_device_name = probe_result.hardware_device_name;
         this.last_health_check_timestamp_milliseconds = current_timestamp_milliseconds;
-        return false;
+        return probe_result.is_online;
     }
 
-    /**
-     * WHAT: Generates a 2048-dimensional normalized embedding directly from an image file on disk.
-     * WHY: Bypasses textual description entirely, preserving subtle optical textures, lighting,
-     *      and visual styles directly in the embedding space.
-     * 
-     * @param {string} physical_image_file_path - Absolute path to the image on local storage.
-     * @returns {Promise<Array<number>>} 2048-dimensional float vector.
-     */
     async generateImageEmbedding(physical_image_file_path) {
-        const is_online = await this.checkHealth();
-        if (!is_online) {
-            throw new Error(`Ovis-Omni microservice is offline at ${this.active_endpoint_url}. Launch start_ovis_server.bat to start it.`);
-        }
-
-        const target_image_embed_url = `${this.active_endpoint_url}/embed/image`;
-        const http_embed_response = await fetch(target_image_embed_url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                image_file_path: physical_image_file_path,
-                instruction_prefix: 'Represent this image for retrieval'
-            })
-        });
-
-        if (!http_embed_response.ok) {
-            const error_message_text = await http_embed_response.text();
-            throw new Error(`Ovis-Omni Image Embed Error (${http_embed_response.status}): ${error_message_text}`);
-        }
-
-        const parsed_response_payload = await http_embed_response.json();
-        return parsed_response_payload.embedding;
+        return generate_image_multimodal_embedding(this.configuration, physical_image_file_path);
     }
 
-    /**
-     * WHAT: Generates a 2048-dimensional normalized embedding for a text search query.
-     * WHY: Maps the query into the exact same vector space as images, enabling direct cross-modal retrieval.
-     * 
-     * @param {string} text_search_query - The conceptual search query typed by the user.
-     * @returns {Promise<Array<number>>} 2048-dimensional float vector.
-     */
     async generateTextEmbedding(text_search_query) {
-        const is_online = await this.checkHealth();
-        if (!is_online) {
-            throw new Error(`Ovis-Omni microservice is offline at ${this.active_endpoint_url}. Launch start_ovis_server.bat to start it.`);
-        }
-
-        const target_text_embed_url = `${this.active_endpoint_url}/embed/text`;
-        const http_embed_response = await fetch(target_text_embed_url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                text_content: text_search_query,
-                instruction_prefix: 'Represent this query for retrieving relevant images: '
-            })
-        });
-
-        if (!http_embed_response.ok) {
-            const error_message_text = await http_embed_response.text();
-            throw new Error(`Ovis-Omni Text Embed Error (${http_embed_response.status}): ${error_message_text}`);
-        }
-
-        const parsed_response_payload = await http_embed_response.json();
-        return parsed_response_payload.embedding;
+        return generate_text_multimodal_embedding(this.configuration, text_search_query);
     }
 
-    /**
-     * WHAT: Classifies an image into candidate labels via zero-shot cosine similarity.
-     * WHY: Provides instant taxonomy classification without prompt engineering or LLM token generation.
-     * 
-     * @param {string} physical_image_file_path - Path to the image file.
-     * @param {Array<string>} candidate_taxonomic_labels - Labels to classify against.
-     * @param {string} classification_facet_name - Name of the facet category.
-     * @returns {Promise<{ facet_name: string, top_label: string, top_confidence: number, predictions: Array<Object> }>}
-     */
     async classifyImageZeroShot(physical_image_file_path, candidate_taxonomic_labels, classification_facet_name = 'visual_facet') {
-        const is_online = await this.checkHealth();
-        if (!is_online) {
-            throw new Error(`Ovis-Omni microservice is offline at ${this.active_endpoint_url}. Launch start_ovis_server.bat to start it.`);
-        }
-
-        const target_classify_url = `${this.active_endpoint_url}/classify/zero-shot`;
-        const http_classify_response = await fetch(target_classify_url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                image_file_path: physical_image_file_path,
-                candidate_taxonomic_labels: candidate_taxonomic_labels,
-                classification_facet_name: classification_facet_name
-            })
-        });
-
-        if (!http_classify_response.ok) {
-            const error_message_text = await http_classify_response.text();
-            throw new Error(`Ovis-Omni Classification Error (${http_classify_response.status}): ${error_message_text}`);
-        }
-
-        return await http_classify_response.json();
+        return classify_image_zero_shot(this.configuration, physical_image_file_path, candidate_taxonomic_labels, classification_facet_name);
     }
 }
 
+// WHAT: Default singleton adapter instance for legacy server.js route handlers.
+// WHY: Ensures zero breaking changes for existing Express routes.
 export const ovis_omni_client_instance = new OvisOmniClient();

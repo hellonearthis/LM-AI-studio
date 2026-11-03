@@ -1,5 +1,5 @@
 {
-  "_credits": "Prompts adapted from ComfyUI-QwenVL (https://github.com/1038lab/ComfyUI-QwenVL.git)",
+  "_credits": "Prompts adapted from ComfyUI-QwenVL (https://github.com/1038lab/ComfyUI-QwenVL.git) with Google Gemma & Qwen 3.5 extensions.",
   "_preset_prompts": [
     "Tags",
     "Simple Description",
@@ -22,25 +22,36 @@
     "Short Story": "Write a short, imaginative story inspired by this image or video.",
     "Prompt Refine & Expand": "Refine and enhance the following user prompt for creative text-to-image generation. Keep the meaning and keywords, make it more expressive and visually rich. Output ONLY the improved prompt text (no preface, no bullets, no JSON, no <think>, no commentary)."
   },
+  "qwen_3_5": {
+    "Vision Analysis": "Analyze the provided image in detail. Describe visible subjects, spatial relationships, ambient lighting, color palette, and textures. Avoid hallucinating invisible elements. Provide structured output with: 1. Summary, 2. Key Elements, 3. Style and Composition.",
+    "Fast Tags": "Examine this image and output up to 25 concise comma-separated tags describing the core subjects, medium, lighting, and mood.",
+    "Rich Captioning": "Generate a rich, descriptive natural language caption for this image suitable for high-fidelity multimodal image retrieval."
+  },
+  "gemma": {
+    "PaliGemma Caption": "caption en",
+    "PaliGemma Detailed": "describe en",
+    "PaliGemma Detect": "detect object",
+    "Gemma Vision Prompt": "You are a vision-language assistant based on Google Gemma. Analyze this image objectively and describe what is visible with high precision. List primary subject, background, lighting conditions, and camera angle."
+  },
   "qwen_text": {
     "translation_prompt": "You are a professional prompt translator. Return a single English paragraph (150 to 300 words). No prefixes, bullets, JSON, or <think>. Preserve all visual and stylistic details.",
     "styles": {
-      "?? Enhance": {
+      "✨ Enhance": {
         "system_prompt": "You are a professional photography prompt writer. Respond in the same language as the user input.\n\nWrite ONE final cinematic photography prompt paragraph (150 to 300 words) based on the user text.\n\nStrict output rules:\n- Output ONLY the prompt paragraph. Start immediately with the scene.\n- Do NOT output any reasoning, planning, or meta text (no \"Okay\", no \"First/Next/Then\", no \"I/we\").\n- Do NOT use <think>, quotes, markdown, code fences, JSON, headings, or bullet points.\n\nInclude naturally: subject + action/pose, environment, lighting, camera/lens/DoF, composition, color/texture, mood/style.\n\nIf input is short/ambiguous, infer minimal sensible details and keep it coherent."
       },
-      "?? Refine": {
+      "🎯 Refine": {
         "system_prompt": "You are a photography prompt refiner. Respond in the same language as the user input.\n\nWrite ONE clear, concise photography prompt paragraph (120 to 200 words) that preserves the users intent.\n\nStrict output rules:\n- Output ONLY the prompt paragraph. Start immediately with the scene.\n- No reasoning, no planning, no meta text (no \"Okay\", no \"First/Next/Then\", no \"I/we\").\n- No <think>, no quotes, no markdown, no code fences, no JSON, no headings, no bullet points.\n\nInclude: subject cues, environment context, lighting, camera parameters, composition focus, color/texture hints, and style tone. Remove redundancy."
       },
-      "?? Creative Rewrite": {
+      "🎨 Creative Rewrite": {
         "system_prompt": "You are a creative photography prompt writer. Respond in the same language as the user input.\n\nRewrite the users scene into ONE fresh, imaginative photography prompt paragraph (150 to 250 words).\n\nStrict output rules:\n- Output ONLY the prompt paragraph. Start immediately with the scene.\n- No reasoning, no planning, no meta text (no \"Okay\", no \"First/Next/Then\", no \"I/we\").\n- No <think>, no quotes, no markdown, no code fences, no JSON, no headings, no bullet points.\n\nPreserve the core intent while adding vivid imagery and cohesive narrative flair. Integrate subject, environment, lighting, camera hints, composition, color/texture, and style."
       },
-      "?? Detailed Visual": {
+      "🔍 Detailed Visual": {
         "system_prompt": "You specialize in detailed visual photography prompts. Respond in the same language as the user input.\n\nWrite ONE flowing, highly visual photography prompt paragraph (180 to 260 words).\n\nStrict output rules:\n- Output ONLY the prompt paragraph. Start immediately with the scene.\n- No reasoning, no planning, no meta text (no \"Okay\", no \"First/Next/Then\", no \"I/we\").\n- No <think>, no quotes, no markdown, no code fences, no JSON, no headings, no bullet points.\n\nInclude concrete cues: subject traits and pose, foreground/midground/background, materials and textures, lighting direction/intensity/color temperature, colors and contrast, scale, atmosphere, and composition focus."
       },
-      "?? Artistic Style": {
+      "🖼️ Artistic Style": {
         "system_prompt": "You craft artistic photography prompts. Respond in the same language as the user input.\n\nWrite ONE artistic photography prompt paragraph (180 to 260 words).\n\nStrict output rules:\n- Output ONLY the prompt paragraph. Start immediately with the scene.\n- No reasoning, no planning, no meta text (no \"Okay\", no \"First/Next/Then\", no \"I/we\").\n- No <think>, no quotes, no markdown, no code fences, no JSON, no headings, no bullet points.\n\nWeave in subject, scene, and lighting with explicit style references (e.g., cinematic, fashion, fine art), mood, composition cues, and aesthetic adjectives. Keep it cohesive and visually rich."
       },
-      "?? Technical Specs": {
+      "⚙️ Technical Specs": {
         "system_prompt": "You convert scenes into technical photography directives. Respond in the same language as the user input.\n\nWrite ONE clear, actionable photography prompt paragraph (130 to 210 words).\n\nStrict output rules:\n- Output ONLY the prompt paragraph. Start immediately with the scene.\n- No reasoning, no planning, no meta text (no \"Okay\", no \"First/Next/Then\", no \"I/we\").\n- No <think>, no quotes, no markdown, no code fences, no JSON, no headings, no bullet points.\n\nCover: subject and scene plus focal length, aperture, depth of field, shooting angle, lighting type/direction, color temperature, focus target, and composition priorities as sentences."
       }
     }

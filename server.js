@@ -1780,8 +1780,8 @@ app.post('/api/proxy/unload', async (http_incoming_request, http_server_response
     }
 });
 
-// WHAT: Serving SQLite database cluster coordinates joined with Laya semantic cluster themes.
-// WHY: Used by scope.js ("Evoc DB" toggle) to render 2D scatter plots colored by semantic theme.
+// WHAT: Serving SQLite database cluster coordinates joined with Toponymy topics and Laya semantic themes.
+// WHY: Used by scope.js ("Evoc DB" toggle) to render 2D scatter plots colored by semantic cluster topics.
 app.get('/api/scope/db-data', (http_incoming_request, http_server_response) => {
     try {
         const sql_coordinates_query = `
@@ -1789,12 +1789,23 @@ app.get('/api/scope/db-data', (http_incoming_request, http_server_response) => {
                 image_coordinates.x, 
                 image_coordinates.y, 
                 image_clusters.cluster_label AS cluster, 
-                COALESCE(cluster_themes.theme_name, 'Cluster ' || image_clusters.cluster_label) AS label, 
+                COALESCE(
+                    image_cluster_topics.topic_title || CASE 
+                        WHEN cluster_themes.theme_name IS NOT NULL 
+                        THEN ' (' || REPLACE(cluster_themes.theme_name, '_', ' ') || ')' 
+                        ELSE '' 
+                    END,
+                    cluster_themes.theme_name,
+                    'Cluster ' || image_clusters.cluster_label
+                ) AS label, 
+                image_cluster_topics.topic_title AS topic_title,
+                image_cluster_topics.keyphrases_json AS topic_keyphrases,
                 images.path, 
                 images.filename,
                 images.id
             FROM image_coordinates
             JOIN image_clusters ON image_coordinates.image_id = image_clusters.image_id
+            LEFT JOIN image_cluster_topics ON image_clusters.cluster_label = image_cluster_topics.cluster_label
             LEFT JOIN cluster_themes ON image_clusters.cluster_label = cluster_themes.cluster_label
             JOIN images ON image_coordinates.image_id = images.id
         `;
@@ -1809,20 +1820,34 @@ app.get('/api/scope/db-data', (http_incoming_request, http_server_response) => {
     }
 });
 
-// WHAT: Retrieves all EVoC cluster themes categorized by Laya.
-// WHY: Allows frontend dropdowns and filter chips to list all semantic cluster categories.
+// WHAT: Retrieves all EVoC cluster themes and Toponymy semantic topics.
+// WHY: Allows frontend dropdowns and filter chips to list all 316+ semantic cluster categories.
 app.get('/api/clusters/themes', (http_incoming_request, http_server_response) => {
     try {
         const sql_cluster_themes_query = `
             SELECT 
-                cluster_label,
-                theme_name,
-                confidence,
-                purity,
-                item_count,
-                sample_summary,
-                updated_at
-            FROM cluster_themes
+                image_clusters.cluster_label,
+                COALESCE(
+                    image_cluster_topics.topic_title || CASE 
+                        WHEN cluster_themes.theme_name IS NOT NULL 
+                        THEN ' (' || REPLACE(cluster_themes.theme_name, '_', ' ') || ')' 
+                        ELSE '' 
+                    END,
+                    cluster_themes.theme_name,
+                    'Cluster ' || image_clusters.cluster_label
+                ) AS theme_name,
+                image_cluster_topics.topic_title AS topic_title,
+                cluster_themes.theme_name AS raw_theme_category,
+                COALESCE(cluster_themes.confidence, 1.0) AS confidence,
+                COALESCE(cluster_themes.purity, 1.0) AS purity,
+                COUNT(image_clusters.image_id) AS item_count,
+                COALESCE(image_cluster_topics.keyphrases_json, cluster_themes.sample_summary) AS sample_summary,
+                image_cluster_topics.updated_at
+            FROM image_clusters
+            LEFT JOIN image_cluster_topics ON image_clusters.cluster_label = image_cluster_topics.cluster_label
+            LEFT JOIN cluster_themes ON image_clusters.cluster_label = cluster_themes.cluster_label
+            WHERE image_clusters.cluster_label != -1
+            GROUP BY image_clusters.cluster_label
             ORDER BY item_count DESC
         `;
         const cluster_themes_records = db.prepare(sql_cluster_themes_query).all();
@@ -1891,6 +1916,107 @@ app.get('/api/clusters/:cluster_identifier/images', (http_incoming_request, http
     } catch (cluster_images_retrieval_error) {
         console.error('[CLUSTERS] Failed to fetch cluster images:', cluster_images_retrieval_error);
         http_server_response.status(500).json({ error: 'Failed to fetch cluster images' });
+    }
+});
+
+// ============================================================================
+// GRAPHMEMORY ASSOCIATIVE RETRIEVAL & KNOWLEDGE GRAPH ENDPOINTS
+// ============================================================================
+
+// WHAT: Executes a command against the GraphMemory Python retrieval engine.
+// WHY: Decouples HTTP request/response handling from CLI subprocess invocation.
+function executeGraphMemoryRetrievalCli(cli_arguments_array) {
+    return new Promise((resolve_promise, reject_promise) => {
+        const python_executable_path = fs.existsSync(path.join(__dirname, 'venv', 'Scripts', 'python.exe'))
+            ? path.join(__dirname, 'venv', 'Scripts', 'python.exe')
+            : 'python';
+        const script_file_path = path.join(__dirname, 'scripts', 'associative_retrieval.py');
+
+        const subprocess_instance = spawn(python_executable_path, [script_file_path, ...cli_arguments_array]);
+        let accumulated_standard_output_buffer = '';
+        let accumulated_standard_error_buffer = '';
+
+        subprocess_instance.stdout.on('data', (output_chunk) => {
+            accumulated_standard_output_buffer += output_chunk.toString();
+        });
+
+        subprocess_instance.stderr.on('data', (error_chunk) => {
+            accumulated_standard_error_buffer += error_chunk.toString();
+        });
+
+        subprocess_instance.on('close', (process_exit_code) => {
+            if (process_exit_code !== 0) {
+                return reject_promise(new Error(accumulated_standard_error_buffer || `Exit code ${process_exit_code}`));
+            }
+            try {
+                const parsed_json_payload = JSON.parse(accumulated_standard_output_buffer);
+                resolve_promise(parsed_json_payload);
+            } catch (json_parsing_error) {
+                reject_promise(new Error(`Failed to parse GraphMemory output: ${json_parsing_error.message}`));
+            }
+        });
+    });
+}
+
+// WHAT: Queries GraphMemory for multi-hop associative neighbors of an image.
+// WHY: Surfaces images that share high conceptual resonance across tags, facets, and topics.
+app.get('/api/graph/associative-related', async (http_incoming_request, http_server_response) => {
+    try {
+        const target_image_identifier = parseInt(http_incoming_request.query.image_id, 10);
+        if (isNaN(target_image_identifier)) {
+            return http_server_response.status(400).json({ error: 'Valid numeric image_id query parameter is required.' });
+        }
+        const maximum_results_limit = parseInt(http_incoming_request.query.limit, 10) || 24;
+
+        const associative_search_result = await executeGraphMemoryRetrievalCli([
+            '--image', String(target_image_identifier),
+            '--limit', String(maximum_results_limit)
+        ]);
+        http_server_response.json(associative_search_result);
+    } catch (graph_search_error) {
+        console.error('[GRAPHMEMORY] Associative retrieval error:', graph_search_error);
+        http_server_response.status(500).json({ error: graph_search_error.message });
+    }
+});
+
+// WHAT: Extracts an interactive ego-network subgraph around an image entity.
+// WHY: Used by frontend visualization components to display connected concepts and peer images.
+app.get('/api/graph/subgraph', async (http_incoming_request, http_server_response) => {
+    try {
+        const target_image_identifier = parseInt(http_incoming_request.query.image_id, 10);
+        if (isNaN(target_image_identifier)) {
+            return http_server_response.status(400).json({ error: 'Valid numeric image_id query parameter is required.' });
+        }
+
+        const subgraph_result = await executeGraphMemoryRetrievalCli([
+            '--subgraph', String(target_image_identifier)
+        ]);
+        http_server_response.json(subgraph_result);
+    } catch (graph_subgraph_error) {
+        console.error('[GRAPHMEMORY] Subgraph extraction error:', graph_subgraph_error);
+        http_server_response.status(500).json({ error: graph_subgraph_error.message });
+    }
+});
+
+// WHAT: Discovers semantic bridge concepts connecting two distinct EVoC clusters.
+// WHY: Allows exploration of conceptual intersections between different visual regions.
+app.get('/api/graph/bridges', async (http_incoming_request, http_server_response) => {
+    try {
+        const first_cluster_label = parseInt(http_incoming_request.query.cluster_a, 10);
+        const second_cluster_label = parseInt(http_incoming_request.query.cluster_b, 10);
+        if (isNaN(first_cluster_label) || isNaN(second_cluster_label)) {
+            return http_server_response.status(400).json({ error: 'Valid numeric cluster_a and cluster_b parameters are required.' });
+        }
+        const maximum_results_limit = parseInt(http_incoming_request.query.limit, 10) || 15;
+
+        const bridges_result = await executeGraphMemoryRetrievalCli([
+            '--bridges', String(first_cluster_label), String(second_cluster_label),
+            '--limit', String(maximum_results_limit)
+        ]);
+        http_server_response.json(bridges_result);
+    } catch (graph_bridges_error) {
+        console.error('[GRAPHMEMORY] Cluster bridges error:', graph_bridges_error);
+        http_server_response.status(500).json({ error: graph_bridges_error.message });
     }
 });
 
