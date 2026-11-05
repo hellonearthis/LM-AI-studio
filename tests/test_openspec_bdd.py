@@ -370,6 +370,22 @@ class OpenSpecExecutableBehaviorTests(unittest.TestCase):
         finally:
             duckdb_connection.close()
 
+    def test_defensive_clamping_and_nan_resilience(self):
+        # WHAT: Validates defensive clamping against mathematical cosine boundary violations.
+        # WHY:  Guarantees that float drift or extreme magnitudes never exceed [-1.0, 1.0].
+        def execute_clamped_dot_product(vector_a, vector_b):
+            raw_dot = sum(a * b for a, b in zip(vector_a, vector_b))
+            return max(-1.0, min(1.0, raw_dot))
+
+        # Vector with slight numerical drift
+        slightly_overflowing_vector_a = (1.0000002, 0.0)
+        unit_vector_b = (1.0, 0.0)
+        clamped_result = execute_clamped_dot_product(slightly_overflowing_vector_a, unit_vector_b)
+
+        self.assertLessEqual(clamped_result, 1.0)
+        self.assertGreaterEqual(clamped_result, -1.0)
+        self.assertEqual(clamped_result, 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

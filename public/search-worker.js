@@ -114,9 +114,12 @@ fn compute_dot_products_main(@builtin(global_invocation_id) global_invocation_id
         accumulated_dot_product = accumulated_dot_product + (query_scalar * candidate_scalar);
     }
 
+    // Defensive clamping to valid mathematical cosine range [-1.0, 1.0]
+    let sanitized_dot_product: f32 = clamp(accumulated_dot_product, -1.0, 1.0);
+
     // Apply threshold filter directly on the GPU
-    if (accumulated_dot_product >= search_parameters.minimum_similarity_threshold) {
-        computed_similarity_scores[candidate_vector_index] = accumulated_dot_product;
+    if (sanitized_dot_product >= search_parameters.minimum_similarity_threshold) {
+        computed_similarity_scores[candidate_vector_index] = sanitized_dot_product;
     } else {
         computed_similarity_scores[candidate_vector_index] = 0.0;
     }
@@ -206,19 +209,30 @@ function buildContiguousVectorTable(raw_embeddings_json_dictionary) {
         indexed_image_identifiers_collection[vector_index] = image_identifier_key;
         database_id_to_vector_index_lookup.set(String(image_identifier_key), vector_index);
 
-        // Step 1: Calculate vector Euclidean magnitude
+        // Step 1: Calculate vector Euclidean magnitude with defensive NaN/Infinity/subnormal sanitization
         let sum_of_squared_scalars = 0.0;
+        const safe_vector_length = Array.isArray(raw_vector_array) ? raw_vector_array.length : 0;
+
         for (let dimension_index = 0; dimension_index < indexed_vector_dimensions_count; dimension_index++) {
-            const scalar_value = raw_vector_array[dimension_index];
-            sum_of_squared_scalars += scalar_value * scalar_value;
+            const raw_scalar = (dimension_index < safe_vector_length) ? raw_vector_array[dimension_index] : 0.0;
+            const sanitized_scalar = (typeof raw_scalar === 'number' && Number.isFinite(raw_scalar)) ? raw_scalar : 0.0;
+            sum_of_squared_scalars += sanitized_scalar * sanitized_scalar;
         }
+
         const vector_euclidean_magnitude = Math.sqrt(sum_of_squared_scalars);
-        const inverse_magnitude_factor = vector_euclidean_magnitude > 0 ? 1.0 / vector_euclidean_magnitude : 0.0;
+        // WHAT: Guard against zero-division and subnormal underflow (< 1e-12).
+        // WHY: Zero-magnitude vectors or corrupt inputs must yield clean zero-vectors rather than poisoning memory with NaN.
+        const inverse_magnitude_factor = (Number.isFinite(vector_euclidean_magnitude) && vector_euclidean_magnitude > 1e-12)
+            ? 1.0 / vector_euclidean_magnitude
+            : 0.0;
 
         // Step 2: Store pre-normalized values directly in the contiguous buffer
         for (let dimension_index = 0; dimension_index < indexed_vector_dimensions_count; dimension_index++) {
+            const raw_scalar = (dimension_index < safe_vector_length) ? raw_vector_array[dimension_index] : 0.0;
+            const sanitized_scalar = (typeof raw_scalar === 'number' && Number.isFinite(raw_scalar)) ? raw_scalar : 0.0;
+            const normalized_scalar = sanitized_scalar * inverse_magnitude_factor;
             contiguous_normalized_embedding_vectors_buffer[base_memory_offset + dimension_index] = (
-                raw_vector_array[dimension_index] * inverse_magnitude_factor
+                Number.isFinite(normalized_scalar) ? normalized_scalar : 0.0
             );
         }
     }
@@ -456,10 +470,15 @@ async function computeVectorSimilaritiesViaWebGpu(normalized_query_float32_array
  * @returns {Array<{ item: Object, score: number }>} Sorted matching candidate records.
  */
 function computeVectorSimilaritiesViaContiguousCpu(normalized_query_float32_array) {
+    if (!normalized_query_float32_array || !contiguous_normalized_embedding_vectors_buffer) {
+        return [];
+    }
+
     const candidate_matches_collection = [];
     const vector_dimensions = indexed_vector_dimensions_count;
     const total_vectors = total_indexed_vectors_count;
     const contiguous_matrix = contiguous_normalized_embedding_vectors_buffer;
+    const safe_query_length = normalized_query_float32_array.length;
 
     // Fast linear loop over contiguous memory
     for (let vector_index = 0; vector_index < total_vectors; vector_index++) {
@@ -467,12 +486,15 @@ function computeVectorSimilaritiesViaContiguousCpu(normalized_query_float32_arra
         let accumulated_dot_product = 0.0;
 
         for (let dimension_index = 0; dimension_index < vector_dimensions; dimension_index++) {
-            accumulated_dot_product += (
-                normalized_query_float32_array[dimension_index] * contiguous_matrix[memory_offset + dimension_index]
-            );
+            const query_scalar = (dimension_index < safe_query_length) ? normalized_query_float32_array[dimension_index] : 0.0;
+            accumulated_dot_product += query_scalar * contiguous_matrix[memory_offset + dimension_index];
         }
 
-        if (accumulated_dot_product >= MINIMUM_COSINE_SIMILARITY_THRESHOLD_SCORE) {
+        // WHAT: Clamping dot product to valid mathematical cosine range [-1.0, 1.0].
+        // WHY: Floating-point precision drift can slightly exceed 1.0; clamping guarantees strict mathematical bounds.
+        const clamped_similarity_score = Math.min(1.0, Math.max(-1.0, accumulated_dot_product));
+
+        if (Number.isFinite(clamped_similarity_score) && clamped_similarity_score >= MINIMUM_COSINE_SIMILARITY_THRESHOLD_SCORE) {
             const image_identifier = indexed_image_identifiers_collection[vector_index];
             const corresponding_image_record = global_image_database_collection.find(
                 single_record => String(single_record.id) === String(image_identifier)
@@ -481,7 +503,7 @@ function computeVectorSimilaritiesViaContiguousCpu(normalized_query_float32_arra
             if (corresponding_image_record) {
                 candidate_matches_collection.push({
                     item: corresponding_image_record,
-                    score: accumulated_dot_product
+                    score: clamped_similarity_score
                 });
             }
         }
@@ -494,27 +516,45 @@ function computeVectorSimilaritiesViaContiguousCpu(normalized_query_float32_arra
 
 /**
  * WHAT: Evaluates semantic similarity across all image vectors using WebGPU (or contiguous CPU fallback).
- * WHY: Dispatches queries to the fastest available execution engine.
+ * WHY: Dispatches queries to the fastest available execution engine with defensive input sanitization.
  */
 async function querySemanticMatchesCollection(raw_query_vector_array) {
     if (!contiguous_normalized_embedding_vectors_buffer || total_indexed_vectors_count === 0) {
         return [];
     }
-
-    // Pre-normalize incoming query vector
-    let query_magnitude_squared = 0.0;
-    for (let index = 0; index < raw_query_vector_array.length; index++) {
-        query_magnitude_squared += raw_query_vector_array[index] * raw_query_vector_array[index];
+    if (!Array.isArray(raw_query_vector_array) && !(raw_query_vector_array instanceof Float32Array)) {
+        return [];
     }
+    if (raw_query_vector_array.length === 0) {
+        return [];
+    }
+
+    // Pre-normalize incoming query vector with NaN/Infinity sanitization
+    let query_magnitude_squared = 0.0;
+    const vector_dimensions = indexed_vector_dimensions_count;
+    const safe_query_length = raw_query_vector_array.length;
+
+    for (let index = 0; index < safe_query_length; index++) {
+        const raw_scalar = raw_query_vector_array[index];
+        const sanitized_scalar = (typeof raw_scalar === 'number' && Number.isFinite(raw_scalar)) ? raw_scalar : 0.0;
+        query_magnitude_squared += sanitized_scalar * sanitized_scalar;
+    }
+
     const query_magnitude = Math.sqrt(query_magnitude_squared);
-    if (query_magnitude === 0.0) {
+    if (!Number.isFinite(query_magnitude) || query_magnitude <= 1e-12) {
         return [];
     }
 
     const inverse_query_magnitude = 1.0 / query_magnitude;
-    const normalized_query_float32 = new Float32Array(raw_query_vector_array.length);
-    for (let index = 0; index < raw_query_vector_array.length; index++) {
-        normalized_query_float32[index] = raw_query_vector_array[index] * inverse_query_magnitude;
+    const normalized_query_float32 = new Float32Array(vector_dimensions);
+    for (let index = 0; index < vector_dimensions; index++) {
+        if (index < safe_query_length) {
+            const raw_scalar = raw_query_vector_array[index];
+            const sanitized_scalar = (typeof raw_scalar === 'number' && Number.isFinite(raw_scalar)) ? raw_scalar : 0.0;
+            normalized_query_float32[index] = sanitized_scalar * inverse_query_magnitude;
+        } else {
+            normalized_query_float32[index] = 0.0;
+        }
     }
 
     const search_start_time = performance.now();
@@ -666,9 +706,12 @@ async function executeHybridSearchProcedure(raw_query_string, query_embedding_ve
  */
 function fuseRankedListsUsingRRF(first_ranked_candidate_list, second_ranked_candidate_list) {
     const combined_scores_dictionary_map = new Map();
+    const safe_first_ranked_list = Array.isArray(first_ranked_candidate_list) ? first_ranked_candidate_list : [];
+    const safe_second_ranked_list = Array.isArray(second_ranked_candidate_list) ? second_ranked_candidate_list : [];
 
     // Factor in ranking from first list
-    first_ranked_candidate_list.forEach((candidate_item, candidate_rank_position_index) => {
+    safe_first_ranked_list.forEach((candidate_item, candidate_rank_position_index) => {
+        if (!candidate_item || candidate_item.id === undefined || candidate_item.id === null) return;
         const candidate_identifier_string = String(candidate_item.id);
         const reciprocal_rank_contribution_score = 1 / (RRF_RANK_SMOOTHING_CONSTANT + candidate_rank_position_index);
         combined_scores_dictionary_map.set(
@@ -678,7 +721,8 @@ function fuseRankedListsUsingRRF(first_ranked_candidate_list, second_ranked_cand
     });
 
     // Factor in ranking from second list
-    second_ranked_candidate_list.forEach((candidate_item, candidate_rank_position_index) => {
+    safe_second_ranked_list.forEach((candidate_item, candidate_rank_position_index) => {
+        if (!candidate_item || candidate_item.id === undefined || candidate_item.id === null) return;
         const candidate_identifier_string = String(candidate_item.id);
         const reciprocal_rank_contribution_score = 1 / (RRF_RANK_SMOOTHING_CONSTANT + candidate_rank_position_index);
         

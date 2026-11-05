@@ -1923,10 +1923,19 @@ app.get('/api/clusters/:cluster_identifier/images', (http_incoming_request, http
 // GRAPHMEMORY ASSOCIATIVE RETRIEVAL & KNOWLEDGE GRAPH ENDPOINTS
 // ============================================================================
 
-// WHAT: Executes a command against the GraphMemory Python retrieval engine.
-// WHY: Decouples HTTP request/response handling from CLI subprocess invocation.
+// WHAT: Executes a command against the GraphMemory Python retrieval engine with defensive argument validation.
+// WHY: Decouples HTTP handling while rejecting dangerous characters or path injection attempts.
 function executeGraphMemoryRetrievalCli(cli_arguments_array) {
     return new Promise((resolve_promise, reject_promise) => {
+        // WHAT: Boundary fuzzing and input sanitization check.
+        // WHY: Validates that each CLI argument token contains only safe alphanumeric, dash, underscore, dot, colon characters.
+        const SAFE_CLI_TOKEN_REGEX = /^[a-zA-Z0-9_\-\.\:\/]+$/;
+        for (const single_token_string of cli_arguments_array) {
+            if (typeof single_token_string !== 'string' || !SAFE_CLI_TOKEN_REGEX.test(single_token_string)) {
+                return reject_promise(new Error(`Rejected unsafe CLI argument token: ${single_token_string}`));
+            }
+        }
+
         const python_executable_path = fs.existsSync(path.join(__dirname, 'venv', 'Scripts', 'python.exe'))
             ? path.join(__dirname, 'venv', 'Scripts', 'python.exe')
             : 'python';
@@ -1958,15 +1967,19 @@ function executeGraphMemoryRetrievalCli(cli_arguments_array) {
     });
 }
 
-// WHAT: Queries GraphMemory for multi-hop associative neighbors of an image.
-// WHY: Surfaces images that share high conceptual resonance across tags, facets, and topics.
+// WHAT: Queries GraphMemory for multi-hop associative neighbors of an image with boundary validation.
+// WHY: Surfaces images that share high conceptual resonance while guarding against negative/overflow integer inputs.
 app.get('/api/graph/associative-related', async (http_incoming_request, http_server_response) => {
     try {
-        const target_image_identifier = parseInt(http_incoming_request.query.image_id, 10);
-        if (isNaN(target_image_identifier)) {
-            return http_server_response.status(400).json({ error: 'Valid numeric image_id query parameter is required.' });
+        const raw_target_id = Number(http_incoming_request.query.image_id);
+        if (!Number.isSafeInteger(raw_target_id) || raw_target_id <= 0) {
+            return http_server_response.status(400).json({ error: 'Valid positive integer image_id query parameter is required.' });
         }
-        const maximum_results_limit = parseInt(http_incoming_request.query.limit, 10) || 24;
+        const target_image_identifier = raw_target_id;
+        const requested_limit = Number(http_incoming_request.query.limit);
+        const maximum_results_limit = (Number.isSafeInteger(requested_limit) && requested_limit > 0)
+            ? Math.min(100, requested_limit)
+            : 24;
 
         const associative_search_result = await executeGraphMemoryRetrievalCli([
             '--image', String(target_image_identifier),
@@ -1979,14 +1992,15 @@ app.get('/api/graph/associative-related', async (http_incoming_request, http_ser
     }
 });
 
-// WHAT: Extracts an interactive ego-network subgraph around an image entity.
-// WHY: Used by frontend visualization components to display connected concepts and peer images.
+// WHAT: Extracts an interactive ego-network subgraph around an image entity with boundary validation.
+// WHY: Used by frontend visualization components; rejects invalid or non-numeric identifiers.
 app.get('/api/graph/subgraph', async (http_incoming_request, http_server_response) => {
     try {
-        const target_image_identifier = parseInt(http_incoming_request.query.image_id, 10);
-        if (isNaN(target_image_identifier)) {
-            return http_server_response.status(400).json({ error: 'Valid numeric image_id query parameter is required.' });
+        const raw_target_id = Number(http_incoming_request.query.image_id);
+        if (!Number.isSafeInteger(raw_target_id) || raw_target_id <= 0) {
+            return http_server_response.status(400).json({ error: 'Valid positive integer image_id query parameter is required.' });
         }
+        const target_image_identifier = raw_target_id;
 
         const subgraph_result = await executeGraphMemoryRetrievalCli([
             '--subgraph', String(target_image_identifier)
@@ -1998,16 +2012,21 @@ app.get('/api/graph/subgraph', async (http_incoming_request, http_server_respons
     }
 });
 
-// WHAT: Discovers semantic bridge concepts connecting two distinct EVoC clusters.
-// WHY: Allows exploration of conceptual intersections between different visual regions.
+// WHAT: Discovers semantic bridge concepts connecting two distinct EVoC clusters with boundary validation.
+// WHY: Rejects negative/overflow cluster coordinates and clamps result limits safely.
 app.get('/api/graph/bridges', async (http_incoming_request, http_server_response) => {
     try {
-        const first_cluster_label = parseInt(http_incoming_request.query.cluster_a, 10);
-        const second_cluster_label = parseInt(http_incoming_request.query.cluster_b, 10);
-        if (isNaN(first_cluster_label) || isNaN(second_cluster_label)) {
-            return http_server_response.status(400).json({ error: 'Valid numeric cluster_a and cluster_b parameters are required.' });
+        const raw_cluster_a = Number(http_incoming_request.query.cluster_a);
+        const raw_cluster_b = Number(http_incoming_request.query.cluster_b);
+        if (!Number.isSafeInteger(raw_cluster_a) || !Number.isSafeInteger(raw_cluster_b) || raw_cluster_a < -1 || raw_cluster_b < -1) {
+            return http_server_response.status(400).json({ error: 'Valid integer cluster_a and cluster_b parameters (>= -1) are required.' });
         }
-        const maximum_results_limit = parseInt(http_incoming_request.query.limit, 10) || 15;
+        const first_cluster_label = raw_cluster_a;
+        const second_cluster_label = raw_cluster_b;
+        const requested_limit = Number(http_incoming_request.query.limit);
+        const maximum_results_limit = (Number.isSafeInteger(requested_limit) && requested_limit > 0)
+            ? Math.min(50, requested_limit)
+            : 15;
 
         const bridges_result = await executeGraphMemoryRetrievalCli([
             '--bridges', String(first_cluster_label), String(second_cluster_label),

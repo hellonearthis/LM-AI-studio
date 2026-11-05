@@ -28,3 +28,12 @@
     - Built scripts/associative_retrieval.py for multi-hop associative search, ego-subgraph extraction, and cluster bridge detection
     - Exposed REST endpoints in server.js: /api/graph/associative-related, /api/graph/subgraph, /api/graph/bridges
     - Added OpenSpec BDD feature 04_graphmemory_associative_retrieval.feature and passing unit tests
+
+[x] Project Zero Dual-Assurance Fuzzing & Defensive Numerical Bounds:
+    - Defensive clamping in WebGPU compute shader and CPU dot-product loop [-1.0, 1.0]
+    - Division-by-zero, subnormal (< 1e-12), and NaN immunity during contiguous Float32Array vector ingestion
+    - Positive safe integer validation and safe CLI token regex checks on REST/subprocess boundaries
+    - fast-check vector property fuzzing suite (tests/test_fuzz_handwired_vector.js) with 750+ chaotic permutations
+    - Hypothesis GraphMemory fuzzing suite (tests/test_fuzz_graphmemory.py) with 450+ boundary iterations
+    - OpenSpec BDD feature 05_fuzzing_resilience_and_defensive_bounds.feature
+    - Unified npm test suite ("npm run test:all" executing BDD, fast-check, and Hypothesis tests)

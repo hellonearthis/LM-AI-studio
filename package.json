@@ -8,6 +8,10 @@
     "start": "electron .",
     "dev": "electron . --dev",
     "test": "node scripts/test_local_ai_client.js",
+    "test:fuzz:vector": "node tests/test_fuzz_handwired_vector.js",
+    "test:fuzz:graph": ".\\venv\\Scripts\\python tests/test_fuzz_graphmemory.py",
+    "test:bdd": ".\\venv\\Scripts\\python -m unittest tests/test_openspec_bdd.py",
+    "test:all": "node scripts/test_local_ai_client.js && node tests/test_fuzz_handwired_vector.js && .\\venv\\Scripts\\python -m unittest discover tests",
     "llama:vision": "start_llama_server.bat",
     "llama:vision:4b": "start_llama_vision_4b.bat",
     "llama:embed": "start_llama_embeddings.bat",
@@ -41,7 +45,8 @@
     "sharp": "^0.33.5"
   },
   "devDependencies": {
-    "electron-builder": "^26.8.1"
+    "electron-builder": "^26.8.1",
+    "fast-check": "^4.10.2"
   },
   "build": {
     "appId": "com.lmaistudio.app",
