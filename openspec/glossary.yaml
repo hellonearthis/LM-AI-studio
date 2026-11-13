@@ -53,4 +53,52 @@ terms:
     definition: "Multi-hop graph traversal engine discovering conceptually resonant assets and cluster bridges via shared concept weighting."
     sources: ["scripts/associative_retrieval.py", "server.js"]
 
+  prompt_dicer_master_record:
+    definition: "Immutable structured decomposition binding characters with theta roles, slot-typed ingredients, physical continuity edges, and weighted concreteness metrics."
+    sources: ["services/promptDicerService.js", "services/promptDicerDb.js"]
+
+  ovis_facet_fallback_enrichment:
+    definition: "Confidence-gated slug normalization pipeline filling missing film_stock_or_medium, framing, and mood slots from image_facets while isolating provenance as ovis_facet."
+    sources: ["services/promptDicerService.js", "services/promptDicerDb.js"]
+
+  visual_grounding_audit:
+    definition: "Multimodal cosine-similarity verification comparing cached or live 2048-dimensional Ovis image vectors against caption vectors to classify descriptions into grounded, borderline, or mismatched."
+    sources: ["services/promptDicerService.js", "services/promptDicerDb.js", "server.js"]
+
+  evoc_cluster_ingredient_matching:
+    definition: "Visual compatibility ranking strategy prioritizing catalog ingredients from shared EVoC image_clusters and Ovis nearest visual neighbors inside the Remix Workbench."
+    sources: ["services/promptDicerDb.js", "public/dicer.js"]
+
+  tri_face_prism_card:
+    definition: "Three-sided 3D CSS database card cycling across Front Summary, Tags, and Diced Prompt faces while isolating enlarged checkbox hit targets from card rotation."
+    sources: ["public/database.js", "public/database.css", "public/database.html"]
+
+  constrained_slot_transplant:
+    definition: "Beam-search ingredient swapper replacing up to K unlocked slots with EVoC-ranked, clash-pruned candidates while preserving user-locked subject, pose, action, and lens slots."
+    sources: ["services/promptDicerService.js", "services/promptDicerDb.js", "public/dicer.js"]
+
+  ingredient_influence_closure:
+    definition: "Bounded Pass D graph resolver auto-pulling implied downstream effects into unlocked slots on ingredient addition and auto-pruning orphaned receivers when their supporting cause is dropped."
+    sources: ["services/promptDicerService.js", "services/promptDicerDb.js", "public/dicer.js"]
+
+  round_trip_prompt_verification:
+    definition: "Automated verification pass re-dicing assembled prompt prose via offline heuristics or llama-server to detect missing planned slots, dropped anchors, or newly introduced continuity clashes."
+    sources: ["services/promptDicerService.js", "server.js", "public/dicer.js"]
+
+  per_ingredient_visual_grounding:
+    definition: "Element-wise 2048-dimensional Ovis embedding comparison scoring individual physical anchors against image pixels to enumerate visually missing or ungrounded ingredients."
+    sources: ["services/promptDicerService.js", "services/promptDicerDb.js", "public/database.js"]
+
+  laya_confidence_gating:
+    definition: "Single-pass Laya /decide evaluation producing slot choice and state implication probabilities to flag low-confidence items for curator review and break remix beam ties."
+    sources: ["services/promptDicerService.js", "services/layaClient.js", "server.js"]
+
+  review_event_ledger:
+    definition: "Append-only SQLite review_events table recording single-question curator labels alongside model_confidence, model_version, deterministic dataset_split, and quiet repeat-check flags while updating per-item is_reviewed columns."
+    sources: ["services/promptDicerService.js", "services/promptDicerDb.js", "public/dicer.js"]
+
+  calibration_histogram_dashboard:
+    definition: "Inline SVG analytics view summarizing whole-caption and per-ingredient Ovis score distributions, Laya confidence-vs-accuracy bands, Pass D missing-edge recall estimates, and intra-rater repeat consistency."
+    sources: ["services/promptDicerService.js", "services/promptDicerDb.js", "public/dicer.js"]
+
 

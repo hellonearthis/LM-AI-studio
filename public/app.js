@@ -2,6 +2,15 @@
 // IMAGE ANALYSIS STUDIO - MAIN APPLICATION LOGIC
 // ============================================================================
 
+import {
+    buildDataUrlFromBuffer,
+    mergeCustomTagsIntoAnalysis,
+    extractDisplayableMetadataFields,
+    buildFastScanBatchPayload,
+    computeBatchProgressStats,
+    tallyBatchSaveOutcome
+} from './modules/appCore.js';
+
 // DOM Elements
 const selectFileBtn = document.getElementById('selectFileBtn');
 const selectFolderBtn = document.getElementById('selectFolderBtn');
@@ -77,13 +86,29 @@ selectFileBtn.addEventListener('click', async () => {
 
         showStatus(`Selected ${filePaths.length} file(s)...`, 'info');
 
-        // For multiple files, batch process them
+        // WHAT: Branching between multi-file batch mode and single-file interactive preview.
+        // WHY: Single files display an immediate live preview and metadata breakdown, whereas multiple
+        //      files stream through the fast-scan batch queue with aggregate progress counters.
         if (filePaths.length > 1) {
             fileMsg.textContent = `${filePaths.length} files selected`;
-            const filesToProcess = filePaths.map(filePath => ({
-                path: filePath,
-                name: filePath.split('\\').slice(-1)[0]
-            }));
+            const filesToProcess = await Promise.all(
+                filePaths.map(async (filePath) => {
+                    try {
+                        const file_stats = await window.electronAPI.getFileStats(filePath);
+                        return {
+                            path: filePath,
+                            name: filePath.split(/[\\\/]/).slice(-1)[0],
+                            mtime: file_stats.mtime,
+                            size: file_stats.size
+                        };
+                    } catch (_stat_error) {
+                        return {
+                            path: filePath,
+                            name: filePath.split(/[\\\/]/).slice(-1)[0]
+                        };
+                    }
+                })
+            );
             await processBatch(filesToProcess);
         } else {
             // Single file - process it
@@ -94,20 +119,7 @@ selectFileBtn.addEventListener('click', async () => {
 
             // Read file using Electron API
             const fileBuffer = await window.electronAPI.readFile(filePath);
-
-            // Detect MIME type from file extension
-            const ext = fileName.split('.').slice(-1)[0].toLowerCase();
-            const mimeTypes = {
-                'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
-                'png': 'image/png', 'gif': 'image/gif',
-                'webp': 'image/webp', 'avif': 'image/avif',
-                'bmp': 'image/bmp', 'tiff': 'image/tiff', 'tif': 'image/tiff'
-            };
-            const mimeType = mimeTypes[ext] || 'image/jpeg';
-
-            const base64Data = `data:${mimeType};base64,${btoa(
-                new Uint8Array(fileBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
-            )}`;
+            const base64Data = buildDataUrlFromBuffer(fileName, fileBuffer);
 
             // Show preview
             previewImg.src = base64Data;
@@ -158,11 +170,15 @@ if (selectFolderBtn) {
 // PROCESSING LOGIC
 // ============================================================================
 
+// WHAT: Processes a single selected image by checking duplicates, repairing missing thumbnails,
+//       running AI vision analysis, and persisting the merged tags and metadata to SQLite.
+// WHY: Ensures duplicate files do not trigger redundant LLM calls while still repairing missing thumbnails.
 async function processSingleFile(filePath, fileName, fileBuffer, base64Data) {
     try {
         isProcessing = true;
 
-        // Calculate file hash
+        // WHAT: Hashing the raw image bytes before contacting the database.
+        // WHY: Allows content-based deduplication even if the image was copied or renamed.
         const fileHash = await calculateFileHash(fileBuffer);
 
         // Get file creation date from filesystem
@@ -182,18 +198,17 @@ async function processSingleFile(filePath, fileName, fileBuffer, base64Data) {
             size: fileStats.size
         });
 
+        // WHAT: Short-circuiting analysis if the image hash already exists in the database.
+        // WHY: Prevents expensive duplicate vision inference while ensuring an AVIF thumbnail is present.
         if (checkResult.duplicate) {
             showStatus(`File already in database. Checking thumbnail...`, 'info');
 
-            // Check if thumbnail exists, generate if missing
             const thumbnailPath = `thumbnails/id_${checkResult.id}.avif`;
 
             try {
-                // Try to fetch the thumbnail to check existence
                 const thumbCheck = await fetch(`${API_BASE_URL}/${thumbnailPath}`, { method: 'HEAD' });
 
                 if (!thumbCheck.ok) {
-                    // Thumbnail missing - generate it
                     showStatus('Thumbnail missing, generating...', 'info');
                     await fetch(`${API_BASE_URL}/create-thumbnail`, {
                         method: 'POST',
@@ -207,9 +222,8 @@ async function processSingleFile(filePath, fileName, fileBuffer, base64Data) {
                 } else {
                     showStatus(`File already in database (found at: ${checkResult.existingPath || filePath})`, 'info');
                 }
-            } catch (e) {
-                console.warn('Thumbnail check failed, attempting to generate:', e);
-                // Attempt to generate anyway
+            } catch (thumbnail_check_error) {
+                console.warn('Thumbnail check failed, attempting to generate:', thumbnail_check_error);
                 await fetch(`${API_BASE_URL}/create-thumbnail`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -233,57 +247,43 @@ async function processSingleFile(filePath, fileName, fileBuffer, base64Data) {
 
         // File is new or updated - perform analysis
         showStatus('Analyzing image with LM Studio...', 'info');
-        const result = await performAnalysis(base64Data);
+        const analysis_response = await performAnalysis(base64Data);
 
-        // MERGE CUSTOM TAGS with Analysis Tags
+        // WHAT: Merging optional user-supplied custom tags into the AI analysis result.
+        // WHY: Ensures batch/user-defined organization tags are persisted alongside AI-detected tags.
         const customTagsInput = document.getElementById('customTagsInput');
-        if (customTagsInput && customTagsInput.value.trim()) {
-            const customTags = customTagsInput.value.split(',').map(t => t.trim()).filter(t => t);
-            if (!result.analysis.tags) result.analysis.tags = [];
-
-            // Add custom tags if they don't exist
-            customTags.forEach(tag => {
-                if (!result.analysis.tags.includes(tag)) {
-                    result.analysis.tags.push(tag);
-                }
-            });
-            console.log('[APP] Added custom tags:', customTags);
-        }
+        const enriched_analysis = customTagsInput
+            ? mergeCustomTagsIntoAnalysis(analysis_response.analysis, customTagsInput.value)
+            : analysis_response.analysis;
 
         // Display Results
-        displayMetadata(result.metadata);
-        displayAnalysis(result.analysis);
+        displayMetadata(analysis_response.metadata);
+        displayAnalysis(enriched_analysis);
         document.querySelector('.analysis-grid').style.opacity = '1';
 
-        // Update database with analysis results
-        // Update database with analysis results
         console.log('[APP] Saving analysis results to database...');
         const finalSaveResult = await autoSaveToDatabase({
             filename: fileName,
             path: filePath,
             file_hash: fileHash,
-            metadata: result.metadata,
-            analysis: result.analysis,
+            metadata: analysis_response.metadata,
+            analysis: enriched_analysis,
             created_at: fileCreationDate,
             mtime: fileStats.mtime,
             size: fileStats.size,
-            imageData: base64Data // Pass this so the server auto-generates the ID-based thumbnail
+            imageData: base64Data
         });
         console.log('[APP] Final Save Result:', finalSaveResult);
 
-        // Show status in sidebar
         sidebarStatus.style.display = 'block';
         statProcessed.textContent = '1';
-        // Logic fix: if checkResult was "new: true", then finalSaveResult "updated: true" is expected.
-        // If checkResult was not duplicate, it means it was INSERTED.
-        // So finalSaveResult should be UPDATED.
         statAdded.textContent = checkResult.new ? '1' : '0';
         statUpdated.textContent = (checkResult.updated || finalSaveResult.updated) ? '1' : '0';
         statExisting.textContent = '0';
         statErrors.textContent = '0';
 
-        const statusMsg = 'Analysis complete and saved!';
-        showStatus(statusMsg, 'success');
+        const status_message_text = 'Analysis complete and saved!';
+        showStatus(status_message_text, 'success');
 
     } catch (error) {
         console.error('Analysis error:', error);
@@ -296,181 +296,140 @@ async function processSingleFile(filePath, fileName, fileBuffer, base64Data) {
     }
 }
 
+// WHAT: Sequentially processes a list of image files, skipping exact fast-scan matches and updating progress bars.
+// WHY: Bulk pre-checking path+size+mtime avoids reading unchanged files from disk and keeps local GPU inference stable.
 async function processBatch(files) {
     if (isProcessing) return;
     isProcessing = true;
 
-    // Reset UI
     progressContainer.style.display = 'block';
     selectFileBtn.style.pointerEvents = 'none';
     resultsContainer.style.display = 'none';
     statusArea.style.display = 'none';
 
-    let processedCount = 0;
-    let errorCount = 0;
-    let addedCount = 0;
-    let updatedCount = 0;
-    let existingCount = 0;
-    const totalFiles = files.length;
-
-    // Initialize Status UI
-    batchErrors = []; // Reset errors for new batch
-    sidebarStatus.style.display = 'block';
-    statProcessed.textContent = `0/${totalFiles}`;
-    statAdded.textContent = '0';
-    statUpdated.textContent = '0';
-    statExisting.textContent = '0';
-    statErrors.textContent = '0';
-
-    // 1. Bulk Check (Fast Scan)
-    progressText.textContent = 'Checking existing files...';
-    let existingRecords = {};
-
     try {
-        // Send ALL file stats to server for batch checking
-        // This is much faster than checking one by one
-        const batchPayload = files.map(f => ({
-            path: f.path,
-            size: f.size,
-            mtime: f.mtime
-        }));
+        let batch_counters = {
+            processedCount: 0,
+            errorCount: 0,
+            addedCount: 0,
+            updatedCount: 0,
+            existingCount: 0
+        };
+        const totalFiles = files.length;
 
-        const response = await fetch(`${API_BASE_URL}/check-fast-batch`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ files: batchPayload })
-        });
+        batchErrors = [];
+        sidebarStatus.style.display = 'block';
+        statProcessed.textContent = `0/${totalFiles}`;
+        statAdded.textContent = '0';
+        statUpdated.textContent = '0';
+        statExisting.textContent = '0';
+        statErrors.textContent = '0';
 
-        if (response.ok) {
-            const data = await response.json();
-            existingRecords = data.results || {};
-        }
-    } catch (err) {
-        console.error('Failed to check existing files:', err);
-    }
-
-    // 2. Process each file
-    for (let file_iteration_index = 0; file_iteration_index < totalFiles; file_iteration_index++) {
-        const fileData = files[file_iteration_index];
-        const filePath = fileData.path;
-        const filename = filePath.split(/[\\\/]/).slice(-1)[0];
-
-        // Update progress UI
-        const percent = Math.round((file_iteration_index / totalFiles) * 100);
-        progressBar.style.width = `${percent}%`;
-        progressPercent.textContent = `${percent}%`;
-        currentFileEl.textContent = `Processing: ${filename}`;
-        statProcessed.textContent = `${file_iteration_index + 1}/${totalFiles}`;
-
-        // CHECK BATCH RESULTS
-        if (existingRecords[filePath] === 'exact') {
-            console.log(`[FAST SCAN] Skipping ${filename} (unchanged)`);
-            existingCount++;
-            statExisting.textContent = existingCount;
-            processedCount++;
-            continue;
-        }
+        // WHAT: Sending file metadata in one batch request before reading any image bytes.
+        // WHY: Lets the server identify unchanged files in milliseconds via path, size, and mtime.
+        progressText.textContent = 'Checking existing files...';
+        let existingRecords = {};
 
         try {
-            // FAST SCAN CHECK REMOVED - using Batch Check above
-            // if (existingRecords[filePath] === 'exact') ... handled above
+            const batchPayload = buildFastScanBatchPayload(files);
 
-            // Read file using Electron API
-            const fileBuffer = await window.electronAPI.readFile(filePath);
-
-            // Detect MIME type from file extension
-            const ext = filename.split('.').pop().toLowerCase();
-            const mimeTypes = {
-                'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
-                'png': 'image/png', 'gif': 'image/gif',
-                'webp': 'image/webp', 'avif': 'image/avif',
-                'bmp': 'image/bmp', 'tiff': 'image/tiff', 'tif': 'image/tiff'
-            };
-            const mimeType = mimeTypes[ext] || 'image/jpeg';
-
-            const base64Data = `data:${mimeType};base64,${btoa(
-                new Uint8Array(fileBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
-            )}`;
-
-            const currentHash = await calculateFileHash(fileBuffer);
-
-            // Get file creation date from filesystem
-            const fileStats = await window.electronAPI.getFileStats(filePath);
-            const fileCreationDate = fileStats.birthtime;
-
-            // Secondary check: if for some reason we want to check hash (optional, but we skipped above)
-            // if (existing && existing.file_hash === currentHash) { ... }
-
-            // Perform Analysis
-            const analysisResult = await performAnalysis(base64Data);
-
-            // MERGE CUSTOM TAGS for Batch
-            const customTagsInput = document.getElementById('customTagsInput');
-            if (customTagsInput && customTagsInput.value.trim()) {
-                const customTags = customTagsInput.value.split(',').map(t => t.trim()).filter(t => t);
-                if (!analysisResult.analysis.tags) analysisResult.analysis.tags = [];
-
-                customTags.forEach(tag => {
-                    if (!analysisResult.analysis.tags.includes(tag)) {
-                        analysisResult.analysis.tags.push(tag);
-                    }
-                });
-            }
-
-            // Save to DB
-            const saveResult = await autoSaveToDatabase({
-                filename,
-                path: filePath,
-                file_hash: currentHash,
-                metadata: analysisResult.metadata,
-                analysis: analysisResult.analysis,
-                created_at: fileCreationDate,
-                mtime: fileData.mtime,
-                size: fileData.size,
-                imageData: base64Data // Server now auto-generates ID-based thumbnails during save
+            const response = await fetch(`${API_BASE_URL}/check-fast-batch`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ files: batchPayload })
             });
 
-            if (saveResult.new) {
-                addedCount++;
-                statAdded.textContent = addedCount;
-            } else if (saveResult.updated) {
-                updatedCount++;
-                statUpdated.textContent = updatedCount;
-            } else if (saveResult.duplicate) {
-                existingCount++;
-                statExisting.textContent = existingCount;
-            } else {
-                addedCount++;
-                statAdded.textContent = addedCount;
+            if (response.ok) {
+                const batch_check_payload = await response.json();
+                existingRecords = batch_check_payload.results || {};
             }
-
-        } catch (error) {
-            console.error(`Error processing ${filename}:`, error);
-            errorCount++;
-            batchErrors.push({ filename, error: error.message });
-            statErrors.textContent = errorCount;
+        } catch (batch_check_error) {
+            console.error('Failed to check existing files:', batch_check_error);
         }
 
-        processedCount++;
+        // 2. Process each file
+        for (let file_iteration_index = 0; file_iteration_index < totalFiles; file_iteration_index++) {
+            const fileData = files[file_iteration_index];
+            const filePath = fileData.path;
+            const filename = filePath.split(/[\\\/]/).slice(-1)[0];
+
+            const progress_stats = computeBatchProgressStats(file_iteration_index, totalFiles, filename);
+            progressBar.style.width = progress_stats.percentText;
+            progressPercent.textContent = progress_stats.percentText;
+            currentFileEl.textContent = progress_stats.currentFileText;
+            statProcessed.textContent = progress_stats.processedText;
+
+            if (existingRecords[filePath] === 'exact') {
+                console.log(`[FAST SCAN] Skipping ${filename} (unchanged)`);
+                batch_counters = {
+                    ...batch_counters,
+                    existingCount: batch_counters.existingCount + 1,
+                    processedCount: batch_counters.processedCount + 1
+                };
+                statExisting.textContent = batch_counters.existingCount;
+                continue;
+            }
+
+            try {
+                const fileBuffer = await window.electronAPI.readFile(filePath);
+                const base64Data = buildDataUrlFromBuffer(filename, fileBuffer);
+                const currentHash = await calculateFileHash(fileBuffer);
+                const fileStats = await window.electronAPI.getFileStats(filePath);
+                const fileCreationDate = fileStats.birthtime;
+
+                const analysisResult = await performAnalysis(base64Data);
+
+                const customTagsInput = document.getElementById('customTagsInput');
+                const enriched_analysis = customTagsInput
+                    ? mergeCustomTagsIntoAnalysis(analysisResult.analysis, customTagsInput.value)
+                    : analysisResult.analysis;
+
+                const saveResult = await autoSaveToDatabase({
+                    filename,
+                    path: filePath,
+                    file_hash: currentHash,
+                    metadata: analysisResult.metadata,
+                    analysis: enriched_analysis,
+                    created_at: fileCreationDate,
+                    mtime: fileData.mtime ?? fileStats.mtime,
+                    size: fileData.size ?? fileStats.size,
+                    imageData: base64Data
+                });
+
+                batch_counters = tallyBatchSaveOutcome(batch_counters, saveResult);
+                statAdded.textContent = batch_counters.addedCount;
+                statUpdated.textContent = batch_counters.updatedCount;
+                statExisting.textContent = batch_counters.existingCount;
+
+            } catch (error) {
+                console.error(`Error processing ${filename}:`, error);
+                batch_counters = { ...batch_counters, errorCount: batch_counters.errorCount + 1 };
+                batchErrors = [...batchErrors, { filename, error: error.message }];
+                statErrors.textContent = batch_counters.errorCount;
+            }
+
+            batch_counters = { ...batch_counters, processedCount: batch_counters.processedCount + 1 };
+        }
+
+        progressBar.style.width = '100%';
+        progressPercent.textContent = '100%';
+        progressText.textContent = 'Batch Processing Complete';
+        currentFileEl.textContent = `Processed ${totalFiles} files. Added: ${batch_counters.addedCount}, Updated: ${batch_counters.updatedCount}, Existing: ${batch_counters.existingCount}, Errors: ${batch_counters.errorCount}`;
+    } finally {
+        isProcessing = false;
+        selectFileBtn.style.pointerEvents = 'auto';
     }
-
-    // Complete
-    progressBar.style.width = '100%';
-    progressPercent.textContent = '100%';
-    progressText.textContent = 'Batch Processing Complete';
-    currentFileEl.textContent = `Processed ${totalFiles} files. Added: ${addedCount}, Updated: ${updatedCount}, Existing: ${existingCount}, Errors: ${errorCount}`;
-
-    isProcessing = false;
-    selectFileBtn.style.pointerEvents = 'auto';
 }
 
 // ============================================================================
 // API FUNCTIONS
 // ============================================================================
 
+// WHAT: Sends a Base64 image and chosen prompt template to the backend `/analyze` endpoint.
+// WHY: Isolates the network boundary for vision inference and raises descriptive errors on HTTP failure.
 async function performAnalysis(base64Data) {
     const promptTypeSelect = document.getElementById('promptType');
-    const promptType = promptTypeSelect ? promptTypeSelect.value : 'Detailed Analysis';
+    const promptType = promptTypeSelect ? promptTypeSelect.value : 'Ultra Detailed Description';
 
     const response = await fetch(`${API_BASE_URL}/analyze`, {
         method: 'POST',
@@ -482,23 +441,25 @@ async function performAnalysis(base64Data) {
     });
 
     if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Analysis failed');
+        const error_payload = await response.json();
+        throw new Error(error_payload.error || 'Analysis failed');
     }
 
     return await response.json();
 }
 
-async function autoSaveToDatabase(data) {
+// WHAT: Persists an analyzed (or pre-checked) image record to the backend `/save` endpoint.
+// WHY: Centralizes database persistence and duplicate detection behind one uniform fetch boundary.
+async function autoSaveToDatabase(image_payload) {
     const response = await fetch(`${API_BASE_URL}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
+        body: JSON.stringify(image_payload)
     });
 
     if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Database save failed');
+        const error_payload = await response.json();
+        throw new Error(error_payload.error || 'Database save failed');
     }
 
     return await response.json();
@@ -508,23 +469,28 @@ async function autoSaveToDatabase(data) {
 // MODAL FUNCTIONS
 // ============================================================================
 
+// WHAT: Opens the modal listing every file that failed during the most recent batch run.
+// WHY: Gives the user actionable per-file diagnostics instead of silently swallowing batch errors.
 function showErrorModal() {
     const modal = document.getElementById('errorModal');
     const errorList = document.getElementById('errorList');
-    
+
     if (batchErrors.length === 0) {
         showStatus('No errors recorded in the last batch.', 'info');
         return;
     }
 
     errorList.innerHTML = '';
-    batchErrors.forEach(err => {
+    batchErrors.forEach(batch_error_entry => {
         const item = document.createElement('div');
         item.className = 'error-list-item';
-        item.innerHTML = `
-            <span class="error-file-name">${err.filename}</span>
-            <span class="error-message-text">${err.error}</span>
-        `;
+        const file_name_span = document.createElement('span');
+        file_name_span.className = 'error-file-name';
+        file_name_span.textContent = String(batch_error_entry.filename || '');
+        const error_message_span = document.createElement('span');
+        error_message_span.className = 'error-message-text';
+        error_message_span.textContent = String(batch_error_entry.error || '');
+        item.append(file_name_span, error_message_span);
         errorList.appendChild(item);
     });
 
@@ -552,28 +518,22 @@ window.addEventListener('click', (event) => {
 // DISPLAY FUNCTIONS
 // ============================================================================
 
+// WHAT: Formats and injects EXIF camera metadata and optional ComfyUI prompt/workflow JSON into the UI.
+// WHY: Separates technical image telemetry from semantic AI descriptions for quick photographer inspection.
 function displayMetadata(metadata) {
     console.log('[APP] Displaying metadata:', metadata); // Debug log
     metadataOutput.innerHTML = '';
 
-    const fields = [
-        { label: 'Width', value: metadata.ImageWidth || metadata.ExifImageWidth || metadata.PixelXDimension },
-        { label: 'Height', value: metadata.ImageHeight || metadata.ExifImageHeight || metadata.PixelYDimension },
-        { label: 'Camera', value: metadata.Make && metadata.Model ? `${metadata.Make} ${metadata.Model}` : null },
-        { label: 'Lens', value: metadata.LensModel },
-        { label: 'ISO', value: metadata.ISO },
-        { label: 'Aperture', value: metadata.FNumber ? `f/${metadata.FNumber}` : null },
-        { label: 'Shutter', value: metadata.ExposureTime },
-        { label: 'Focal Length', value: metadata.FocalLength ? `${metadata.FocalLength}mm` : null }
-    ];
+    const fields = extractDisplayableMetadataFields(metadata);
 
     fields.forEach(field => {
-        if (field.value) {
-            const item = document.createElement('div');
-            item.className = 'metadata-item';
-            item.innerHTML = `<strong>${field.label}:</strong> ${field.value}`;
-            metadataOutput.appendChild(item);
-        }
+        const item = document.createElement('div');
+        item.className = 'metadata-item';
+        const label_strong = document.createElement('strong');
+        label_strong.textContent = `${field.label}: `;
+        const value_text = document.createTextNode(String(field.value));
+        item.append(label_strong, value_text);
+        metadataOutput.appendChild(item);
     });
 
     // Display ComfyUI Metadata (Prompt/Workflow)
@@ -583,23 +543,33 @@ function displayMetadata(metadata) {
         comfyDiv.style.borderTop = '1px solid var(--border)';
         comfyDiv.style.paddingTop = '0.5rem';
 
+        const append_json_details = (summary_label, json_payload, margin_top) => {
+            const details_element = document.createElement('details');
+            if (margin_top) details_element.style.marginTop = margin_top;
+            const summary_element = document.createElement('summary');
+            summary_element.style.cssText = 'cursor:pointer; color:var(--accent);';
+            summary_element.textContent = summary_label;
+            const pre_element = document.createElement('pre');
+            pre_element.style.cssText = 'font-size:0.7rem; overflow:auto; max-height:200px; background:rgba(0,0,0,0.2); padding:0.5rem; border-radius:4px;';
+            pre_element.textContent = JSON.stringify(json_payload, null, 2);
+            details_element.append(summary_element, pre_element);
+            comfyDiv.appendChild(details_element);
+        };
+
         if (metadata.prompt) {
-            const details = document.createElement('details');
-            details.innerHTML = '<summary style="cursor:pointer; color:var(--accent);">ComfyUI Prompt</summary><pre style="font-size:0.7rem; overflow:auto; max-height:200px; background:rgba(0,0,0,0.2); padding:0.5rem; border-radius:4px;">' + JSON.stringify(metadata.prompt, null, 2) + '</pre>';
-            comfyDiv.appendChild(details);
+            append_json_details('ComfyUI Prompt', metadata.prompt, null);
         }
 
         if (metadata.workflow) {
-            const details = document.createElement('details');
-            details.style.marginTop = '0.5rem';
-            details.innerHTML = '<summary style="cursor:pointer; color:var(--accent);">ComfyUI Workflow</summary><pre style="font-size:0.7rem; overflow:auto; max-height:200px; background:rgba(0,0,0,0.2); padding:0.5rem; border-radius:4px;">' + JSON.stringify(metadata.workflow, null, 2) + '</pre>';
-            comfyDiv.appendChild(details);
+            append_json_details('ComfyUI Workflow', metadata.workflow, '0.5rem');
         }
 
         metadataOutput.appendChild(comfyDiv);
     }
 }
 
+// WHAT: Renders the structured AI vision analysis (summary, detected objects, tags, scene type, technical details).
+// WHY: Displays each semantic facet with visual distinction (green pills for objects, indigo for scene type).
 function displayAnalysis(description) {
     analysisOutput.innerHTML = '';
 
@@ -607,7 +577,11 @@ function displayAnalysis(description) {
     if (description.summary) {
         const summaryDiv = document.createElement('div');
         summaryDiv.className = 'analysis-section';
-        summaryDiv.innerHTML = `<h3>Summary</h3><p>${description.summary}</p>`;
+        const heading_element = document.createElement('h3');
+        heading_element.textContent = 'Summary';
+        const paragraph_element = document.createElement('p');
+        paragraph_element.textContent = String(description.summary);
+        summaryDiv.append(heading_element, paragraph_element);
         analysisOutput.appendChild(summaryDiv);
     }
 
@@ -618,13 +592,13 @@ function displayAnalysis(description) {
         objectsDiv.innerHTML = '<h3>Detected Objects</h3><div class="tags-container"></div>';
         const objectsContainer = objectsDiv.querySelector('.tags-container');
 
-        description.objects.forEach(obj => {
-            const objSpan = document.createElement('span');
-            objSpan.className = 'tag';
-            objSpan.style.backgroundColor = 'rgba(16, 185, 129, 0.2)'; // Green tint for objects
-            objSpan.style.color = '#34d399';
-            objSpan.textContent = obj;
-            objectsContainer.appendChild(objSpan);
+        description.objects.forEach(detected_object_label => {
+            const object_badge_element = document.createElement('span');
+            object_badge_element.className = 'tag';
+            object_badge_element.style.backgroundColor = 'rgba(16, 185, 129, 0.2)'; // Green tint for objects
+            object_badge_element.style.color = '#34d399';
+            object_badge_element.textContent = detected_object_label;
+            objectsContainer.appendChild(object_badge_element);
         });
         analysisOutput.appendChild(objectsDiv);
     }
@@ -660,7 +634,11 @@ function displayAnalysis(description) {
     if (description.technical_details) {
         const techDiv = document.createElement('div');
         techDiv.className = 'analysis-section';
-        techDiv.innerHTML = `<h3>Technical Details</h3><p>${description.technical_details}</p>`;
+        const heading_element = document.createElement('h3');
+        heading_element.textContent = 'Technical Details';
+        const paragraph_element = document.createElement('p');
+        paragraph_element.textContent = String(description.technical_details);
+        techDiv.append(heading_element, paragraph_element);
         analysisOutput.appendChild(techDiv);
     }
 }

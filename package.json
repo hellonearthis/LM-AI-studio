@@ -8,10 +8,16 @@
     "start": "electron .",
     "dev": "electron . --dev",
     "test": "node scripts/test_local_ai_client.js",
+    "lint": "node scripts/lint_modules.js",
+    "test:modules": "node --test tests/test_pure_modules.js tests/test_search_modules.js tests/test_services_and_routes.js",
+    "test:dicer": "node --test tests/test_prompt_dicer.js",
+    "test:dicer:db": ".\\venv\\Scripts\\python .agent/skills/native-electron-runner/scripts/run_in_electron.py tests/test_prompt_dicer_db_electron.cjs",
     "test:fuzz:vector": "node tests/test_fuzz_handwired_vector.js",
     "test:fuzz:graph": ".\\venv\\Scripts\\python tests/test_fuzz_graphmemory.py",
     "test:bdd": ".\\venv\\Scripts\\python -m unittest tests/test_openspec_bdd.py",
-    "test:all": "node scripts/test_local_ai_client.js && node tests/test_fuzz_handwired_vector.js && .\\venv\\Scripts\\python -m unittest discover tests",
+    "test:all": "node scripts/lint_modules.js && node --test tests/test_pure_modules.js tests/test_search_modules.js tests/test_services_and_routes.js && node scripts/test_local_ai_client.js && node --test tests/test_prompt_dicer.js && node tests/test_fuzz_handwired_vector.js && .\\venv\\Scripts\\python -m unittest discover tests",
+    "embeddings:audit": ".\\venv\\Scripts\\python .agent/skills/embedding-pipeline-ops/scripts/verify_embeddings.py",
+    "embeddings:prune": ".\\venv\\Scripts\\python .agent/skills/embedding-pipeline-ops/scripts/verify_embeddings.py --prune",
     "llama:vision": "start_llama_server.bat",
     "llama:vision:4b": "start_llama_vision_4b.bat",
     "llama:embed": "start_llama_embeddings.bat",
@@ -49,8 +55,8 @@
     "fast-check": "^4.10.2"
   },
   "build": {
-    "appId": "com.lmaistudio.app",
-    "productName": "LM AI Studio",
+    "appId": "com.imageanalysisstudio.app",
+    "productName": "Image Analysis Studio",
     "win": {
       "target": "nsis",
       "icon": "public/favicon.ico"

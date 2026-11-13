@@ -1,10 +1,10 @@
 @echo off
 setlocal enabledelayedexpansion
-title LM AI Studio Launcher
+title Image Analysis Studio Launcher
 cd /d "%~dp0"
 
 :: ============================================================================
-:: WHAT: Automated launcher for LM AI Studio and its local AI microservices.
+:: WHAT: Automated launcher for Image Analysis Studio and its local AI microservices.
 :: WHY: Ensures that the local vision server (port 8081), embedding server
 ::      (port 8083), Ovis engine (port 8082), and Laya classifier (port 8765)
 ::      are active before launching the Electron interface.
@@ -16,7 +16,7 @@ cd /d "%~dp0"
 set "VISION_LAUNCH_SCRIPT=start_llama_server.bat"
 
 echo ======================================================================
-echo                     LM AI STUDIO LAUNCHER
+echo                   IMAGE ANALYSIS STUDIO LAUNCHER
 echo ======================================================================
 echo Verifying local AI backend services...
 echo.
@@ -74,7 +74,7 @@ if exist "start_laya_server.bat" (
 )
 
 echo.
-echo Launching LM AI Studio Electron application...
+echo Launching Image Analysis Studio Electron application...
 echo ======================================================================
 call npm start
 if %errorlevel% neq 0 (

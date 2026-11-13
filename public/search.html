@@ -5,8 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Search - Image Analysis Studio</title>
-    <link rel="stylesheet" href="style.css">
-    <link rel="stylesheet" href="search.css">
+    <link rel="stylesheet" href="style.css?v=4">
+    <link rel="stylesheet" href="search.css?v=4">
     <link href="https://fonts.googleapis.com/css2?family=Numans&family=Outfit:wght@300;400;600&display=swap"
         rel="stylesheet">
 </head>
@@ -33,6 +33,9 @@
             <a href="scope.html" class="nav-item">
                 <span class="nav-icon">🗺️</span> Map <span style="font-size: 0.7em; opacity: 0.7; margin-left: 5px;">(β)</span>
             </a>
+            <a href="dicer.html" class="nav-item">
+                <span class="nav-icon">🧩</span> Prompt Dicer
+            </a>
             <a href="settings.html" class="nav-item">
                 <span class="nav-icon">⚙️</span> Settings
             </a>
@@ -55,8 +58,8 @@
             <select id="dbPromptType" class="sidebar-select" title="Choose the AI analysis mode for batch processing. This controls how the vision model describes selected images.">
                 <option value="Detailed Analysis">Detailed Analysis</option>
                 <option value="Simple Description">Simple Description</option>
-                <option value="Detailed Description" selected>Detailed Description</option>
-                <option value="Ultra Detailed Description">Ultra Detailed Description</option>
+                <option value="Detailed Description">Detailed Description</option>
+                <option value="Ultra Detailed Description" selected>Ultra Detailed Description</option>
                 <option value="Cinematic Description">Cinematic Description</option>
                 <option value="Video Summary">Video Summary</option>
                 <option value="Short Story">Short Story</option>
@@ -395,7 +398,7 @@
 
 
     <script type="module" src="pretext-layout.js"></script>
-    <script src="search.js?v=2"></script>
+    <script type="module" src="search.js?v=5"></script>
 </body>
 
 </html>

@@ -4,17 +4,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LM Studio - Data Map</title>
+    <title>Data Map - Image Analysis Studio</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="scope.css">
     <script type="importmap">
         {
             "imports": {
-                "d3": "./libs/d3/d3.min.js",
-                "@duckdb/duckdb-wasm": "./libs/duckdb/index.js",
-                "apache-arrow": "./libs/arrow/Arrow.dom.mjs",
-                "tslib": "./libs/tslib/tslib.mjs",
-                "flatbuffers": "./libs/flatbuffers/flatbuffers.js"
+                "d3": "./libs/d3/d3.min.js"
             }
         }
     </script>
@@ -48,6 +44,9 @@
             <a href="scope.html" class="nav-item active">
                 <span class="nav-icon">🗺️</span> Map <span
                     style="font-size: 0.7em; opacity: 0.7; margin-left: 5px;">(β)</span>
+            </a>
+            <a href="dicer.html" class="nav-item">
+                <span class="nav-icon">🧩</span> Prompt Dicer
             </a>
             <a href="settings.html" class="nav-item">
                 <span class="nav-icon">⚙️</span> Settings
@@ -99,16 +98,6 @@
                             <div id="clusterFilterList" class="cluster-filter-list"></div>
                         </div>
                     </div>
-
-                    <div class="toggle-group" style="display: flex; background: var(--card-bg); border-radius: 6px; overflow: hidden; border: 1px solid var(--border); margin-right: 1rem;">
-                        <button id="toggleParquetBtn" style="padding: 0.5rem 1rem; border: none; background: var(--accent); color: white; cursor: pointer; transition: background 0.2s;">Latent Scope</button>
-                        <button id="toggleDbBtn" style="padding: 0.5rem 1rem; border: left 1px solid var(--border); background: transparent; color: var(--text-primary); cursor: pointer; transition: background 0.2s;">Evoc DB</button>
-                    </div>
-
-                    <button id="syncBtn" class="primary-btn"
-                        style="display: flex; align-items: center; gap: 0.5rem; background: var(--border);">
-                        <span id="syncIcon">🔄</span> Sync Data
-                    </button>
                 </div>
             </div>
 
@@ -153,7 +142,7 @@
         </div>
     </div>
 
-    <script type="module" src="scope.js"></script>
+    <script type="module" src="scope.js?v=5"></script>
 </body>
 
 </html>

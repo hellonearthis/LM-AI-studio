@@ -109,12 +109,13 @@ export const SEARCH_QUERY_INTENT_QUESTIONS = Object.freeze({
  */
 export const create_laya_client_configuration = (optional_custom_endpoint_override = null) => {
     const environment_specified_endpoint = process.env.LAYA_SERVER_URL;
-    const default_candidate_endpoints = [
-        optional_custom_endpoint_override,
-        environment_specified_endpoint,
-        'http://127.0.0.1:8765',
-        'http://localhost:8765'
-    ];
+    const default_candidate_endpoints = optional_custom_endpoint_override
+        ? [optional_custom_endpoint_override]
+        : [
+            environment_specified_endpoint,
+            'http://127.0.0.1:8765',
+            'http://localhost:8765'
+        ];
 
     // WHAT: Deduplicating and trimming candidate endpoint URLs.
     // WHY: Guarantees sanitized network addresses without redundant slashes.
@@ -320,55 +321,107 @@ export const classify_search_query_intent = async (client_configuration, user_se
     });
 };
 
+/**
+ * WHAT: Executes a non-throwing `/decide` call against Laya for optional Prompt Dicer slot/clash scoring.
+ * WHY: Allows offline-first pipelines to query Laya probabilities when available without failing when port 8765 is offline.
+ * 
+ * @param {Readonly<Object>} client_configuration - The client configuration record.
+ * @param {string|Object} state_context_data - Text context to evaluate.
+ * @param {Object} questions_specification - Structured Laya choice/yes-no questions dictionary.
+ * @returns {Promise<Object>} Frozen `{ available, answers, reason? }`.
+ */
+export const try_execute_laya_decision = async (
+    client_configuration,
+    state_context_data,
+    questions_specification
+) => {
+    try {
+        const health_status = await probe_laya_server_health(client_configuration);
+        if (!health_status.is_online) {
+            return Object.freeze({ available: false, answers: Object.freeze({}), reason: 'laya_offline' });
+        }
+        const decision_payload = await execute_laya_decision(
+            client_configuration,
+            state_context_data,
+            questions_specification
+        );
+        return Object.freeze({
+            available: true,
+            answers: decision_payload?.answers || Object.freeze({})
+        });
+    } catch (laya_optional_error) {
+        return Object.freeze({
+            available: false,
+            answers: Object.freeze({}),
+            reason: laya_optional_error.message || 'laya_error'
+        });
+    }
+};
+
 // ============================================================================
 // THIN DELEGATION WRAPPER (BACKWARD-COMPATIBLE BOUNDARY ADAPTER)
 // ============================================================================
 
 /**
- * WHAT: Thin backward-compatible adapter delegating calls to pure functional routines.
- * WHY: Supports existing callers expecting class-like method signatures without violating pure functional architecture.
+ * WHAT: Pure factory adapter delegating calls to pure functional routines without `class` or `this`.
+ * WHY: Supports existing callers expecting client object method signatures while adhering to Pure Functional Architecture.
  */
-export class LayaClient {
-    constructor(optional_endpoint_override = null) {
-        this.configuration = create_laya_client_configuration(optional_endpoint_override);
-        this.active_endpoint_url = this.configuration.active_endpoint_url;
-        this.active_device_name = 'unknown';
-        this.is_server_online = false;
-        this.last_health_check_timestamp_milliseconds = 0;
-        this.health_check_cache_duration_milliseconds = 5000;
-        this.image_facet_taxonomy_questions = this.configuration.image_facet_taxonomy_questions;
-        this.search_query_intent_questions = this.configuration.search_query_intent_questions;
-    }
+export function createLayaClient(optional_endpoint_override = null) {
+    const configuration = create_laya_client_configuration(optional_endpoint_override);
+    let client_health_state = {
+        active_endpoint_url: configuration.active_endpoint_url,
+        active_device_name: 'unknown',
+        is_server_online: false,
+        last_health_check_timestamp_milliseconds: 0
+    };
+    const health_check_cache_duration_milliseconds = 5000;
 
-    async checkServerHealth(force_immediate_probe = false) {
-        const current_timestamp_milliseconds = Date.now();
-        const time_elapsed_since_last_check = current_timestamp_milliseconds - this.last_health_check_timestamp_milliseconds;
+    return {
+        get configuration() { return configuration; },
+        get active_endpoint_url() { return client_health_state.active_endpoint_url; },
+        get active_device_name() { return client_health_state.active_device_name; },
+        get is_server_online() { return client_health_state.is_server_online; },
+        image_facet_taxonomy_questions: configuration.image_facet_taxonomy_questions,
+        search_query_intent_questions: configuration.search_query_intent_questions,
 
-        if (!force_immediate_probe && time_elapsed_since_last_check < this.health_check_cache_duration_milliseconds) {
-            return this.is_server_online;
+        async checkServerHealth(force_immediate_probe = false) {
+            const current_timestamp_milliseconds = Date.now();
+            const time_elapsed_since_last_check = current_timestamp_milliseconds - client_health_state.last_health_check_timestamp_milliseconds;
+
+            if (!force_immediate_probe && time_elapsed_since_last_check < health_check_cache_duration_milliseconds) {
+                return client_health_state.is_server_online;
+            }
+
+            const probe_result = await probe_laya_server_health(configuration);
+            client_health_state = {
+                active_endpoint_url: probe_result.responsive_endpoint_url,
+                active_device_name: probe_result.active_device_name,
+                is_server_online: probe_result.is_online,
+                last_health_check_timestamp_milliseconds: current_timestamp_milliseconds
+            };
+            return probe_result.is_online;
+        },
+
+        async decide(state_context_data, questions_specification) {
+            return execute_laya_decision(configuration, state_context_data, questions_specification);
+        },
+
+        async tryDecide(state_context_data, questions_specification) {
+            return try_execute_laya_decision(configuration, state_context_data, questions_specification);
+        },
+
+        async classifyImageFacets(image_analysis_summary) {
+            return classify_image_facets(configuration, image_analysis_summary);
+        },
+
+        async classifyQueryIntent(user_search_query_text) {
+            return classify_search_query_intent(configuration, user_search_query_text);
         }
-
-        const probe_result = await probe_laya_server_health(this.configuration);
-        this.is_server_online = probe_result.is_online;
-        this.active_endpoint_url = probe_result.responsive_endpoint_url;
-        this.active_device_name = probe_result.active_device_name;
-        this.last_health_check_timestamp_milliseconds = current_timestamp_milliseconds;
-        return probe_result.is_online;
-    }
-
-    async decide(state_context_data, questions_specification) {
-        return execute_laya_decision(this.configuration, state_context_data, questions_specification);
-    }
-
-    async classifyImageFacets(image_analysis_summary) {
-        return classify_image_facets(this.configuration, image_analysis_summary);
-    }
-
-    async classifyQueryIntent(user_search_query_text) {
-        return classify_search_query_intent(this.configuration, user_search_query_text);
-    }
+    };
 }
 
-// WHAT: Default singleton adapter instance for legacy server.js route handlers.
+export const LayaClient = createLayaClient;
+
+// WHAT: Default singleton adapter instance for server route handlers.
 // WHY: Ensures zero breaking changes for existing Express routes.
-export const laya_client_instance = new LayaClient();
+export const laya_client_instance = createLayaClient();

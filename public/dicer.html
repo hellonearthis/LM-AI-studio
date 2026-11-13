@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prompt Dicer & Remix Workbench - Image Analysis Studio</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="dicer.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Numans&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <!-- Sidebar Navigation -->
+    <nav class="sidebar">
+        <div class="sidebar-header">
+            <h1>Lumina</h1>
+            <div class="sidebar-subtitle">AI Image Analysis</div>
+        </div>
+        <div class="sidebar-nav">
+            <a href="index.html" class="nav-item"><span class="nav-icon">✨</span> Analysis</a>
+            <a href="database.html" class="nav-item"><span class="nav-icon">🗄️</span> Database</a>
+            <a href="search.html" class="nav-item"><span class="nav-icon">🔍</span> Search</a>
+            <a href="tags.html" class="nav-item"><span class="nav-icon">🏷️</span> Tags</a>
+            <a href="scope.html" class="nav-item"><span class="nav-icon">🗺️</span> Map <span class="beta-tag">(β)</span></a>
+            <a href="dicer.html" class="nav-item active"><span class="nav-icon">🧩</span> Prompt Dicer</a>
+            <a href="settings.html" class="nav-item"><span class="nav-icon">⚙️</span> Settings</a>
+        </div>
+    </nav>
+
+    <div class="main-wrapper">
+        <div class="dicer-container">
+            <!-- Header Section -->
+            <div class="dicer-header-section">
+                <h1 class="dicer-title">Prompt Dicer & Remix Workbench</h1>
+                <p class="dicer-subtitle">Deconstruct image and video prompts into atomic physical ingredients, bind subjects without attribute bleed, detect continuity clashes, and remix without contradictions.</p>
+
+                <!-- Stats Bar -->
+                <div class="dicer-stats-bar">
+                    <div class="stat-pill">
+                        <span class="stat-pill-icon">📜</span>
+                        <div>
+                            <div class="stat-pill-label">Diced Prompts</div>
+                            <div class="stat-pill-value" id="statsPromptsCount">0</div>
+                        </div>
+                    </div>
+                    <div class="stat-pill">
+                        <span class="stat-pill-icon">🧪</span>
+                        <div>
+                            <div class="stat-pill-label">Cataloged Ingredients</div>
+                            <div class="stat-pill-value" id="statsIngredientsCount">0</div>
+                        </div>
+                    </div>
+                    <div class="stat-pill">
+                        <span class="stat-pill-icon">⚡</span>
+                        <div>
+                            <div class="stat-pill-label">Avg Concreteness</div>
+                            <div class="stat-pill-value" id="statsPhysicalityRatio">0.00</div>
+                        </div>
+                    </div>
+                    <div class="stat-pill">
+                        <span class="stat-pill-icon">🔗</span>
+                        <div>
+                            <div class="stat-pill-label">Influence Edges</div>
+                            <div class="stat-pill-value" id="statsInfluencesCount">0</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tabs Container -->
+                <div class="dicer-tabs-container" style="justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                        <button class="dicer-tab-btn active" id="tabBtnRemix" onclick="switchDicerTab('remix')">
+                            <span>🎨</span> Recombine & Remix
+                        </button>
+                        <button class="dicer-tab-btn" id="tabBtnProcess" onclick="switchDicerTab('process')">
+                            <span>⚡</span> Process & Batch Dice
+                        </button>
+                        <button class="dicer-tab-btn" id="tabBtnCatalog" onclick="switchDicerTab('catalog')">
+                            <span>🗃️</span> Catalog & Inspector
+                        </button>
+                        <button class="dicer-tab-btn" id="tabBtnReview" onclick="switchDicerTab('review')">
+                            <span>🎯</span> Review & Calibrate
+                        </button>
+                    </div>
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                        <button id="btnAuditVisualGrounding" class="dicer-secondary-btn" style="padding: 0.5rem 0.9rem; font-size: 0.8rem;" onclick="auditVisualGroundingWithOvis()" title="Compare image captions against pixels using Ovis-Omni on port 8082">
+                            <span>👁️</span> Audit Visual Grounding
+                        </button>
+                        <button id="btnValidateDicedPrompts" class="dicer-secondary-btn" style="padding: 0.5rem 0.9rem; font-size: 0.8rem;" onclick="validateAndSyncAllDicedPrompts()" title="Re-dice entries whose image descriptions changed, fill Ovis facet fallbacks, and repair missing/desynced records">
+                            <span>🛡️</span> Validate & Sync Diced Prompts
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ==================================================================
+                 TAB 1: PROMPT REMIX & RECOMBINATION WORKBENCH
+                 ================================================================== -->
+            <div class="dicer-tab-content active" id="tabContentRemix">
+                <!-- Full-Width: Pull Pieces From Existing Diced Prompts -->
+                <div class="workbench-card" style="margin-bottom: 1.5rem;">
+                    <div class="workbench-card-title">
+                        <span>1. Pull Pieces From Diced Prompts</span>
+                        <span style="font-size: 0.78rem; color: var(--text-secondary);" id="remixSourceSummary">0 active pieces</span>
+                    </div>
+                    <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+                        Search your cataloged image prompts or pull individual slots from the Ingredient Library on the right to combine pieces from multiple prompts into one new prompt.
+                    </p>
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
+                        <input type="text" id="remixPromptSearchInput" placeholder="Search prompts by keyword, filename, or prm_ID..." style="flex: 1; min-width: 240px; background: rgba(11, 11, 26, 0.8); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); padding: 0.55rem 0.75rem;">
+                        <button class="dicer-secondary-btn" style="padding: 0.55rem 0.9rem; font-size: 0.82rem;" onclick="searchSourcePromptsForRemix()">🔍 Search</button>
+                    </div>
+                    <div id="remixPromptSearchResults" class="remix-prompt-search-results"></div>
+                </div>
+
+                <div class="workbench-layout-grid">
+                    <!-- Left: Active Ingredients Canvas & Recombined Prompt Area -->
+                    <div>
+
+                        <!-- Continuity Clash Alert Banner (Hidden by default) -->
+                        <div id="clashAlertPanel" class="clash-alert-panel" style="display: none;">
+                            <span class="clash-alert-icon">⚠️</span>
+                            <div class="clash-alert-content">
+                                <h4>Physical Continuity Clash Detected</h4>
+                                <p id="clashAlertMessage">Opposing physical states detected between selected ingredients.</p>
+                            </div>
+                        </div>
+
+                        <!-- Active Ingredients Board -->
+                        <div class="workbench-card" style="margin-bottom: 1.5rem;">
+                            <div class="workbench-card-title" style="flex-wrap: wrap; gap: 0.5rem;">
+                                <span>2. Selected Sliced Pieces by Slot</span>
+                                <div class="transplant-toolbar">
+                                    <label style="font-size: 0.78rem; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 0.3rem;" title="How many unlocked slots the solver may swap or fill">
+                                        Swap:
+                                        <select id="transplantSwapCountSelect" class="transplant-count-select">
+                                            <option value="1">1 slot</option>
+                                            <option value="2" selected>2 slots</option>
+                                            <option value="3">3 slots</option>
+                                            <option value="4">4 slots</option>
+                                        </select>
+                                    </label>
+                                    <button id="btnTransplantSlots" class="dicer-primary-btn" style="padding: 0.35rem 0.75rem; font-size: 0.8rem;" onclick="executeConstraintTransplant()" title="Run beam-search constraint transplant across unlocked slots + Influence Closure">🎲 Transplant</button>
+                                    <button id="btnUndoTransplant" class="dicer-secondary-btn" style="padding: 0.35rem 0.65rem; font-size: 0.8rem;" onclick="undoLastRemixMutation()" disabled title="Revert last swap or edit">↩️ Undo</button>
+                                    <button class="dicer-secondary-btn" style="padding: 0.35rem 0.75rem; font-size: 0.8rem;" onclick="clearRemixCanvas()">Clear All</button>
+                                </div>
+                            </div>
+                            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+                                Lock any slot (🔒) to keep it fixed before transplanting. Unlocked slots are filled cleanly with clash-free, visually compatible candidates and auto-resolved Influence Closure effects.
+                            </p>
+                            <div id="closureTraceBanner" class="closure-trace-banner" style="display: none;"></div>
+                            <div class="active-slots-container" id="activeSlotsContainer">
+                                <!-- Dynamic slot rows injected via JavaScript -->
+                            </div>
+                        </div>
+
+                        <!-- Recombined Sliced Prompts Output Box -->
+                        <div class="workbench-card" id="recombinedPromptPanel">
+                            <div class="workbench-card-title" style="flex-wrap: wrap; gap: 0.5rem;">
+                                <span>3. Recombined Prompt Output</span>
+                                <div style="display: flex; align-items: center; gap: 0.55rem;">
+                                    <span id="roundTripStatusBadge" class="round-trip-badge" style="display: none;"></span>
+                                    <span style="font-size: 0.8rem; color: var(--text-secondary);" id="remixWordCount">0 words</span>
+                                </div>
+                            </div>
+                            <label style="display: inline-flex; align-items: center; gap: 0.45rem; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem; cursor: pointer;">
+                                <input type="checkbox" id="toggleObservableReplacements" checked onchange="executeRemixPreviewEvaluation()">
+                                Replace abstract vibe words (e.g. "cinematic") with observable camera/lighting details
+                            </label>
+                            <textarea id="remixedPromptOutput" class="prompt-output-textarea" placeholder="Pull sliced ingredients from a diced prompt above or the Ingredient Library on the right to recombine them into a new prompt..."></textarea>
+                            <div class="prompt-output-actions">
+                                <button class="dicer-secondary-btn" onclick="executeRemixPreviewEvaluation()">🔄 Re-assemble</button>
+                                <button id="btnDeepRoundTrip" class="dicer-secondary-btn" onclick="executeDeepLlmRoundTripCheck()" title="Re-dice output through llama-server (with heuristic fallback) to check full semantic drift">🔎 Deep Round-Trip</button>
+                                <button class="dicer-secondary-btn" onclick="copyRemixedPrompt()">📋 Copy Prompt</button>
+                                <button class="dicer-primary-btn" onclick="saveAsNewPrompt()">💾 Save as Diced Prompt</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right: Slot Catalog Drawer -->
+                    <div>
+                        <div class="workbench-card">
+                            <div class="workbench-card-title">
+                                <span>Ingredient Library</span>
+                            </div>
+                            <label style="font-size: 0.8rem; color: var(--text-secondary); display: block; margin-bottom: 0.4rem;">Select Slot to Browse:</label>
+                            <select id="slotSelectorDropdown" class="slot-filter-select" onchange="filterSlotLibrary()">
+                                <option value="all">All Controlled Slots (14)</option>
+                                <option value="lighting">💡 Lighting (Angles, Kelvin, Ratios)</option>
+                                <option value="lens">🔍 Lens (Focal Length, Aperture)</option>
+                                <option value="weather_or_matter">🌧️ Weather & Matter (Rain, Fog, Steam)</option>
+                                <option value="subject_appearance">👤 Subject Appearance (Clothing, Hair)</option>
+                                <option value="expression_or_pose">🎭 Expression & Pose</option>
+                                <option value="action">⚡ Action Verbs</option>
+                                <option value="framing">🎬 Framing (Wide, Close-up)</option>
+                                <option value="setting">🏛️ Setting (Architecture, Landscape)</option>
+                                <option value="palette">🎨 Palette (Color Schemes)</option>
+                                <option value="film_stock_or_medium">🎞️ Film Stock / Medium</option>
+                                <option value="mood">🔮 Mood & Vibe Words</option>
+                                <option value="camera_motion">🎥 Camera Motion (Pan, Track)</option>
+                                <option value="audio">🔊 Audio (Ambient, Sound)</option>
+                            </select>
+
+                            <input type="text" id="ingredientFilterSearch" placeholder="Filter ingredients..." style="width: 100%; background: rgba(11, 11, 26, 0.8); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); padding: 0.6rem; margin-bottom: 0.65rem;" oninput="filterSlotLibrary()">
+
+                            <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.85rem; padding: 0.45rem 0.6rem; border-radius: 8px; background: rgba(56, 189, 248, 0.06); border: 1px solid rgba(56, 189, 248, 0.18);">
+                                <label style="display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.78rem; color: var(--text-primary); cursor: pointer;" title="Prioritize ingredients from the same EVoC visual cluster as active Remix pieces">
+                                    <input type="checkbox" id="toggleVisualClusterMatch" checked onchange="filterSlotLibrary()">
+                                    <span>🎯 Visual Cluster Match</span>
+                                </label>
+                                <button type="button" id="btnDeepVisualMatch" class="dicer-secondary-btn" style="padding: 0.25rem 0.55rem; font-size: 0.72rem;" onclick="filterSlotLibrary({ include_vector_neighbors: true })" title="Rank by Ovis 2048-dim nearest visual neighbors (uses public/ovis-embeddings.json)">
+                                    <span>👁️</span> + Vector Neighbors
+                                </button>
+                            </div>
+
+                            <div class="available-ingredients-list" id="availableIngredientsList">
+                                <div style="text-align: center; padding: 2rem; color: var(--text-secondary);">Loading catalog ingredients...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ==================================================================
+                 TAB 2: PROCESS & BATCH DICE
+                 ================================================================== -->
+            <div class="dicer-tab-content" id="tabContentProcess">
+                <div style="display: grid; grid-template-columns: 1fr; gap: 2rem;">
+                    <!-- Section A: Dice Any Custom Prompt -->
+                    <div class="workbench-card">
+                        <div class="workbench-card-title">
+                            <span>Dice Custom Image or Video Prompt</span>
+                            <span class="badge-lighting" style="font-size: 0.75rem; padding: 0.2rem 0.5rem; border-radius: 4px;">Pass A → B → C → D</span>
+                        </div>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                            Paste any text prompt below. The pipeline will isolate characters and theta roles (Pass A), split concrete physical anchors from pretext hype words with camera replacements (Pass B), mint sequential IDs and calculate the physicality ratio (Pass C), and extract influence/consequence seeds (Pass D).
+                        </p>
+                        <textarea id="customPromptInput" class="prompt-output-textarea" placeholder="Paste an image or video generation prompt (e.g. 'A cinematic, lovecraftian wide shot on 35mm. Subject 1, a detective in a trenchcoat, stands in heavy rain under a 3200K sodium streetlamp...')" style="min-height: 100px;"></textarea>
+                        
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem;">
+                            <div style="display: flex; gap: 1rem; align-items: center;">
+                                <label style="font-size: 0.85rem; color: var(--text-secondary); display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                                    <input type="radio" name="customMediaType" value="image" checked> Image Prompt
+                                </label>
+                                <label style="font-size: 0.85rem; color: var(--text-secondary); display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                                    <input type="radio" name="customMediaType" value="video"> Video Prompt (Tracks Speech State)
+                                </label>
+                            </div>
+                            <button id="btnDiceCustomPrompt" class="dicer-primary-btn" onclick="executeCustomPromptDicing()">
+                                <span>🧩</span> Dice This Prompt
+                            </button>
+                        </div>
+
+                        <!-- Live Dicing Result Preview Box -->
+                        <div id="liveDicingResultContainer" style="display: none; margin-top: 1.5rem; border-top: 1px solid var(--border); padding-top: 1.5rem;">
+                            <!-- Injected dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- Section B: Batch Ingest Library Prompts -->
+                    <div class="workbench-card">
+                        <div class="workbench-card-title">
+                            <span>Library Candidate Prompts (From images.db)</span>
+                            <button id="btnBatchDiceAll" class="dicer-primary-btn" onclick="batchDiceAllCandidates()">
+                                <span>🚀</span> Batch Dice All Candidates (<span id="candidateCountBadge">0</span>)
+                            </button>
+                        </div>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary);">
+                            The scanner identified prompts embedded in your ComfyUI workflow nodes, Automatic1111 parameter strings, and vision summaries that have not yet been diced into the catalog.
+                        </p>
+
+                        <!-- Batch Progress Bar (Hidden by default) -->
+                        <div id="batchProgressBarContainer" style="display: none; margin: 1.5rem 0;">
+                            <div style="display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 0.35rem;">
+                                <span id="batchProgressText">Processing prompts...</span>
+                                <span id="batchProgressPercent">0%</span>
+                            </div>
+                            <div class="physicality-ratio-meter">
+                                <div id="batchProgressBarFill" class="physicality-ratio-fill" style="width: 0%;"></div>
+                            </div>
+                        </div>
+
+                        <div class="candidate-grid" id="candidatePromptsGrid">
+                            <div style="text-align: center; padding: 2rem; color: var(--text-secondary); grid-column: 1 / -1;">Scanning library images for generation prompts...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ==================================================================
+                 TAB 3: CATALOG & MASTER INSPECTOR
+                 ================================================================== -->
+            <div class="dicer-tab-content" id="tabContentCatalog">
+                <div class="workbench-card">
+                    <div class="workbench-card-title">
+                        <span>Analyzed Prompts & Concreteness Leaderboard</span>
+                        <div style="display: flex; gap: 0.75rem;">
+                            <a href="/api/dicer/export-training-data" class="dicer-secondary-btn" style="text-decoration: none; padding: 0.5rem 1rem; font-size: 0.85rem;">
+                                <span>📥</span> Export Training Dataset (JSONL)
+                            </a>
+                        </div>
+                    </div>
+                    <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1.5rem;">
+                        Inspect master records, review subject bindings, and verify physical influence consequences. High concreteness scores indicate observable instructions that diffusion models render faithfully.
+                    </p>
+
+                    <div id="dicedPromptsTableContainer">
+                        <div style="text-align: center; padding: 3rem; color: var(--text-secondary);">Loading diced catalog entries...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ==================================================================
+                 TAB 4: REVIEW QUEUE & CALIBRATION DASHBOARD
+                 ================================================================== -->
+            <div class="dicer-tab-content" id="tabContentReview">
+                <!-- Top Queue Controls & Sitting Progress -->
+                <div class="workbench-card" style="margin-bottom: 1.5rem;">
+                    <div class="workbench-card-title" style="flex-wrap: wrap; gap: 0.75rem;">
+                        <span>🎯 Single-Question Review Queue</span>
+                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
+                            <select id="reviewCardTypeFilter" class="transplant-count-select" onchange="loadReviewQueue(true)">
+                                <option value="all">Mixed Stratified Queue (All 5 Types)</option>
+                                <option value="grounding_caption">Grounding (Caption)</option>
+                                <option value="grounding_ingredient">Grounding (Ingredient)</option>
+                                <option value="edge_check">Edge Check (Pass D)</option>
+                                <option value="slot_check">Slot Check</option>
+                                <option value="missing_edge">Missing Edge Recall Probe</option>
+                            </select>
+                            <select id="reviewOrderingSelect" class="transplant-count-select" onchange="loadReviewQueue(true)">
+                                <option value="stratified">Stratified Random (First Pass)</option>
+                                <option value="uncertainty">Uncertainty First (Post-Tune ~50%)</option>
+                            </select>
+                            <label style="font-size: 0.78rem; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer;" title="Compute missing 2048-dim Ovis scores when Ovis-Omni :8082 is online">
+                                <input type="checkbox" id="toggleEnrichOvisQueue" onchange="loadReviewQueue(true)">
+                                Enrich Ovis Scores
+                            </label>
+                            <button class="dicer-secondary-btn" style="padding: 0.35rem 0.75rem; font-size: 0.8rem;" onclick="loadReviewQueue(true)">🔄 Reload Queue</button>
+                            <a href="/api/dicer/export-training-data?reviewed_only=true&split=train" class="dicer-secondary-btn" style="text-decoration: none; padding: 0.35rem 0.75rem; font-size: 0.8rem;" title="Export only reviewed training items">📥 Reviewed Train</a>
+                            <a href="/api/dicer/export-training-data?reviewed_only=true&split=holdout" class="dicer-secondary-btn" style="text-decoration: none; padding: 0.35rem 0.75rem; font-size: 0.8rem;" title="Export only reviewed holdout evaluation items">📥 Reviewed Holdout</a>
+                        </div>
+                    </div>
+
+                    <div id="reviewSittingProgressGrid" class="review-sitting-grid"></div>
+                </div>
+
+                <!-- Single-Question Rapid Review Card -->
+                <div class="workbench-card" id="reviewQueueCardContainer" style="margin-bottom: 1.5rem;">
+                    <div style="text-align: center; padding: 2.5rem; color: var(--text-secondary);">Switch to this tab or click Reload Queue to load review cards...</div>
+                </div>
+
+                <!-- Calibration, Histograms & Edge Recall Dashboard -->
+                <div class="workbench-card" id="calibrationDashboardContainer">
+                    <div class="workbench-card-title">
+                        <span>📊 Grounding Cutoffs, Laya Calibration & Pass D Edge Recall</span>
+                        <button class="dicer-secondary-btn" style="padding: 0.35rem 0.75rem; font-size: 0.8rem;" onclick="fetchAndRenderCalibrationDashboard()">↻ Refresh Charts</button>
+                    </div>
+                    <div id="calibrationChartsContent" style="color: var(--text-secondary); font-size: 0.85rem;">Loading analytics...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Inspector Modal Dialog -->
+    <div id="promptInspectorModal" class="custom-modal-overlay" style="display: none;">
+        <div class="custom-modal-content" style="max-width: 900px; width: 95%;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.75rem;">
+                <h3 id="inspectorModalTitle" style="margin: 0; color: #38bdf8;">Prompt Master Record Inspector</h3>
+                <button onclick="closeInspectorModal()" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 1.5rem;">&times;</button>
+            </div>
+            <div id="inspectorModalBody" style="max-height: 70vh; overflow-y: auto;">
+                <!-- Dynamically populated -->
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="dicer.js?v=3"></script>
+</body>
+
+</html>
+

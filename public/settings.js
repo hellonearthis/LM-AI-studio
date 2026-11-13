@@ -10,7 +10,14 @@
 // 2. "Tutorial Protocol": Comprehensive instructional WHAT and WHY documentation.
 // ============================================================================
 
-const API_BASE_URL = 'http://localhost:3000';
+import {
+    buildUserConfigurationPayload,
+    buildModelLoadRequestPayload,
+    formatModelLoadStatusPresentation,
+    formatLayaStatusPresentation,
+    formatStreamingLogChunkHtml
+} from './modules/settingsCore.js';
+import { escapeHtmlCharacters } from './modules/cardCore.js';
 
 // ============================================================================
 // DOM ELEMENT BINDINGS
@@ -67,12 +74,12 @@ refresh_models_button_element.addEventListener('click', async () => {
 // WHAT: Saves user-selected models and hardware parameters to config.json on the server.
 // WHY: Ensures user selections persist across server and Electron application restarts.
 save_configuration_button_element.addEventListener('click', async () => {
-    const user_configuration_payload = {
-        visionModel: vision_model_select_element.value,
-        embeddingModel: embedding_model_select_element.value,
-        gpuLayers: gpu_offload_layers_input_element ? gpu_offload_layers_input_element.value : 'max',
-        contextLength: parseInt(gpu_offload_layers_input_element ? context_length_tokens_input_element.value : '8192', 10) || 8192
-    };
+    const user_configuration_payload = buildUserConfigurationPayload(
+        vision_model_select_element.value,
+        embedding_model_select_element.value,
+        gpu_offload_layers_input_element ? gpu_offload_layers_input_element.value : 'max',
+        context_length_tokens_input_element ? context_length_tokens_input_element.value : '8192'
+    );
 
     try {
         const configuration_save_response = await fetch('/api/config', {
@@ -107,7 +114,7 @@ if (load_model_button_element) {
         }
 
         const resolved_gpu_layers_specification = gpu_offload_layers_input_element ? gpu_offload_layers_input_element.value : 'max';
-        const resolved_context_length_tokens = parseInt(context_length_tokens_input_element ? context_length_tokens_input_element.value : '8192', 10) || 8192;
+        const resolved_context_length_tokens = context_length_tokens_input_element ? context_length_tokens_input_element.value : '8192';
 
         load_model_button_element.disabled = true;
         load_model_button_element.textContent = '⏳ Loading Model...';
@@ -118,28 +125,24 @@ if (load_model_button_element) {
             const model_load_http_response = await fetch('/api/proxy/load', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    model_identifier: selected_vision_model_identifier,
-                    config: {
-                        gpu_offload: resolved_gpu_layers_specification,
-                        context_length: resolved_context_length_tokens
-                    }
-                })
+                body: JSON.stringify(
+                    buildModelLoadRequestPayload(
+                        selected_vision_model_identifier,
+                        resolved_gpu_layers_specification,
+                        resolved_context_length_tokens
+                    )
+                )
             });
 
             const parsed_load_response_data = await model_load_http_response.json();
-
-            if (model_load_http_response.ok) {
-                model_load_status_message_element.textContent = (
-                    parsed_load_response_data.message
-                        ? `ℹ️ ${parsed_load_response_data.message}`
-                        : '✅ Model Loaded Successfully!'
-                );
-                model_load_status_message_element.style.color = '#4ade80';
+            const load_status_presentation = formatModelLoadStatusPresentation(
+                model_load_http_response.ok,
+                parsed_load_response_data
+            );
+            model_load_status_message_element.textContent = load_status_presentation.text;
+            model_load_status_message_element.style.color = load_status_presentation.color;
+            if (load_status_presentation.shouldRefreshDiagnostics) {
                 updateDiagnosticsDisplay();
-            } else {
-                model_load_status_message_element.textContent = '❌ Load Failed: ' + (parsed_load_response_data.error || 'Check local AI server logs.');
-                model_load_status_message_element.style.color = '#ef4444';
             }
         } catch (model_load_network_error_exception) {
             console.error('Model load network error:', model_load_network_error_exception);
@@ -292,9 +295,7 @@ run_evoc_analysis_button_element.addEventListener('click', async () => {
             }
 
             const decoded_chunk_string = stream_text_decoder.decode(stream_byte_chunk, { stream: true });
-            const formatted_log_markup = decoded_chunk_string
-                .replace(/\n/g, '<br>')
-                .replace(/\[\*\]/g, '<span style="color: #0ff">[*]</span>');
+            const formatted_log_markup = formatStreamingLogChunkHtml(decoded_chunk_string, true);
 
             evoc_log_output_element.innerHTML += formatted_log_markup;
             evoc_log_container_element.scrollTop = evoc_log_container_element.scrollHeight;
@@ -309,7 +310,7 @@ run_evoc_analysis_button_element.addEventListener('click', async () => {
 
     } catch (pipeline_execution_error_exception) {
         console.error('EVoC pipeline error:', pipeline_execution_error_exception);
-        evoc_log_output_element.innerHTML += `<br><span style="color: #f00">Error: ${pipeline_execution_error_exception.message}</span>`;
+        evoc_log_output_element.innerHTML += `<br><span style="color: #f00">Error: ${escapeHtmlCharacters(pipeline_execution_error_exception.message)}</span>`;
         evoc_status_message_element.textContent = 'Pipeline failed. Check output console for details.';
         run_evoc_analysis_button_element.disabled = false;
         run_evoc_analysis_button_element.textContent = '🚀 Retry Map Analysis';
@@ -343,23 +344,13 @@ async function checkLayaMicroserviceStatus() {
         }
 
         const laya_status_payload = await laya_status_http_response.json();
-        const is_service_online = (laya_status_payload.status === 'online');
+        const laya_status_presentation = formatLayaStatusPresentation(laya_status_payload);
 
-        if (is_service_online) {
-            laya_status_dot_element.style.background = '#4ade80';
-            laya_status_title_element.textContent = `Online (${laya_status_payload.device || 'CUDA'})`;
-            laya_status_subtitle_element.textContent = (
-                `Endpoint: ${laya_status_payload.endpoint} • ` +
-                `${laya_status_payload.cluster_themes_count} Themes • ` +
-                `${laya_status_payload.classified_facets_count} Facets Tagged`
-            );
-            if (batch_classify_facets_button_element) {
-                batch_classify_facets_button_element.disabled = false;
-            }
-        } else {
-            laya_status_dot_element.style.background = '#ef4444';
-            laya_status_title_element.textContent = 'Offline (Port 8765 unreachable)';
-            laya_status_subtitle_element.textContent = 'Launch start_laya_server.bat to start Laya Decision Engine';
+        laya_status_dot_element.style.background = laya_status_presentation.dotColor;
+        laya_status_title_element.textContent = laya_status_presentation.titleText;
+        laya_status_subtitle_element.textContent = laya_status_presentation.subtitleText;
+        if (laya_status_presentation.enableBatchButton && batch_classify_facets_button_element) {
+            batch_classify_facets_button_element.disabled = false;
         }
     } catch (laya_status_check_error) {
         laya_status_dot_element.style.background = '#ef4444';
@@ -398,7 +389,7 @@ if (batch_classify_facets_button_element) {
                 }
 
                 const decoded_chunk_text = text_stream_decoder.decode(stream_byte_chunk, { stream: true });
-                const formatted_log_text = decoded_chunk_text.replace(/\n/g, '<br>');
+                const formatted_log_text = formatStreamingLogChunkHtml(decoded_chunk_text, false);
                 laya_log_output_element.innerHTML += formatted_log_text;
                 laya_log_container_element.scrollTop = laya_log_container_element.scrollHeight;
             }
@@ -411,7 +402,7 @@ if (batch_classify_facets_button_element) {
             }, 4000);
         } catch (batch_classification_error) {
             console.error('Batch classification error:', batch_classification_error);
-            laya_log_output_element.innerHTML += `<br><span style="color: #ef4444;">Error: ${batch_classification_error.message}</span>`;
+            laya_log_output_element.innerHTML += `<br><span style="color: #ef4444;">Error: ${escapeHtmlCharacters(batch_classification_error.message)}</span>`;
             batch_classify_facets_button_element.disabled = false;
             batch_classify_facets_button_element.textContent = '⚡ Retry Facet Tagging';
         }

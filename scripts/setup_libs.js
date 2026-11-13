@@ -7,35 +7,43 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PUBLIC_LIBS = path.join(__dirname, '../public/libs');
 
-['duckdb', 'd3', 'arrow'].forEach(dir => {
-    const p = path.join(PUBLIC_LIBS, dir);
-    if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+['duckdb', 'd3', 'arrow'].forEach(library_directory_name => {
+    const target_library_directory = path.join(PUBLIC_LIBS, library_directory_name);
+    if (!fs.existsSync(target_library_directory)) {
+        fs.mkdirSync(target_library_directory, { recursive: true });
+    }
 });
 
-function copyFile(src, dest) {
-    if (fs.existsSync(src)) {
-        fs.copyFileSync(src, dest);
-        console.log(`Copied file: ${path.basename(dest)}`);
+// WHAT: Copies a single browser-vendored library asset from node_modules to public/libs.
+// WHY: Serves local WASM and UMD/ESM dependencies offline without relying on external CDNs.
+function copyFile(source_file_path, destination_file_path) {
+    if (fs.existsSync(source_file_path)) {
+        fs.copyFileSync(source_file_path, destination_file_path);
+        console.log(`Copied file: ${path.basename(destination_file_path)}`);
     } else {
-        console.warn(`Missing source: ${src}`);
+        console.warn(`Missing source: ${source_file_path}`);
     }
 }
 
-function copyDir(src, dest) {
-    if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true });
+// WHAT: Recursively copies an entire library folder so relative ESM imports resolve intact.
+// WHY: Packages like Apache Arrow and FlatBuffers reference sibling modules via relative paths.
+function copyDir(source_directory_path, destination_directory_path) {
+    if (!fs.existsSync(destination_directory_path)) {
+        fs.mkdirSync(destination_directory_path, { recursive: true });
+    }
 
-    const entries = fs.readdirSync(src, { withFileTypes: true });
-    for (const entry of entries) {
-        const srcPath = path.join(src, entry.name);
-        const destPath = path.join(dest, entry.name);
+    const directory_entries = fs.readdirSync(source_directory_path, { withFileTypes: true });
+    for (const directory_entry of directory_entries) {
+        const entry_source_path = path.join(source_directory_path, directory_entry.name);
+        const entry_destination_path = path.join(destination_directory_path, directory_entry.name);
 
-        if (entry.isDirectory()) {
-            copyDir(srcPath, destPath);
+        if (directory_entry.isDirectory()) {
+            copyDir(entry_source_path, entry_destination_path);
         } else {
-            fs.copyFileSync(srcPath, destPath);
+            fs.copyFileSync(entry_source_path, entry_destination_path);
         }
     }
-    console.log(`Copied directory: ${src} -> ${dest}`);
+    console.log(`Copied directory: ${source_directory_path} -> ${destination_directory_path}`);
 }
 
 // 1. DuckDB

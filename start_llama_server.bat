@@ -1,11 +1,11 @@
 @echo off
-title "llama-server (LM AI Studio Vision on Port 8081)"
+title "llama-server (Image Analysis Studio Vision on Port 8081)"
 
-:: WHAT: Launch script for llama-server.exe configured for LM AI Studio.
+:: WHAT: Launch script for llama-server.exe configured for Image Analysis Studio.
 :: WHY: Provides 1-click startup with GPU offloading, Flash Attention, multimodal vision projector,
-::      and clean model aliases so LM AI Studio discovers and binds to it automatically.
+::      and clean model aliases so Image Analysis Studio discovers and binds to it automatically.
 
-set "LLAMA_DIR=C:\llamaCPP"
+set "LLAMA_DIR=I:\llamaCPP"
 
 if not exist "%LLAMA_DIR%\llama-server.exe" (
     echo [ERROR] llama-server.exe not found in %LLAMA_DIR%.
@@ -17,13 +17,13 @@ if not exist "%LLAMA_DIR%\llama-server.exe" (
 cd /d "%LLAMA_DIR%"
 
 echo ======================================================================
-echo Starting llama-server for LM AI Studio on port 8081...
+echo Starting llama-server for Image Analysis Studio on port 8081...
 echo Model: Qwen 3.5 9B with Multimodal Vision Projector
 echo ======================================================================
 
 llama-server.exe ^
-  -m "models\lmstudio-community\Qwen3.5-9B-GGUF\Qwen3.5-9B-Q4_K_M.gguf" ^
-  --mmproj "models\lmstudio-community\Qwen3.5-9B-GGUF\mmproj-Qwen3.5-9B-BF16.gguf" ^
+  -m "models\Qwen3.5-9B-GGUF\Qwen3.5-9B-Q4_K_M.gguf" ^
+  --mmproj "models\Qwen3.5-9B-GGUF\mmproj-Qwen3.5-9B-BF16.gguf" ^
   -ngl 99 ^
   -c 8192 ^
   --flash-attn on ^

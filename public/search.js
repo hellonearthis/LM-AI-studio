@@ -1,30 +1,72 @@
-// ============================================================================
-// SEARCH PAGE LOGIC
-// ============================================================================
 /**
- * Handles all logic for the search.html page.
- * Includes:
- * - Fuse.js fuzzy search initialization and execution
- * - Search rendering with infinite scroll (IntersectionObserver)
- * - Filtering by date and scene type
- * - Inline tag management and file operations
+ * ============================================================================
+ * SEARCH.JS — Imperative Shell & Coordinator for search.html
+ * ============================================================================
+ *
+ * WHAT: Coordinates DOM events, Web Worker communication (`search-worker.js`),
+ *       API calls, infinite scroll pagination, and UI state for `search.html`.
+ * WHY:  Delegates all pure data transformations (filtering, sorting, ranking,
+ *       HTML card building, tag deduplication) to `public/modules/cardCore.js`
+ *       and `public/modules/searchFilters.js`, and delegates modal dialogs to
+ *       `public/modules/uiModals.js`.
  */
 
+import { createSearchMaintenanceController } from "./modules/searchMaintenanceController.js";
+import {
+    escapeHtmlCharacters,
+    deduplicateAndNormalizeAnalysisRecord,
+    calculatePretextCardTextWidth,
+    buildSearchResultCardHtml,
+    extractDicedPromptMasterRecord,
+    renderDicedPromptBackDetailsHtml,
+    buildCardBackIdentityHeaderHtml
+} from './modules/cardCore.js';
+
+import {
+    computeCardPixelWidthFromGridWidth,
+    computeTriangularPrismRadiusPixels,
+    computeNextPrismSpinDegrees
+} from './modules/databaseCardRenderers.js';
+
+import {
+    filterImageRecordsByCriteria,
+    sortFilteredImageRecords,
+    rankTagAutocompleteMatches,
+    extractSimilarImageSearchState,
+    computeUpdatedRecentRenamesList,
+    formatDetectedIntentFilterDescriptions
+} from './modules/searchFilters.js';
+
+import {
+    showTagInputModal,
+    showSummaryInputModal,
+    showIntegrityCheckModal,
+    showConfirmModal,
+    showAlertModal,
+    showBulkRenameModal,
+    showDeleteModal,
+    showImagePreview
+} from './modules/uiModals.js';
+
+// ============================================================================
+// DOM ELEMENT REFERENCES & CONSTANTS
+// ============================================================================
+
 const searchQuery = document.getElementById('searchQuery');
-const negativeQuery = document.getElementById('negativeQuery'); // New input
+const negativeQuery = document.getElementById('negativeQuery');
 const sceneType = document.getElementById('sceneType');
 const startDate = document.getElementById('startDate');
 const endDate = document.getElementById('endDate');
-const searchLogicToggle = document.getElementById('searchLogicToggle');
-const logicLabel = document.getElementById('logicLabel');
 const searchBtn = document.getElementById('searchBtn');
 const searchResults = document.getElementById('searchResults');
 const resultsCount = document.getElementById('resultsCount');
 const API_BASE_URL = 'http://localhost:3000';
+const {
+    checkOrPruneOrphanedEmbeddings,
+    fetchEmbeddingsStatus,
+    updateModelIndicator
+} = createSearchMaintenanceController({ apiBaseUrl: API_BASE_URL, refreshData: () => refreshData() });
 
-// ============================================================================
-// TAG & OBJECT FILTER STATE
-// ============================================================================
 const tagFilterInput = document.getElementById('tagFilterInput');
 const tagAutocomplete = document.getElementById('tagAutocomplete');
 const tagFilterChips = document.getElementById('tagFilterChips');
@@ -32,14 +74,6 @@ const similarBanner = document.getElementById('similarBanner');
 const similarBannerName = document.getElementById('similarBannerName');
 const clearSimilarBtn = document.getElementById('clearSimilarBtn');
 
-const selectedTagFilters = new Set();   // Exact tag names
-const selectedObjectFilters = new Set(); // Exact object names
-let allKnownTags = [];    // [{name, count, type:'tag'}, ...]
-let allKnownObjects = [];  // [{name, count, type:'object'}, ...]
-let acActiveIndex = -1;   // Keyboard nav index for autocomplete
-
-// WHAT: DOM element bindings for Laya cluster themes, faceted filters, and smart intent indicator.
-// WHY: Enables interactive filtering by ModernBERT semantic clusters, artistic medium, mood, and composition.
 const clusterThemeSelect = document.getElementById('clusterThemeSelect');
 const facetMediumSelect = document.getElementById('facetMediumSelect');
 const facetMoodSelect = document.getElementById('facetMoodSelect');
@@ -47,173 +81,143 @@ const facetCompositionSelect = document.getElementById('facetCompositionSelect')
 const smartIntentIndicator = document.getElementById('smartIntentIndicator');
 const smartIntentText = document.getElementById('smartIntentText');
 
-// WHAT: Escapes special characters within a given string that have semantic meaning in HTML.
-// WHY: We replace characters like '&', '<', '>', '"', and "'" with their corresponding HTML safe entity values.
-// This prevents the web browser from interpreting user-supplied or AI-generated string fields as HTML code,
-// thereby neutralizing potential Cross-Site Scripting (XSS) code injection attempts.
-function escapeHtmlCharacters(input_string_to_be_escaped) {
-    if (!input_string_to_be_escaped) {
-        return '';
-    }
-    return String(input_string_to_be_escaped)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-}
-
-// Helper: Deduplicate tags and objects
-function deduplicateTags(analysis) {
-    if (!analysis) return;
-    
-    // Helper: Normalize by removing plurals, brackets, and extra spaces
-    const normalize = (s) => String(s).trim().toLowerCase().replace(/[\[\]\(\)\{\}]/g, '').replace(/\s+/g, ' ').trim().replace(/s$/, '');
-
-    if (Array.isArray(analysis.objects)) {
-        // Initial cleaning
-        let objects = analysis.objects
-            .map(o => String(o).trim())
-            .filter(o => o.length > 0 && o.length < 100 && o.split(/\s+/).length <= 8);
-
-        // Case-insensitive distinct
-        const seen = new Set();
-        analysis.objects = objects.filter(o => {
-            const norm = normalize(o);
-            if (seen.has(norm)) return false;
-            seen.add(norm);
-            return true;
-        });
-    }
-    
-    if (Array.isArray(analysis.tags)) {
-        // 1. Initial cleaning (Length and Word Count limits)
-        let tags = analysis.tags
-            .map(t => String(t).trim())
-            .filter(t => t.length > 0 && t.length < 120 && t.split(/\s+/).length <= 10);
-
-        // 2. Case-insensitive and Plural-insensitive deduplication
-        const seen = new Set();
-        tags = tags.filter(t => {
-            const norm = normalize(t);
-            if (seen.has(norm)) return false;
-            seen.add(norm);
-            return true;
-        });
-
-        // 3. Substring / Recursive pruning:
-        tags.sort((a, b) => a.length - b.length); 
-
-        const finalTags = [];
-        for (const tag of tags) {
-            const normTag = normalize(tag);
-            const isRedundant = finalTags.some(existing => {
-                const normExisting = normalize(existing);
-                if (normTag.length > 5 && normExisting.length > 5) {
-                    if (normTag.includes(normExisting) || normExisting.includes(normTag)) return true;
-                }
-                return false;
-            });
-            if (!isRedundant) finalTags.push(tag);
-        }
-
-        analysis.tags = finalTags;
-
-        // 4. Remove tags that are already represented as objects
-        if (Array.isArray(analysis.objects)) {
-            const objectNorms = new Set(analysis.objects.map(normalize));
-            analysis.tags = analysis.tags.filter(tag => !objectNorms.has(normalize(tag)));
-        }
-    }
-}
-
-// State
-let allImages = []; // We keep a local copy for filtering date/scene types quickly if needed, or we rely on worker results.
-// Actually, worker sends back "results" (which are full objects from search-data.json). 
-// So we update this list based on search results.
-let searchWorker = null;
-let isInitialized = false;
-
-// WHAT: Tracking image identifiers currently mounted within the search results DOM grid.
-// WHY: Maintaining a Set of active image IDs provides O(1) deduplication guards, preventing duplicate
-// card elements from ever being injected even if batch pagination or worker messages race.
-const currently_rendered_image_identifier_set = new Set();
-
-// WHAT: Guard flag tracking whether the search worker system is actively in the process of spinning up.
-// WHY: Prevents multiple concurrent initialization attempts from spawning orphan Web Worker threads.
-let is_search_system_currently_initializing = false;
-
-// State for pagination
-let filteredImages = [];
-let currentIndex = 0;
-let isRendering = false; // Prevents concurrent batch rendering
-let selectedIds = new Set();
-const BATCH_SIZE = 50;
-let observer = null;
-const sentinel = document.getElementById('scroll-sentinel');
-
-
-// Toggle Label Update
 const fuzzinessSlider = document.getElementById('fuzzinessSlider');
 const fuzzinessValue = document.getElementById('fuzzinessValue');
-const semanticToggle = document.getElementById('semanticToggle'); // Hidden compat checkbox
+const semanticToggle = document.getElementById('semanticToggle');
 const searchModeHint = document.getElementById('searchModeHint');
 
-// Search Mode Helper
-function getSearchMode() {
-    const checked = document.querySelector('input[name="searchMode"]:checked');
-    return checked ? checked.value : 'keyword';
-}
-
-const SEARCH_MODE_HINTS = {
-    keyword: 'Fuzzy keyword matching on summaries, tags, and objects.',
-    hybrid: '⚡ Combines keyword + semantic search via Reciprocal Rank Fusion.',
-    semantic: '🧠 AI concept search using embedding similarity.'
-};
-
-// Scope Elements
 const scopeAnalysis = document.getElementById('scopeAnalysis');
 const scopeObjects = document.getElementById('scopeObjects');
 const scopeTags = document.getElementById('scopeTags');
-
-// Update Fuzziness Label
 const sortOrder = document.getElementById('sortOrder');
 
-fuzzinessSlider.addEventListener('input', () => {
-    fuzzinessValue.textContent = fuzzinessSlider.value;
+const sentinel = document.getElementById('scroll-sentinel');
+const contextMenu = document.getElementById('contextMenu');
+const generateEmbeddingsBtn = document.getElementById('generateEmbeddingsBtn');
+const genProgress = document.getElementById('genProgress');
+const embeddingsStatusEl = document.getElementById('embeddingsStatus');
+
+const selectMissingBtn = document.getElementById('selectMissingBtn');
+const unselectAllBtn = document.getElementById('unselectAllBtn');
+const processSelectedBtn = document.getElementById('processSelectedBtn');
+const dbPromptType = document.getElementById('dbPromptType');
+const validateBtn = document.getElementById('validateBtn');
+const validationStatus = document.getElementById('validationStatus');
+const validationText = document.getElementById('validationText');
+const validationProgressBar = document.getElementById('validationProgressBar');
+const closeStatus = document.getElementById('closeStatus');
+
+const SEARCH_MODE_HINTS = Object.freeze({
+    keyword: 'Fuzzy keyword matching on summaries, tags, and objects.',
+    hybrid: '⚡ Combines keyword + semantic search via Reciprocal Rank Fusion.',
+    semantic: '🧠 AI concept search using embedding similarity.'
 });
 
-// Update Search on Slider Change
-fuzzinessSlider.addEventListener('change', () => {
-    const mode = getSearchMode();
-    if (mode === 'semantic') return; // Fuzziness not relevant for pure semantic
+const BATCH_SIZE = 50;
 
-    if (searchWorker) {
-        searchWorker.postMessage({
-            type: 'UPDATE_CONFIG',
-            payload: { fuzziness: parseFloat(fuzzinessSlider.value) }
-        });
-        executeSearchQuery();
+// ============================================================================
+// IMPERATIVE SHELL UI STATE
+// ============================================================================
+
+const selectedTagFilters = new Set();
+const selectedObjectFilters = new Set();
+const currently_rendered_image_identifier_set = new Set();
+const selectedIds = new Set();
+
+let allKnownTags = [];
+let allKnownObjects = [];
+let autocomplete_active_index = -1;
+
+let allImages = [];
+let lastWorkerResults = [];
+let filteredImages = [];
+let currentIndex = 0;
+let isRendering = false;
+let searchWorker = null;
+let isInitialized = false;
+let is_search_system_currently_initializing = false;
+let observer = null;
+let context_menu_target_state = null;
+
+// ============================================================================
+// SEARCH MODE & FILTER CONTROLS
+// ============================================================================
+
+/**
+ * WHAT: Reads the currently selected search mode radio input (`keyword`, `hybrid`, or `semantic`).
+ * WHY:  Provides a single source of truth for search execution and UI state toggling.
+ *
+ * @returns {string} Active search mode identifier.
+ */
+function getSearchMode() {
+    const checked_radio_element = document.querySelector('input[name="searchMode"]:checked');
+    return checked_radio_element ? checked_radio_element.value : 'keyword';
+}
+
+/**
+ * WHAT: Updates control availability, opacity, hints, and sort order when switching search modes.
+ * WHY:  Fuzziness and field scopes do not apply to pure vector semantic search, and semantic/hybrid
+ *       modes default to relevance ranking.
+ */
+function updateSearchModeUI() {
+    const active_mode = getSearchMode();
+    const is_pure_semantic = active_mode === 'semantic';
+
+    if (fuzzinessSlider) fuzzinessSlider.disabled = is_pure_semantic;
+    if (scopeAnalysis) scopeAnalysis.disabled = is_pure_semantic;
+    if (scopeObjects) scopeObjects.disabled = is_pure_semantic;
+    if (scopeTags) scopeTags.disabled = is_pure_semantic;
+
+    const control_opacity = is_pure_semantic ? '0.5' : '1';
+    const fuzziness_container = document.querySelector('.fuzziness-container');
+    const scope_container = document.querySelector('.scope-container');
+    if (fuzziness_container) fuzziness_container.style.opacity = control_opacity;
+    if (scope_container) scope_container.style.opacity = control_opacity;
+
+    if (searchModeHint) {
+        searchModeHint.textContent = SEARCH_MODE_HINTS[active_mode] || '';
     }
-});
 
-// Search Mode Radio Listeners
-document.querySelectorAll('input[name="searchMode"]').forEach(radio => {
-    radio.addEventListener('change', () => {
-        // Sync hidden checkbox for backward compat
-        const mode = getSearchMode();
-        if (semanticToggle) semanticToggle.checked = (mode === 'semantic' || mode === 'hybrid');
+    if ((active_mode === 'semantic' || active_mode === 'hybrid') && sortOrder) {
+        sortOrder.value = 'relevance';
+    }
+}
+
+if (fuzzinessSlider) {
+    fuzzinessSlider.addEventListener('input', () => {
+        if (fuzzinessValue) fuzzinessValue.textContent = fuzzinessSlider.value;
+    });
+
+    fuzzinessSlider.addEventListener('change', () => {
+        const active_mode = getSearchMode();
+        if (active_mode === 'semantic') return;
+
+        if (searchWorker) {
+            searchWorker.postMessage({
+                type: 'UPDATE_CONFIG',
+                payload: { fuzziness: parseFloat(fuzzinessSlider.value) }
+            });
+            executeSearchQuery();
+        }
+    });
+}
+
+document.querySelectorAll('input[name="searchMode"]').forEach((mode_radio_element) => {
+    mode_radio_element.addEventListener('change', () => {
+        const active_mode = getSearchMode();
+        if (semanticToggle) {
+            semanticToggle.checked = active_mode === 'semantic' || active_mode === 'hybrid';
+        }
         updateSearchModeUI();
         executeSearchQuery();
     });
 });
 
-// Update Search on Scope/Filter Change
 [
-    scopeAnalysis, scopeObjects, scopeTags, sortOrder, negativeQuery, 
-    document.getElementById('dataStatus'), sceneType,
+    scopeAnalysis, scopeObjects, scopeTags, sortOrder, negativeQuery,
+    document.getElementById('dataStatus'), sceneType, startDate, endDate,
     clusterThemeSelect, facetMediumSelect, facetMoodSelect, facetCompositionSelect
-].forEach(filter_input_element => {
+].forEach((filter_input_element) => {
     if (filter_input_element) {
         filter_input_element.addEventListener('change', () => {
             executeSearchQuery();
@@ -221,8 +225,28 @@ document.querySelectorAll('input[name="searchMode"]').forEach(radio => {
     }
 });
 
-// WHAT: Asynchronously fetches EVoC cluster themes from Laya and populates the theme dropdown.
-// WHY: Gives the user immediate access to semantic visual categories discovered across the library.
+if (negativeQuery) {
+    negativeQuery.addEventListener('keydown', (keyboard_event_object) => {
+        if (keyboard_event_object.key === 'Enter') executeSearchQuery();
+    });
+}
+
+if (searchBtn) {
+    searchBtn.addEventListener('click', () => {
+        executeSearchQuery();
+    });
+}
+
+if (searchQuery) {
+    searchQuery.addEventListener('keydown', (keyboard_event_object) => {
+        if (keyboard_event_object.key === 'Enter') executeSearchQuery();
+    });
+}
+
+/**
+ * WHAT: Fetches EVoC cluster themes from `/api/clusters/themes` and populates the theme dropdown.
+ * WHY:  Exposes discovered semantic visual categories in the search filter bar.
+ */
 async function loadClusterThemesIntoFilterDropdown() {
     if (!clusterThemeSelect) return;
     try {
@@ -231,9 +255,8 @@ async function loadClusterThemesIntoFilterDropdown() {
         const { themes } = await cluster_themes_http_response.json();
         if (!themes || !Array.isArray(themes)) return;
 
-        // Reset to default option
         clusterThemeSelect.innerHTML = '<option value="all">All Cluster Themes</option>';
-        themes.forEach(theme_record => {
+        themes.forEach((theme_record) => {
             const theme_option_element = document.createElement('option');
             theme_option_element.value = theme_record.theme_name;
             const human_readable_theme_name = theme_record.theme_name.replace(/_/g, ' ');
@@ -245,538 +268,339 @@ async function loadClusterThemesIntoFilterDropdown() {
     }
 }
 
-function updateSearchModeUI() {
-    const mode = getSearchMode();
-    const isPureSemantic = (mode === 'semantic');
-
-    // Disable/Dim Fuzziness & Scope (Not used in pure Semantic)
-    fuzzinessSlider.disabled = isPureSemantic;
-    scopeAnalysis.disabled = isPureSemantic;
-    scopeObjects.disabled = isPureSemantic;
-    scopeTags.disabled = isPureSemantic;
-
-    // Visual feedback
-    const opacity = isPureSemantic ? '0.5' : '1';
-    document.querySelector('.fuzziness-container').style.opacity = opacity;
-    document.querySelector('.scope-container').style.opacity = opacity;
-
-    // Update hint text
-    if (searchModeHint) {
-        searchModeHint.textContent = SEARCH_MODE_HINTS[mode] || '';
-    }
-
-    // Force Sort to Relevance if semantic or hybrid
-    if (mode === 'semantic' || mode === 'hybrid') {
-        sortOrder.value = 'relevance';
-    }
-}
-
-// Allow Enter key in negative query
-if (negativeQuery) {
-    negativeQuery.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') executeSearchQuery();
-    });
-}
+// ============================================================================
+// WORKER INITIALIZATION & SEARCH EXECUTION
+// ============================================================================
 
 /**
- * INITIALIZATION: The Search Engine Handshake
- * 
- * This function sets up the communication bridge between the browser and 
- * our background Search Worker. We do this primarily to keep the main 
- * interface responsive during heavy computations.
+ * WHAT: Initializes the Web Worker search engine, Pretext layout engine, URL filters, and cluster dropdown.
+ * WHY:  Keeps multi-megabyte JSON index parsing and vector math off the main UI thread.
  */
 function initializeSearchSystem() {
-    // WHAT: Checking if the search system is already operational or currently in the process of starting.
-    // WHY: Early return prevents creating duplicate background threads or corrupting state.
     if (isInitialized || is_search_system_currently_initializing) return;
     is_search_system_currently_initializing = true;
 
-    // Give visual feedback that the heavy lifing is starting
-    searchBtn.disabled = true;
-    searchBtn.textContent = 'Preparing Search Engine...';
+    if (searchBtn) {
+        searchBtn.disabled = true;
+        searchBtn.textContent = 'Preparing Search Engine...';
+    }
 
-    // The PretextLayout engine helps us calculate the exact height of 
-    // AI summaries so the grid doesn't "jump" when images load.
     if (window.PretextLayout) {
         window.PretextLayout.init();
     }
 
-    // Step 1: Handle any filters passed in the URL (e.g. from the Tags page)
     processUrlParams();
     loadClusterThemesIntoFilterDropdown();
 
-    // WHAT: Terminating any preexisting worker before spawning a clean thread.
-    // WHY: Guarantees that only a single worker thread communicates with the main interface.
     if (searchWorker) {
         searchWorker.terminate();
         searchWorker = null;
     }
 
-    // Step 2: Spawn the background thread
     searchWorker = new Worker('search-worker.js');
 
-    // Step 3: Listen for signals from the worker
-    searchWorker.onmessage = function (event) {
-        const { type, payload } = event.data;
+    searchWorker.onmessage = function (worker_message_event) {
+        const { type: message_type, payload } = worker_message_event.data;
 
-        switch (type) {
-            case 'READY':
-                // The worker has finished parsing the multi-megabyte JSON indexes
+        switch (message_type) {
+            case 'READY': {
                 console.log(`[MAIN] Search Engine Ready. Items: ${payload.count}. Semantic: ${payload.hasEmbeddings}`);
                 isInitialized = true;
                 is_search_system_currently_initializing = false;
-                searchBtn.disabled = false;
-                searchBtn.textContent = 'Search Images';
+                if (searchBtn) {
+                    searchBtn.disabled = false;
+                    searchBtn.textContent = 'Search Images';
+                }
 
-                // FEATURE DETECTION: If the user hasn't generated embeddings yet, 
-                // we hide the Hybrid and Semantic search options to prevent confusion.
                 if (!payload.hasEmbeddings) {
-                    document.querySelectorAll('input[name="searchMode"]').forEach(radio => {
-                        if (radio.value === 'hybrid' || radio.value === 'semantic') {
-                            radio.disabled = true;
+                    document.querySelectorAll('input[name="searchMode"]').forEach((mode_radio_element) => {
+                        if (mode_radio_element.value === 'hybrid' || mode_radio_element.value === 'semantic') {
+                            mode_radio_element.disabled = true;
                         }
                     });
-                    const modeSelectorGroup = document.querySelector('.search-mode-selector')?.closest('.filter-group');
-                    if (modeSelectorGroup) {
-                        modeSelectorGroup.title = "Hybrid & Semantic modes require embeddings. Click 'Generate Data' first.";
+                    const mode_selector_group = document.querySelector('.search-mode-selector')?.closest('.filter-group');
+                    if (mode_selector_group) {
+                        mode_selector_group.title = "Hybrid & Semantic modes require embeddings. Click 'Generate Data' first.";
                     }
                 } else {
-                    // CONVENIENCE: If embeddings exist, default to the best mode (Hybrid)
-                    const hybridRadio = document.querySelector('input[name="searchMode"][value="hybrid"]');
-                    if (hybridRadio && !hybridRadio.disabled) {
-                        hybridRadio.checked = true;
+                    const hybrid_radio_element = document.querySelector('input[name="searchMode"][value="hybrid"]');
+                    if (hybrid_radio_element && !hybrid_radio_element.disabled) {
+                        hybrid_radio_element.checked = true;
                         if (semanticToggle) semanticToggle.checked = true;
                         updateSearchModeUI();
                     }
                 }
 
-                // Always run an initial search to populate the grid
                 executeSearchQuery();
                 break;
+            }
 
             case 'RESULTS':
-                // The worker found some matches! Now we display them.
                 processAndDisplayMatches(payload.results);
                 break;
 
             case 'ERROR':
                 console.error('[MAIN] Search Engine Error:', payload);
-                searchResults.innerHTML = '<div class="error-msg">Failed to load search index.</div>';
-                searchBtn.disabled = false;
-                searchBtn.textContent = 'Retry Engine Load';
+                if (searchResults) {
+                    searchResults.innerHTML = '<div class="error-msg">Failed to load search index.</div>';
+                }
+                if (searchBtn) {
+                    searchBtn.disabled = false;
+                    searchBtn.textContent = 'Retry Engine Load';
+                }
+                is_search_system_currently_initializing = false;
                 break;
         }
     };
 
-    // Step 4: Tell the worker to start loading data
     searchWorker.postMessage({
         type: 'INIT',
-        payload: { fuzziness: parseFloat(fuzzinessSlider.value) }
+        payload: { fuzziness: parseFloat(fuzzinessSlider ? fuzzinessSlider.value : '0.4') }
     });
 }
 
 /**
- * RESULTS HANDLING: From Background Task to Visual Grid
- * 
- * The Worker sends us a list of "text-relevance" matches. We then 
- * apply local "client-side" filters (like Date or Scene Type) before 
- * showing the final results to the user.
+ * WHAT: Applies pure client-side filters and sorting to raw worker results, then resets and renders the grid.
+ * WHY:  Delegates all filtering and sorting to pure functions in `searchFilters.js` while keeping DOM updates isolated.
+ *
+ * @param {readonly Record<string, any>[]} raw_worker_results - Candidate image records returned by `search-worker.js`.
  */
-function processAndDisplayMatches(rawWorkerResults) {
-    // 1. Temporarily store the raw results (useful for local context lookups)
-    lastWorkerResults = rawWorkerResults;
+function processAndDisplayMatches(raw_worker_results) {
+    lastWorkerResults = raw_worker_results;
+    if (allImages.length === 0 && Array.isArray(raw_worker_results)) {
+        allImages = raw_worker_results.slice();
+    }
 
-    // 2. Apply "Client-Side" Filters
-    // We do things like Date Range and Scene Type here in the main thread
-    // because they are lightweight and change frequently based on user clicks.
-    const finalFilteredResults = applyLocalClientFilters(rawWorkerResults);
+    const active_search_query = searchQuery ? searchQuery.value.trim() : '';
+    const active_sort_mode = sortOrder ? sortOrder.value : 'newest';
+    const match_logic_mode = document.querySelector('input[name="tagLogic"]:checked')?.value || 'AND';
 
-    // WHAT: Disconnecting any active scroll sentinel observer before replacing the results.
-    // WHY: Prevents in-flight intersection callbacks from appending old batches while the DOM is cleared.
+    const filter_criteria_snapshot = {
+        selected_tags: selectedTagFilters,
+        selected_objects: selectedObjectFilters,
+        tag_filter_mode: match_logic_mode,
+        exclude_terms_raw: negativeQuery ? negativeQuery.value.trim() : '',
+        scene_type: sceneType ? sceneType.value : 'all',
+        date_from: startDate ? startDate.value : '',
+        date_to: endDate ? endDate.value : '',
+        data_status: document.getElementById('dataStatus')?.value || 'all',
+        theme_filter: clusterThemeSelect ? clusterThemeSelect.value : 'all',
+        facet_medium: facetMediumSelect ? facetMediumSelect.value : 'all',
+        facet_mood: facetMoodSelect ? facetMoodSelect.value : 'all',
+        facet_composition: facetCompositionSelect ? facetCompositionSelect.value : 'all'
+    };
+
+    const filtered_records = filterImageRecordsByCriteria(raw_worker_results, filter_criteria_snapshot);
+    const sorted_filtered_results = sortFilteredImageRecords(
+        filtered_records,
+        active_sort_mode,
+        Boolean(active_search_query)
+    );
+
     if (observer) {
         observer.disconnect();
         observer = null;
     }
 
-    // 3. Prepare the Infinite Scroll state
-    window.currentSearchResults = finalFilteredResults;
-    filteredImages = finalFilteredResults;
-    currentIndex = 0; // Reset scroll position to the top
+    window.currentSearchResults = sorted_filtered_results;
+    filteredImages = sorted_filtered_results;
+    currentIndex = 0;
 
-    // WHAT: Resetting the tracking set of rendered image identifiers.
-    // WHY: Since searchResults.innerHTML is being cleared, the DOM starts empty, so tracking must reset.
     currently_rendered_image_identifier_set.clear();
-    searchResults.innerHTML = ''; // Wipe the previous grid
+    if (searchResults) searchResults.innerHTML = '';
 
-    // 4. Update the UI Count
-    resultsCount.textContent = `Found ${finalFilteredResults.length} results`;
-    searchBtn.disabled = false;
-    searchBtn.textContent = 'Search Images';
+    if (resultsCount) resultsCount.textContent = `Found ${sorted_filtered_results.length} results`;
+    if (searchBtn) {
+        searchBtn.disabled = false;
+        searchBtn.textContent = 'Search Images';
+    }
 
-    if (finalFilteredResults.length === 0) {
-        searchResults.innerHTML = `
-            <div style="grid-column: 1/-1; text-align: center; padding: 4rem 2rem;">
-                <div style="font-size: 3rem; margin-bottom: 1rem;">🔍</div>
-                <div style="color: var(--text-secondary); font-size: 1.1rem;">No images found matching your current filters.</div>
-                <button class="action-btn" style="margin-top: 1rem;" onclick="location.reload()">Clear All Filters</button>
-            </div>`;
+    if (sorted_filtered_results.length === 0) {
+        if (searchResults) {
+            searchResults.innerHTML = `
+                <div style="grid-column: 1/-1; text-align: center; padding: 4rem 2rem;">
+                    <div style="font-size: 3rem; margin-bottom: 1rem;">🔍</div>
+                    <div style="color: var(--text-secondary); font-size: 1.1rem;">No images found matching your current filters.</div>
+                    <button class="action-btn" style="margin-top: 1rem;" onclick="location.reload()">Clear All Filters</button>
+                </div>`;
+        }
     } else {
-        // WHAT: Render the first batch of results directly into the row grid.
-        // WHY: In a row-by-row CSS Grid layout, cards naturally organize into sequential rows.
         renderNextBatchOfResults();
         setupInfiniteScrollObserver();
     }
 }
 
 /**
- * CLIENT-SIDE FILTERING: Precision Slicing
- * 
- * While the Worker handles "Fuzzy Search" and "AI Vector Search", 
- * this function handles the sharp, binary filters: "Is it a Portrait?", 
- * "Is it from 2024?", "Does it NOT contain 'cats'?".
- */
-function applyLocalClientFilters(baseResultSet) {
-    const negativeQueryText = negativeQuery ? negativeQuery.value.trim() : '';
-    const activeSceneType = sceneType.value;
-    const dataStatusFilter = document.getElementById('dataStatus')?.value || 'all';
-    const startDateFilter = startDate.value;
-    const endDateFilter = endDate.value;
-    const activeSortMode = sortOrder ? sortOrder.value : 'newest';
-    const activeSearchQuery = searchQuery.value.trim();
-
-    // Prepare negative terms for fast lookup
-    const negativeTermsArray = negativeQueryText 
-        ? negativeQueryText.toLowerCase().split(/\s+/).filter(term => term.length > 0) 
-        : [];
-
-    let filteredSet = baseResultSet.filter(imageRecord => {
-        
-        // --- FILTER 1: Exact Tag/Object Chips ---
-        if (selectedTagFilters.size > 0 || selectedObjectFilters.size > 0) {
-            const analysis = imageRecord.analysis || {};
-            const imageTags = (analysis.tags || []).map(t => t.toLowerCase());
-            const imageObjects = (analysis.objects || []).map(o => o.toLowerCase());
-            
-            // Map the selected filters into a standardized search structure
-            const activeFilterRequirements = [
-                ...Array.from(selectedTagFilters).map(tagName => ({ name: tagName.toLowerCase(), source: imageTags })),
-                ...Array.from(selectedObjectFilters).map(objName => ({ name: objName.toLowerCase(), source: imageObjects }))
-            ];
-
-            const matchLogicMode = document.querySelector('input[name="tagLogic"]:checked')?.value || 'AND';
-
-            if (matchLogicMode === 'AND') {
-                // "Match All": Every single selected chip must exist on the image
-                if (!activeFilterRequirements.every(req => req.source.includes(req.name))) return false;
-            } else {
-                // "Match Any": If even one chip matches, the image is passed through
-                if (!activeFilterRequirements.some(req => req.source.includes(req.name))) return false;
-            }
-        }
-
-        // --- FILTER 2: Negative Search ("Subtract" concepts) ---
-        if (negativeTermsArray.length > 0) {
-            const analysis = imageRecord.analysis || {};
-            const searchableBlob = [
-                imageRecord.filename,
-                analysis.summary,
-                ...(analysis.objects || []),
-                ...(analysis.tags || []),
-                analysis.scene_type
-            ].join(' ').toLowerCase();
-
-            // If the image contains ANY of the negative keywords, we discard it
-            if (negativeTermsArray.some(badTerm => searchableBlob.includes(badTerm))) return false;
-        }
-
-        // --- FILTER 3: Scene Type (Indoor, Nature, etc.) ---
-        if (activeSceneType !== 'all') {
-            const imageScene = (imageRecord.analysis && imageRecord.analysis.scene_type) || '';
-            if (imageScene.toLowerCase() !== activeSceneType.toLowerCase()) return false;
-        }
-
-        // --- FILTER 4: Date Range (Time-traveling search) ---
-        const imageCreationTime = new Date(imageRecord.created_at);
-        if (startDateFilter && imageCreationTime < new Date(startDateFilter)) return false;
-        if (endDateFilter) {
-            const endOfDay = new Date(endDateFilter);
-            endOfDay.setHours(23, 59, 59); // Include the entire end date
-            if (imageCreationTime > endOfDay) return false;
-        }
-
-        // --- FILTER 5: Data Hygiene (Finding missing AI data) ---
-        if (dataStatusFilter !== 'all') {
-            const analysis = imageRecord.analysis || {};
-            const hasTags = Array.isArray(analysis.tags) && analysis.tags.length > 0;
-            const hasObjects = Array.isArray(analysis.objects) && analysis.objects.length > 0;
-            const hasScene = !!analysis.scene_type && analysis.scene_type !== 'unknown';
-            const hasSummary = !!analysis.summary && analysis.summary.length > 0;
-
-            if (dataStatusFilter === 'missing-any' && (hasTags && hasObjects && hasScene && hasSummary)) return false;
-            if (dataStatusFilter === 'missing-tags' && hasTags) return false;
-            if (dataStatusFilter === 'missing-objects' && hasObjects) return false;
-            if (dataStatusFilter === 'missing-badge' && hasScene) return false;
-            if (dataStatusFilter === 'missing-summary' && hasSummary) return false;
-        }
-
-        // --- FILTER 6: Cluster Theme Filter (EVoC + Laya) ---
-        const activeClusterTheme = clusterThemeSelect ? clusterThemeSelect.value : 'all';
-        if (activeClusterTheme !== 'all') {
-            const imageClusterTheme = imageRecord.theme_name || '';
-            if (imageClusterTheme !== activeClusterTheme) return false;
-        }
-
-        // --- FILTER 7: Visual Facet Filters (Laya) ---
-        const activeFacetMedium = facetMediumSelect ? facetMediumSelect.value : 'all';
-        if (activeFacetMedium !== 'all') {
-            const imageMedium = imageRecord.facet_medium || '';
-            if (imageMedium !== activeFacetMedium) return false;
-        }
-
-        const activeFacetMood = facetMoodSelect ? facetMoodSelect.value : 'all';
-        if (activeFacetMood !== 'all') {
-            const imageMood = imageRecord.facet_mood || '';
-            if (imageMood !== activeFacetMood) return false;
-        }
-
-        const activeFacetComposition = facetCompositionSelect ? facetCompositionSelect.value : 'all';
-        if (activeFacetComposition !== 'all') {
-            const imageComposition = imageRecord.facet_composition || '';
-            if (imageComposition !== activeFacetComposition) return false;
-        }
-
-        return true;
-    });
-
-    // --- SORTING: Final Ordering ---
-    filteredSet.sort((firstImage, secondImage) => {
-        
-        // RELEVANCE: If we have a query, the Worker already sorted them by score.
-        // We preserve that order by returning 0 (no change).
-        if (activeSortMode === 'relevance' && activeSearchQuery) {
-            return 0; 
-        }
-
-        const dateA = new Date(firstImage.created_at || 0).getTime();
-        const dateB = new Date(secondImage.created_at || 0).getTime();
-        const updateA = firstImage.updated_at ? new Date(firstImage.updated_at).getTime() : dateA;
-        const updateB = secondImage.updated_at ? new Date(secondImage.updated_at).getTime() : dateB;
-
-        if (activeSortMode === 'oldest') {
-            const difference_in_creation_timestamps = dateA - dateB;
-            if (difference_in_creation_timestamps !== 0) {
-                return difference_in_creation_timestamps;
-            }
-            return (Number(firstImage.id) || 0) - (Number(secondImage.id) || 0);
-        } else if (activeSortMode === 'newest') {
-            const difference_in_update_timestamps = updateB - updateA;
-            if (difference_in_update_timestamps !== 0) {
-                return difference_in_update_timestamps;
-            }
-            return (Number(secondImage.id) || 0) - (Number(firstImage.id) || 0);
-        } else {
-            // Default "Relevance" fallback for non-query views is just Newest
-            const difference_in_fallback_timestamps = updateB - updateA;
-            if (difference_in_fallback_timestamps !== 0) {
-                return difference_in_fallback_timestamps;
-            }
-            return (Number(secondImage.id) || 0) - (Number(firstImage.id) || 0);
-        }
-    });
-
-    return filteredSet;
-}
-
-/**
- * EXECUTION: The Central Search Orchestrator
- * 
- * This is the brain of the search page. It decides whether to use 
- * Keyword logic, AI Semantic logic, or the Hybrid merge.
+ * WHAT: Orchestrates keyword, semantic, or hybrid search queries against `search-worker.js` and `/api/embed`.
+ * WHY:  Dispatches embedding generation when needed and falls back gracefully to keyword search if the AI server is offline.
  */
 async function executeSearchQuery() {
     if (!isInitialized || !searchWorker) return;
 
-    // WHAT: Disconnecting the infinite scroll observer immediately upon issuing a search query.
-    // WHY: If the user scrolls while an async embedding request is pending, this stops old search results
-    // from continuing to paginate into the grid before the new query arrives.
     if (observer) {
         observer.disconnect();
         observer = null;
     }
 
-    // Show a loading spinner so the user knows we are working
-    searchBtn.disabled = true;
-    searchBtn.innerHTML = '<div class="spinner"></div> Searching...';
+    if (searchBtn) {
+        searchBtn.disabled = true;
+        searchBtn.innerHTML = '<div class="spinner"></div> Searching...';
+    }
 
-    const rawQueryString = searchQuery.value.trim();
-    const activeSearchMode = getSearchMode();
+    const raw_query_string = searchQuery ? searchQuery.value.trim() : '';
+    const active_search_mode = getSearchMode();
 
     // Fast Laya Query Intent Check in background
-    if (rawQueryString && smartIntentIndicator && smartIntentText) {
+    if (raw_query_string && smartIntentIndicator && smartIntentText) {
         fetch('/api/laya/query-intent', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: rawQueryString })
+            body: JSON.stringify({ query: raw_query_string })
         })
-        .then(intent_http_response => intent_http_response.json())
-        .then(intent_payload => {
-            if (intent_payload && intent_payload.suggested_filters && Object.keys(intent_payload.suggested_filters).length > 0) {
-                const detected_filter_descriptions = [];
-                if (intent_payload.suggested_filters.medium) {
-                    detected_filter_descriptions.push(`Medium: ${intent_payload.suggested_filters.medium.replace(/_/g, ' ')}`);
+            .then((intent_http_response) => {
+                if (!intent_http_response.ok) {
+                    throw new Error(`Intent request failed with HTTP ${intent_http_response.status}`);
                 }
-                if (intent_payload.suggested_filters.mood) {
-                    detected_filter_descriptions.push(`Mood: ${intent_payload.suggested_filters.mood.replace(/_/g, ' ')}`);
+                return intent_http_response.json();
+            })
+            .then((intent_payload) => {
+                const detected_filter_descriptions = formatDetectedIntentFilterDescriptions(intent_payload);
+                if (detected_filter_descriptions.length > 0) {
+                    smartIntentText.textContent = `Laya Intent: ${detected_filter_descriptions.join(', ')}`;
+                    smartIntentIndicator.style.display = 'block';
+                } else {
+                    smartIntentIndicator.style.display = 'none';
                 }
-                smartIntentText.textContent = `Laya Intent: ${detected_filter_descriptions.join(', ')}`;
-                smartIntentIndicator.style.display = 'block';
-            } else {
+            })
+            .catch(() => {
                 smartIntentIndicator.style.display = 'none';
-            }
-        })
-        .catch(() => {
-            smartIntentIndicator.style.display = 'none';
-        });
+            });
     } else if (smartIntentIndicator) {
         smartIntentIndicator.style.display = 'none';
     }
 
-    // SCENARIO 1: HYBRID MODE (Keyword + Semantic)
-    if (activeSearchMode === 'hybrid' && rawQueryString) {
+    if (active_search_mode === 'hybrid' && raw_query_string) {
         try {
-            // First, we need to turn the user's text into a concept vector.
-            // We ask our local server (which proxies to LM Studio) for the math.
-            searchBtn.textContent = 'Generating Embedding...';
-            const embedResponse = await fetch('/api/embed', {
+            if (searchBtn) searchBtn.textContent = 'Generating Embedding...';
+            const embed_http_response = await fetch('/api/embed', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: rawQueryString })
+                body: JSON.stringify({ text: raw_query_string })
             });
 
-            if (!embedResponse.ok) throw new Error('Local AI server failed to generate a search vector.');
-            const vectorData = await embedResponse.json();
+            if (!embed_http_response.ok) throw new Error('Local AI server failed to generate a search vector.');
+            const vector_payload = await embed_http_response.json();
 
-            // Now we send BOTH the text and the vector to the Worker.
-            // It will run two searches in parallel and fuse them with RRF.
-            searchBtn.textContent = 'Fusing Results...';
+            if (searchBtn) searchBtn.textContent = 'Fusing Results...';
             searchWorker.postMessage({
                 type: 'HYBRID_SEARCH',
-                payload: { query: rawQueryString, vector: vectorData.embedding }
+                payload: { query: raw_query_string, vector: vector_payload.embedding }
             });
-
-        } catch (err) {
-            console.error('Hybrid Search Failed:', err);
-            // FAIL-SAFE: If the AI model isn't loaded, don't crash! 
-            // Just drop back to reliable keyword search.
+        } catch (hybrid_search_error) {
+            console.error('Hybrid Search Failed:', hybrid_search_error);
             console.warn('[MAIN] AI Engine offline. Falling back to Keyword search.');
             searchWorker.postMessage({
                 type: 'SEARCH',
-                payload: { query: rawQueryString }
+                payload: { query: raw_query_string }
             });
         }
-    } 
-    // SCENARIO 2: PURE SEMANTIC (AI Matches Only)
-    else if (activeSearchMode === 'semantic' && rawQueryString) {
+    } else if (active_search_mode === 'semantic' && raw_query_string) {
         try {
-            searchBtn.textContent = 'Analyzing Concept...';
-            const embedResponse = await fetch('/api/embed', {
+            if (searchBtn) searchBtn.textContent = 'Analyzing Concept...';
+            const embed_http_response = await fetch('/api/embed', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: rawQueryString })
+                body: JSON.stringify({ text: raw_query_string })
             });
 
-            if (!embedResponse.ok) throw new Error('AI Engine unreachable.');
-            const vectorData = await embedResponse.json();
+            if (!embed_http_response.ok) throw new Error('AI Engine unreachable.');
+            const vector_payload = await embed_http_response.json();
 
-            searchBtn.textContent = 'Comparing Concepts...';
+            if (searchBtn) searchBtn.textContent = 'Comparing Concepts...';
             searchWorker.postMessage({
                 type: 'SEMANTIC_SEARCH',
-                payload: { vector: vectorData.embedding }
+                payload: { vector: vector_payload.embedding }
             });
-
-        } catch (err) {
-            console.error('Semantic Search Failed:', err);
-            showAlertModal('AI search failed. Please ensure llama-server is running on port 8080. Error: ' + err.message, 'Concept Search Error');
-            searchBtn.disabled = false;
-            searchBtn.textContent = 'Search Images';
+        } catch (semantic_search_error) {
+            console.error('Semantic Search Failed:', semantic_search_error);
+            showAlertModal(
+                'AI search failed. Please ensure llama-server is running on port 8080. Error: ' + semantic_search_error.message,
+                'Concept Search Error'
+            );
+            if (searchBtn) {
+                searchBtn.disabled = false;
+                searchBtn.textContent = 'Search Images';
+            }
         }
-    } 
-    // SCENARIO 3: KEYWORD MODE (Fast & Familiar)
-    else {
-        // Just send the text to the worker for fuzzy matching (Fuse.js)
+    } else {
         searchWorker.postMessage({
             type: 'SEARCH',
-            payload: { query: rawQueryString }
+            payload: { query: raw_query_string }
         });
     }
 }
 
 /**
- * Instantly populates the UI from URL parameters (q, type, similar)
- * Provides immediate visual feedback while the index loads.
+ * WHAT: Reads URL query parameters (`q`, `tag`, `type`, `similar`) to pre-populate filters on page load.
+ * WHY:  Allows deep-linking from `tags.html`, `database.html`, or "Find Similar" links.
  */
-const urlParams = new URLSearchParams(window.location.search);
-
 function processUrlParams() {
-    const initialQuery = urlParams.get('q');
-    const initialSimilar = urlParams.get('similar');
-    const initialTag = urlParams.get('tag'); // Legacy support
+    const url_search_params = new URLSearchParams(window.location.search);
+    const initial_query = url_search_params.get('q');
+    const initial_similar = url_search_params.get('similar');
+    const initial_tag = url_search_params.get('tag');
 
-    if (initialSimilar) {
-        console.log(`[MAIN] Pre-populating 'similar' for ID: ${initialSimilar}`);
-        findSimilar(initialSimilar); // This handles its own search execution
-    } else if (initialQuery || initialTag) {
-        const queryVal = initialQuery || initialTag;
-        const decoded = decodeURIComponent(queryVal);
-        const urlType = urlParams.get('type'); // 'tag' or 'object'
-        console.log(`[MAIN] Pre-populating query: ${decoded}, type: ${urlType}`);
+    if (initial_similar) {
+        console.log(`[MAIN] Pre-populating 'similar' for ID: ${initial_similar}`);
+        findSimilar(initial_similar);
+    } else if (initial_query || initial_tag) {
+        const raw_query_value = initial_query || initial_tag;
+        const decoded_query_value = decodeURIComponent(raw_query_value);
+        const url_filter_type = url_search_params.get('type');
+        const effective_filter_type = url_filter_type || (initial_tag ? 'tag' : null);
 
-        // If 'tag' parameter is present but 'type' is missing, assume it's a tag filter
-        const effectiveType = urlType || (initialTag ? 'tag' : null);
-
-        if (effectiveType === 'tag' || effectiveType === 'object') {
-            addTagFilter(decoded, effectiveType);
-        } else {
-            searchQuery.value = decoded;
+        if (effective_filter_type === 'tag' || effective_filter_type === 'object') {
+            addTagFilter(decoded_query_value, effective_filter_type);
+        } else if (searchQuery) {
+            searchQuery.value = decoded_query_value;
         }
     }
 }
 
-
-// Refresh Data (Simplistic implementation: just reload page or re-init worker?)
-// For now, re-init worker is safer to get fresh JSONs
+/**
+ * WHAT: Restarts the background search worker to reload fresh JSON indexes after mutations or pruning.
+ * WHY:  Ensures newly generated embeddings, renames, or pruned vectors are immediately reflected in search.
+ */
 function refreshData() {
+    allImages = [];
     if (searchWorker) {
         searchWorker.terminate();
         isInitialized = false;
+        is_search_system_currently_initializing = false;
         initializeSearchSystem();
     }
 }
 
+// ============================================================================
+// INFINITE SCROLL & BATCH CARD RENDERING
+// ============================================================================
+
+/**
+ * WHAT: Attaches an IntersectionObserver to `#scroll-sentinel` to trigger batch pagination.
+ * WHY:  Waiting two animation frames prevents false-positive second-batch loads before initial grid layout settles.
+ */
 function setupInfiniteScrollObserver() {
-    // WHAT: Disconnecting any previously registered IntersectionObserver instance.
-    // WHY: Prevents stale observer callbacks from firing on replaced or obsolete sentinel positions.
     if (observer) {
         observer.disconnect();
         observer = null;
     }
 
-    // WHAT: Creating a new IntersectionObserver to monitor the scroll sentinel.
-    // WHY: We want to trigger loading the next batch of results when the user scrolls near the bottom of the page
-    // (within 400px of the sentinel), but we guard it using 'isRendering' to prevent overlapping asynchronous renders.
     observer = new IntersectionObserver((intersection_observer_entries) => {
-        // WHAT: Checking if the sentinel is visible and ensuring we are not already busy rendering a batch.
-        // WHY: Rapid scrolling can cause the sentinel to intersect multiple times.
-        // The 'isRendering' guard guarantees that exactly one batch render occurs at a time.
         if (intersection_observer_entries[0].isIntersecting && !isRendering) {
             renderNextBatchOfResults();
         }
     }, { rootMargin: '400px' });
 
-    // WHAT: Deferring sentinel observation across two animation frames.
-    // WHY: In the CSS Grid row layout, cards render and calculate their dimensions across layout passes.
-    // Waiting two animation frames ensures the container height has expanded and pushed the sentinel below the viewport,
-    // preventing the observer from immediately triggering a false-positive second batch on page load.
     requestAnimationFrame(() => {
         requestAnimationFrame(() => {
             if (sentinel && observer && currentIndex < filteredImages.length) {
@@ -787,12 +611,51 @@ function setupInfiniteScrollObserver() {
 }
 
 /**
- * Renders the next set of search results from the 'filteredImages' list.
- * This utilizes infinite scroll via a scroll-sentinel.
+ * WHAT: Measures summary height for a single card via Pretext before replacing its DOM markup.
+ * WHY:  Preserves layout stability during in-place tag/summary edits.
+ *
+ * @param {Readonly<Record<string, any>>} image_record - Image record to measure.
+ * @param {string} [layout_context='search'] - Pretext font/line-height profile name.
+ * @returns {number | undefined} Measured text height in pixels, or `undefined` if Pretext is unavailable.
+ */
+function measureSingleCardHeight(image_record, layout_context = 'search') {
+    if (!window.PretextLayout || !window.PretextLayout.ready) return undefined;
+    const summary_text = image_record?.analysis?.summary || '';
+    if (!summary_text) return undefined;
+
+    const existing_card_element = document.querySelector(`.card[data-id="${image_record.id}"]`);
+    const existing_card_width = existing_card_element ? existing_card_element.clientWidth : 0;
+    const grid_container_width = searchResults ? searchResults.offsetWidth : 1000;
+    const text_width_pixels = calculatePretextCardTextWidth(grid_container_width, existing_card_width);
+
+    const measurement_result = window.PretextLayout.measureText(summary_text, text_width_pixels, layout_context);
+    return measurement_result.height;
+}
+
+/**
+ * WHAT: Renders a single card's HTML using the pure `buildSearchResultCardHtml` builder and current selection state.
+ * WHY:  Centralizes `selectedIds` lookup so both batch rendering and single-card updates share one path.
+ *
+ * @param {Readonly<Record<string, any>>} image_record - Image record to render.
+ * @param {number | undefined} summary_height_pixels - Pre-measured summary height.
+ * @param {boolean} [is_priority_lcp=false] - Whether this card is the top-left LCP image.
+ * @param {boolean} [is_eager_loaded=false] - Whether to load the thumbnail eagerly.
+ * @returns {string} Complete HTML markup for the card.
+ */
+function renderCardMarkup(image_record, summary_height_pixels, is_priority_lcp = false, is_eager_loaded = false) {
+    return buildSearchResultCardHtml(image_record, {
+        summary_height_pixels,
+        is_selected: selectedIds.has(String(image_record.id)),
+        is_priority_lcp,
+        is_eager_loaded
+    });
+}
+
+/**
+ * WHAT: Slices the next batch from `filteredImages`, pre-measures heights via Pretext, and appends cards to `#searchResults`.
+ * WHY:  Batching keeps DOM mutations fast while `currently_rendered_image_identifier_set` guarantees zero duplicate cards.
  */
 function renderNextBatchOfResults() {
-    // WHAT: Guarding against re-entrant rendering or advancing past the total number of filtered images.
-    // WHY: Prevents duplicate simultaneous render operations and cleans up observer when results are exhausted.
     if (isRendering || currentIndex >= filteredImages.length) {
         if (currentIndex >= filteredImages.length && observer) {
             observer.disconnect();
@@ -805,12 +668,9 @@ function renderNextBatchOfResults() {
 
     const batch_start_index = currentIndex;
     const candidate_batch_images = filteredImages.slice(batch_start_index, batch_start_index + BATCH_SIZE);
-    currentIndex += candidate_batch_images.length; 
+    currentIndex += candidate_batch_images.length;
 
-    // WHAT: Filtering candidate images against the active rendered identifier set to prevent duplicate cards.
-    // WHY: If pagination events trigger in rapid succession or an index drifts, deduplicating ensures that
-    // an image already present in the DOM grid cannot be rendered a second time.
-    const deduplicated_batch_images = candidate_batch_images.filter(candidate_image_record => {
+    const deduplicated_batch_images = candidate_batch_images.filter((candidate_image_record) => {
         const image_unique_identifier_string = String(candidate_image_record.id);
         if (currently_rendered_image_identifier_set.has(image_unique_identifier_string)) {
             return false;
@@ -821,1653 +681,1199 @@ function renderNextBatchOfResults() {
 
     if (deduplicated_batch_images.length === 0) {
         isRendering = false;
-        // If there are still more images in filteredImages, trigger next batch
         if (currentIndex < filteredImages.length) {
             renderNextBatchOfResults();
         }
         return;
     }
 
-    // 2. PRE-MEASUREMENT (The 'Why'):
-    // Before rendering, we calculate the exact height of the AI summaries. 
-    // Pretext sets min-height on the summary text elements to prevent Cumulative Layout Shift (CLS).
-    let summaryHeightsMap = new Map();
+    let summary_heights_map = new Map();
     if (window.PretextLayout && window.PretextLayout.ready) {
-        const container_total_pixel_width = searchResults.offsetWidth > 0 ? searchResults.offsetWidth : 1000;
-        const approximate_column_count = Math.max(1, Math.floor((container_total_pixel_width + 16) / (300 + 16)));
+        const container_total_pixel_width = searchResults && searchResults.offsetWidth > 0 ? searchResults.offsetWidth : 1000;
+        const approximate_column_count = Math.max(1, Math.floor((container_total_pixel_width + 16) / (420 + 16)));
         const estimated_card_pixel_width = (container_total_pixel_width - (approximate_column_count - 1) * 16) / approximate_column_count;
-        const text_usable_pixel_width = Math.max(100, estimated_card_pixel_width - 24); // Card padding (0.75rem * 2)
+        const text_usable_pixel_width = Math.max(100, estimated_card_pixel_width - 24);
 
-        const text_measurement_payload_array = deduplicated_batch_images.map(image_record => {
-            const analysis = image_record.analysis || {};
-            return { id: image_record.id, text: analysis.summary || '' };
-        });
+        const text_measurement_payload_array = deduplicated_batch_images.map((image_record) => ({
+            id: image_record.id,
+            text: image_record?.analysis?.summary || ''
+        }));
 
-        summaryHeightsMap = window.PretextLayout.measureBatch(text_measurement_payload_array, text_usable_pixel_width, 'search');
+        summary_heights_map = window.PretextLayout.measureBatch(text_measurement_payload_array, text_usable_pixel_width, 'search');
     }
 
-    // 3. HTML GENERATION & SEQUENTIAL ROW INSERTION:
-    // WHAT: Building HTML for the current batch of cards and appending directly to the grid.
-    // WHY: In CSS Grid row layout, cards flow sequentially from left to right, row by row.
-    // Each newly appended batch adds rows at the bottom of the grid, ensuring previous rows never move.
     let final_batch_concatenated_html_string = '';
-    const isFirstPage = (batch_start_index === 0);
-    
+    const is_first_page = batch_start_index === 0;
+
     deduplicated_batch_images.forEach((image_record, batch_position_index) => {
         try {
-            const measured_summary_height = summaryHeightsMap.get(String(image_record.id));
-            const isPriorityImage = (isFirstPage && batch_position_index === 0);
-            const isEagerLoad = (isFirstPage && batch_position_index < 4);
-            
-            final_batch_concatenated_html_string += createResultHtml(image_record, measured_summary_height, isPriorityImage, isEagerLoad);
+            const measured_summary_height = summary_heights_map.get(String(image_record.id));
+            const is_priority_image = is_first_page && batch_position_index === 0;
+            const is_eager_load = is_first_page && batch_position_index < 4;
+
+            final_batch_concatenated_html_string += renderCardMarkup(
+                image_record,
+                measured_summary_height,
+                is_priority_image,
+                is_eager_load
+            );
         } catch (card_rendering_error) {
             console.error('Error rendering search result card:', image_record, card_rendering_error);
         }
     });
 
-    // 4. Final UI Update: Append new rows directly to the grid
-    searchResults.insertAdjacentHTML('beforeend', final_batch_concatenated_html_string);
+    if (searchResults) {
+        searchResults.insertAdjacentHTML('beforeend', final_batch_concatenated_html_string);
+        syncGridPrismGeometry();
+    }
 
     isRendering = false;
 }
 
-// Factor out result HTML generation (similar to card creation in database.js)
-// Helper: Measure pretext height for a single card update
-function measureSingleCardHeight(img, context = 'search') {
-    if (!window.PretextLayout || !window.PretextLayout.ready) return undefined;
-    const analysis = img.analysis || {};
-    const summaryText = analysis.summary || '';
-    if (!summaryText) return undefined;
+// ============================================================================
+// 3D PRISM GEOMETRY, TOASTS & CARD STATE CONTROLLERS
+// ============================================================================
 
-    let textWidth = 296; // Safe default
-    const existingCard = document.querySelector(`.card[data-id="${img.id}"]`);
-    if (existingCard && existingCard.clientWidth > 0) {
-        textWidth = existingCard.clientWidth - 24;
+/**
+ * WHAT: Displays an ephemeral floating toast notification in the UI.
+ * WHY: Provides immediate visual feedback for actions like Dicing and Thumbnail Regeneration without blocking modal popups.
+ *
+ * @param {string} toast_message - Content string to display.
+ * @param {'info' | 'success' | 'error'} [notification_type='info'] - Visual style of toast.
+ */
+function showToast(toast_message, notification_type = 'info') {
+    const toast_notification_element = document.createElement('div');
+    toast_notification_element.className = `toast-notification ${notification_type}`;
+
+    let icon_glyph = 'ℹ️';
+    if (notification_type === 'success') icon_glyph = '✅';
+    if (notification_type === 'error') icon_glyph = '⚠️';
+
+    toast_notification_element.innerHTML = `
+        <span style="font-size: 1.2rem;">${icon_glyph}</span>
+        <span>${escapeHtmlCharacters(toast_message)}</span>
+    `;
+
+    document.body.appendChild(toast_notification_element);
+
+    setTimeout(() => {
+        toast_notification_element.style.animation = 'fadeOut 0.3s forwards';
+        toast_notification_element.addEventListener('animationend', () => toast_notification_element.remove());
+    }, 3000);
+}
+
+/**
+ * WHAT: Calculates the equilateral 3D triangular prism radius (apothem) for `#searchResults` based on actual card column width.
+ * WHY: Dynamically sets `--prism-r` so 3D rotation edges meet cleanly with razor-sharp geometry matching Database cards.
+ */
+function syncGridPrismGeometry() {
+    if (!searchResults) return;
+    const sample_card_element = searchResults.querySelector('.card');
+    const measured_card_width = (sample_card_element && sample_card_element.clientWidth > 0)
+        ? sample_card_element.clientWidth
+        : computeCardPixelWidthFromGridWidth(searchResults.offsetWidth);
+    const prism_radius_pixels = computeTriangularPrismRadiusPixels(measured_card_width);
+    searchResults.style.setProperty('--prism-r', `${prism_radius_pixels}px`);
+}
+
+if (typeof ResizeObserver !== 'undefined' && searchResults) {
+    const search_grid_prism_resize_observer = new ResizeObserver(() => {
+        syncGridPrismGeometry();
+    });
+    search_grid_prism_resize_observer.observe(searchResults);
+}
+
+/**
+ * WHAT: Updates a search card element's active face (`1`, `2`, or `3`) and triggers its 3D Y-axis prism spin.
+ * WHY: Matches Database card behavior by smoothly rotating `--spin-deg` in 120-degree equilateral steps and toggling active pill states.
+ *
+ * @param {HTMLElement} card_element - Target card DOM element.
+ * @param {string | number} target_side - Face number (`1` for Summary, `2` for Tags/Objects, `3` for Diced Prompt).
+ * @param {Record<string, any>} [transition_options={}] - Optional instant flag or overridden spin degrees.
+ */
+function applyCardSideState(card_element, target_side, transition_options = {}) {
+    if (!card_element) return;
+    const normalized_side = ['1', '2', '3'].includes(String(target_side)) ? String(target_side) : '1';
+    const previous_side = card_element.getAttribute('data-side') || '1';
+    const current_spin_degrees = Number(card_element.getAttribute('data-spin-deg')) || 0;
+
+    syncGridPrismGeometry();
+
+    const next_spin_degrees = Number.isFinite(transition_options.override_spin_degrees)
+        ? Number(transition_options.override_spin_degrees)
+        : computeNextPrismSpinDegrees(current_spin_degrees, previous_side, normalized_side);
+
+    const card_inner_element = card_element.querySelector('.card-inner');
+    if (transition_options.instant && card_inner_element) {
+        card_inner_element.style.transition = 'none';
+    }
+
+    card_element.setAttribute('data-side', normalized_side);
+    card_element.setAttribute('data-spin-deg', String(next_spin_degrees));
+    card_element.style.setProperty('--spin-deg', `${next_spin_degrees}deg`);
+
+    if (normalized_side === '1') {
+        card_element.classList.remove('flipped');
     } else {
-        const gridWidth = searchResults.offsetWidth > 0 ? searchResults.offsetWidth : 1000;
-        const colCount = Math.max(1, Math.floor((gridWidth + 16) / (320 + 16)));
-        const actualCardWidth = (gridWidth - (colCount - 1) * 16) / colCount;
-        textWidth = actualCardWidth - 24;
+        card_element.classList.add('flipped');
     }
-    const result = window.PretextLayout.measureText(summaryText, textWidth, context);
-    return result.height;
-}
 
-const BRICKS_GRADS = ['purple', 'blue', 'green', 'orange', 'pink'];
-function getCardGrad(id) {
-    const numericId = typeof id === 'string' ? id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) : id;
-    return BRICKS_GRADS[numericId % BRICKS_GRADS.length];
-}
-
-function createResultHtml(img, summaryHeight, isPriority = false, isEager = false) {
-    // WHAT: Standardizes HTML escaping by calling our robust module-scoped escaping utility.
-    // WHY: By using the centralized file-wide escaping utility, we ensure all user-supplied metadata properties are safely encoded to block XSS attacks.
-    const escapeHtml = (input_value_to_be_escaped) => {
-        return escapeHtmlCharacters(input_value_to_be_escaped);
-    };
-
-    const date = new Date(img.created_at || Date.now()).toLocaleDateString();
-
-    // Thumbnail path logic (ID-based)
-    const timeStamp = img.updated_at ? new Date(img.updated_at).getTime() : (img.created_at ? new Date(img.created_at).getTime() : '');
-    const displayPath = `thumbnails/id_${img.id}.avif${timeStamp ? '?t=' + timeStamp : ''}`;
-
-    const analysis = img.analysis || {};
-    const objects = analysis.objects || [];
-    const tags = analysis.tags || [];
-    const isSelected = selectedIds.has(String(img.id));
-
-    return `
-        <div class="card ${isSelected ? 'selected' : ''}" data-id="${img.id}" data-grad="${getCardGrad(img.id)}">
-            <div class="card-inner">
-                <!-- FRONT FACE -->
-                <div class="card-front">
-                    <div style="position: absolute; top: 0.75rem; right: 0.75rem; z-index: 5;">
-                        <input type="checkbox" class="card-select-cb" data-id="${img.id}" ${isSelected ? 'checked' : ''} style="transform: scale(1.3); cursor: pointer;">
-                    </div>
-                    
-                    <div style="display: flex; gap: 1rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; padding-right: 1.5rem;">
-                        <img src="${escapeHtml(displayPath)}" 
-                             data-fullpath="${escapeHtml(img.path)}"
-                             class="thumbnail-preview"
-                             loading="${isEager ? 'eager' : 'lazy'}"
-                             decoding="async"
-                             ${isPriority ? 'fetchpriority="high"' : ''}
-                             width="80"
-                             height="80"
-                             onerror="this.style.display='none'"
-                             style="width: 80px; height: 80px; object-fit: cover; border-radius: 8px; cursor: pointer;"
-                             title="Click to view full size">
-                        <div style="flex: 1; min-width: 0;">
-                            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                                <h3 class="file-link" data-path="${escapeHtml(img.path)}" style="margin: 0; color: var(--accent); font-size: 1rem; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Show in folder">${escapeHtml(img.filename)}</h3>
-                                <button class="delete-btn" data-id="${img.id}" style="background: transparent; border: 1px solid #ef4444; color: #ef4444; padding: 0.25rem 0.5rem; border-radius: 6px; cursor: pointer; font-size: 0.7rem; transition: all 0.2s; margin-left: 0.5rem;">X</button>
-                            </div>
-                            <small style="color: var(--text-secondary);">${date}</small>
-                            <div style="margin-top: 0.25rem; display: flex; flex-wrap: wrap; gap: 0.25rem;">
-                                <span class="badge" style="font-size: 0.7rem;">${escapeHtml(analysis.scene_type) || 'Unknown'}</span>
-                                ${img.theme_name ? `<span class="badge" style="font-size: 0.65rem; background: rgba(147, 51, 234, 0.2); color: #c084fc; border: 1px solid rgba(147, 51, 234, 0.4);" title="EVoC Cluster Theme by Laya">🏷️ ${escapeHtml(img.theme_name.replace(/_/g, ' '))}</span>` : ''}
-                                ${img.facet_medium ? `<span class="badge" style="font-size: 0.65rem; background: rgba(59, 130, 246, 0.15); color: #60a5fa;" title="Artistic Medium">🎨 ${escapeHtml(img.facet_medium.replace(/_/g, ' '))}</span>` : ''}
-                                ${img.facet_mood ? `<span class="badge" style="font-size: 0.65rem; background: rgba(245, 158, 11, 0.15); color: #fbbf24;" title="Visual Mood">✨ ${escapeHtml(img.facet_mood.replace(/_/g, ' '))}</span>` : ''}
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div style="flex: 1;">
-                        <p class="summary-text ${summaryHeight ? 'pretext-measured' : ''}" data-id="${img.id}" style="font-size: 0.9rem; color: var(--text-primary); margin: 0; line-height: 1.4;${summaryHeight ? ` min-height: ${summaryHeight}px;` : ''}">
-                            <button class="copy-btn" data-text="${escapeHtml(analysis.summary || '')}" style="float: right; margin: 0.1rem 0 0.25rem 0.5rem; background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.25rem 0.5rem; border-radius: 4px; cursor: pointer; font-size: 0.75rem; white-space: nowrap;" title="Copy to clipboard">Copy</button>
-                            ${escapeHtml(analysis.summary) || 'No summary available'}
-                        </p>
-                    </div>
-
-                    <div style="margin-top: 1rem; text-align: right;">
-                        <span style="font-size: 0.7rem; color: var(--text-secondary); opacity: 0.6;">Click card to reveal details ↻</span>
-                    </div>
-                </div>
-
-                <!-- BACK FACE -->
-                <div class="card-back">
-                    <div class="tags-section">
-                        <div class="tags-container" style="margin-bottom: 1rem;">
-                            <strong style="font-size: 0.8rem; color: var(--text-secondary); display: block; margin-bottom: 0.5rem;">Detected Objects:</strong>
-                            ${objects.map(obj => `<span class="tag editable" data-id="${img.id}" data-type="objects" data-tag="${escapeHtml(obj)}" title="Click to search, Right-click to edit" style="cursor: pointer; font-size: 0.75rem; background-color: rgba(16, 185, 129, 0.2); color: #34d399; margin-bottom: 4px;">${escapeHtml(obj)}</span>`).join('')}
-                            <button class="add-tag-btn" data-id="${img.id}" data-type="objects" title="Add Object">+</button>
-                        </div>
-                        <div class="tags-container">
-                            <strong style="font-size: 0.8rem; color: var(--text-secondary); display: block; margin-bottom: 0.5rem;">Image Tags:</strong>
-                            ${tags.map(tag => `<span class="tag editable" data-id="${img.id}" data-type="tags" data-tag="${escapeHtml(tag)}" title="Click to search, Right-click to edit" style="cursor: pointer; font-size: 0.75rem; margin-bottom: 4px;">${escapeHtml(tag)}</span>`).join('')}
-                            <button class="add-tag-btn" data-id="${img.id}" data-type="tags" title="Add Tag">+</button>
-                        </div>
-                    </div>
-                    
-                    <div style="margin-top: 2rem; text-align: center;">
-                        <span style="font-size: 0.75rem; color: var(--accent); cursor: pointer; padding: 0.5rem; border: 1px solid var(--accent); border-radius: 6px;" onclick="this.closest('.card').classList.remove('flipped')">Back to Summary</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    `;
-}
-
-// Event Listeners for search trigger
-if (searchBtn) {
-    searchBtn.addEventListener('click', () => {
-        executeSearchQuery();
+    card_element.querySelectorAll('.card-side-pill[data-target-side]').forEach((pill_button_element) => {
+        const pill_target_side = pill_button_element.getAttribute('data-target-side');
+        if (pill_target_side === normalized_side && normalized_side !== '1') {
+            pill_button_element.classList.add('active');
+        } else {
+            pill_button_element.classList.remove('active');
+        }
     });
-}
-// Allow Enter key in search box
-if (searchQuery) {
-    searchQuery.addEventListener('keydown', (keyboard_event_object) => {
-        if (keyboard_event_object.key === 'Enter') executeSearchQuery();
-    });
-}
 
-// Display Results
-// Display Results removed, replaced by renderBatch and createResultHtml
-
-// Global Event Listeners for Search Results (Delegation)
-searchResults.addEventListener('click', (e) => {
-    // Copy Button Click
-    const copyBtn = e.target.closest('.copy-btn');
-    if (copyBtn) {
-        e.stopPropagation();
-        const text = copyBtn.dataset.text;
-        if (text) {
-            navigator.clipboard.writeText(text).then(() => {
-                const originalText = copyBtn.textContent;
-                copyBtn.textContent = 'Copied!';
-                copyBtn.style.borderColor = 'var(--accent)';
-                copyBtn.style.color = 'var(--accent)';
-                setTimeout(() => {
-                    copyBtn.textContent = originalText;
-                    copyBtn.style.borderColor = 'var(--border)';
-                    copyBtn.style.color = 'var(--text-secondary)';
-                }, 2000);
-            }).catch(err => {
-                console.error('Failed to copy to clipboard', err);
+    if (transition_options.instant && card_inner_element && typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                card_inner_element.style.transition = '';
             });
+        });
+    }
+
+    if (normalized_side === '3') {
+        ensureSearchCardDicedPromptLoaded(card_element);
+    }
+}
+
+/**
+ * WHAT: Purely parses a diced prompt payload (JSON string or object) into a validated Master Record.
+ * WHY: Isolates JSON parsing and structural validation from async network/DOM side effects.
+ *
+ * @param {string | Record<string, any> | null | undefined} raw_diced_prompt_value - Raw field from SQLite.
+ * @returns {Record<string, any> | null} Validated Master Record with ingredients array, or null.
+ */
+function parseValidatedDicedPromptRecord(raw_diced_prompt_value) {
+    if (!raw_diced_prompt_value) return null;
+
+    let parsed_diced_prompt_record = null;
+    if (typeof raw_diced_prompt_value === 'string') {
+        try {
+            parsed_diced_prompt_record = JSON.parse(raw_diced_prompt_value);
+        } catch (_json_parse_error) {
+            return null;
         }
+    } else if (typeof raw_diced_prompt_value === 'object') {
+        parsed_diced_prompt_record = raw_diced_prompt_value;
+    }
+
+    if (!parsed_diced_prompt_record || !Array.isArray(parsed_diced_prompt_record.ingredients)) {
+        return null;
+    }
+    return parsed_diced_prompt_record;
+}
+
+/**
+ * WHAT: Lazily loads the full Diced Prompt Master Record from SQLite when Face 3 is revealed on Search cards.
+ * WHY: search-data.json omits bulky diced prompt trees to keep initial download size under 20MB.
+ *      Fetching on-demand when the user rotates to Face 3 ensures cards display real ingredients and influences.
+ *
+ * @param {HTMLElement} card_element - Target card DOM node.
+ */
+async function ensureSearchCardDicedPromptLoaded(card_element) {
+    // WHAT: Guard against missing card elements or cards that already have their diced prompt rendered.
+    // WHY: Only cards still displaying the fallback `.dice-card-btn` placeholder need a live SQLite fetch.
+    if (!card_element) return;
+    const placeholder_dice_button = card_element.querySelector('.dice-card-btn');
+    if (!placeholder_dice_button) return;
+
+    const numeric_image_identifier = Number(card_element.dataset.id);
+    if (!Number.isFinite(numeric_image_identifier)) return;
+
+    // WHAT: Skip network fetch if the in-memory search record already holds a populated diced prompt object.
+    // WHY: Avoids redundant HTTP requests if the user flips back and forth between card faces.
+    const cached_image_record = findCachedImageRecordById(numeric_image_identifier);
+    if (cached_image_record && cached_image_record.diced_prompt && typeof cached_image_record.diced_prompt === 'object') {
         return;
     }
 
-    // Thumbnail Click
-    // Thumbnail Click
-    if (e.target.classList.contains('thumbnail-preview')) {
-        e.stopPropagation();
-        const fullPath = e.target.dataset.fullpath;
-        if (fullPath) showImagePreview(fullPath);
-    }
+    try {
+        // WHAT: Fetches the complete single-image record including `diced_prompt` from SQLite via Express.
+        // WHY: `GET /images?id=` joins `images` with `diced_prompts` to deliver the full Master Record.
+        const http_image_response = await fetch(`${API_BASE_URL}/images?id=${numeric_image_identifier}`);
+        if (!http_image_response.ok) return;
 
-    // Tag Click (Add to Filter)
-    const tagEl = e.target.closest('.tag.editable');
-    if (tagEl) {
-        e.stopPropagation();
-        const tagText = tagEl.dataset.tag;
-        const dataType = tagEl.dataset.type; // 'tags' or 'objects'
-        if (tagText) {
-            const filterType = dataType === 'objects' ? 'object' : 'tag';
-            addTagFilter(tagText, filterType);
+        const image_payload = await http_image_response.json();
+        const incoming_full_image_record = image_payload?.image;
+        const parsed_diced_prompt_record = parseValidatedDicedPromptRecord(incoming_full_image_record?.diced_prompt);
+        if (!parsed_diced_prompt_record) return;
+
+        if (cached_image_record) {
+            cached_image_record.diced_prompt = parsed_diced_prompt_record;
         }
-        return;
-    }
 
-    // Delete Button Click
-    if (e.target.closest('.delete-btn')) {
-        e.stopPropagation();
-        const btn = e.target.closest('.delete-btn');
-        const id = btn.dataset.id;
+        // WHAT: Replaces the Face 3 inner HTML in-place with the hydrated Diced Prompt Master Record.
+        // WHY: Updating only `.card-back-dicer` preserves the active 3D prism rotation without jarring re-layouts.
+        const dicer_face_element = card_element.querySelector('.card-back-dicer');
+        if (dicer_face_element) {
+            const cache_busting_timestamp_ms = (cached_image_record?.updated_at)
+                ? new Date(cached_image_record.updated_at).getTime()
+                : (cached_image_record?.created_at ? new Date(cached_image_record.created_at).getTime() : '');
+            const thumbnail_display_path = `thumbnails/id_${numeric_image_identifier}.avif${cache_busting_timestamp_ms ? '?t=' + cache_busting_timestamp_ms : ''}`;
+            const display_date_string = new Date(cached_image_record?.created_at || Date.now()).toLocaleDateString();
 
-        // To support disk delete, we need the full path.
-        const card = btn.closest('.card');
-        const fullPath = card.querySelector('.file-link').dataset.path;
+            const back_identity_header_html = buildCardBackIdentityHeaderHtml({
+                image_id: numeric_image_identifier,
+                display_path: thumbnail_display_path,
+                full_path: cached_image_record?.path || '',
+                filename_text: cached_image_record?.filename || '',
+                metadata_tooltip: cached_image_record?.path || '',
+                date_text: display_date_string,
+                width_text: cached_image_record?.width || 'N/A',
+                height_text: cached_image_record?.height || 'N/A',
+                is_eager: false
+            });
 
-        showDeleteModal(id, fullPath, card);
-    }
-
-    // Add Tag Button Click
-    if (e.target.closest('.add-tag-btn')) {
-        e.stopPropagation();
-        const btn = e.target.closest('.add-tag-btn');
-        const id = btn.dataset.id;
-        const type = btn.dataset.type; // 'tags' or 'objects'
-        showAddTagInput(id, type, btn);
-        return;
-    }
-
-    // NEW: Card Flip Toggle
-    const card = e.target.closest('.card');
-    if (card) {
-        // Only flip if we didn't click an interactive element
-        const isInteractive = e.target.closest('button, input, .file-link, .tag, .thumbnail-preview');
-        if (!isInteractive) {
-            card.classList.toggle('flipped');
+            dicer_face_element.innerHTML = `
+                ${back_identity_header_html}
+                ${renderDicedPromptBackDetailsHtml(cached_image_record || incoming_full_image_record, parsed_diced_prompt_record)}
+                <div style="margin-top: 0.85rem; text-align: center;">
+                    <button class="card-side-pill" data-target-side="1" style="border-color: var(--accent); color: var(--accent);">Back to Summary (1/3) ↻</button>
+                </div>
+            `;
         }
+    } catch (lazy_diced_load_error) {
+        console.warn(`[Search] Lazy diced prompt lookup failed for image #${numeric_image_identifier}:`, lazy_diced_load_error);
     }
-});
+}
 
-// Show Delete Modal (matches database.js)
-function showDeleteModal(id, fullPath, cardElement) {
-    const modal = document.createElement('div');
-    modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 9999;';
-    modal.innerHTML = `
-        <div style="background: var(--card-bg); padding: 2rem; border-radius: 12px; border: 1px solid var(--border); max-width: 500px; width: 90%;">
-            <h2 style="margin: 0 0 1rem 0; color: var(--text-primary);">Delete Image</h2>
-            <p style="margin: 0 0 1.5rem 0; color: var(--text-secondary);">How would you like to delete this image?</p>
-            <div style="display: flex; flex-direction: column; gap: 1rem;">
-                <button id="deleteDbBtn" style="background: transparent; border: 1px solid var(--accent); color: var(--accent); padding: 0.75rem; border-radius: 6px; cursor: pointer; font-weight: 500;">Delete from Database Only</button>
-                <button id="cancelBtn" style="background: #a1f0f0ff;border:2px solid var(--border);color: #240d00ff; font-size:2rem;font-weight:700;padding:1.75rem 1.75rem;border-radius:6px;cursor:pointer;margin-top:0.5rem;">Cancel</button>
-                <button id="deleteDiskBtn" style="background: #ef4444; border: none; color: white; padding: 0.75rem; border-radius: 6px; cursor: pointer; font-weight: 600;">Delete from Computer & Database</button>
-            </div>
-        </div>
-    `;
-    document.body.appendChild(modal);
+/**
+ * WHAT: Dices an image prompt on demand via `POST /api/dicer/dice` and re-renders its card in place.
+ * WHY: Matches Database card capability to run the prompt dicing pipeline directly from Face 3 while keeping 3D prism face intact.
+ *
+ * @param {string | number} target_image_identifier - Target image ID.
+ */
+async function diceSingleImageAndRefreshCard(target_image_identifier) {
+    const numeric_image_identifier = Number(target_image_identifier);
+    if (!Number.isFinite(numeric_image_identifier)) return;
 
-    // Cancel
-    modal.querySelector('#cancelBtn').onclick = () => modal.remove();
+    showToast(`🧩 Dicing prompt for image #${numeric_image_identifier} (Pass A–D)...`, 'info');
+    try {
+        const http_dice_response = await fetch(`${API_BASE_URL}/api/dicer/dice`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                image_id: numeric_image_identifier,
+                media_type: 'image',
+                run_pass_d: true
+            })
+        });
 
-    // DB Only
-    modal.querySelector('#deleteDbBtn').onclick = async () => {
-        modal.remove();
-        await deleteFromDatabase(id, cardElement);
-    };
+        if (!http_dice_response.ok) {
+            const error_payload = await http_dice_response.json();
+            throw new Error(error_payload.error || 'Dicing request failed');
+        }
 
-    // Disk & DB
-    modal.querySelector('#deleteDiskBtn').onclick = async () => {
-        if (!window.electronAPI || !window.electronAPI.trashFile) {
-            showAlertModal('Error: Electron API not available for file operations.', 'System Error');
+        const dice_payload = await http_dice_response.json();
+        const master_record = dice_payload.master_record;
+
+        const target_image_record = allImages.find(
+            single_image_record => Number(single_image_record.id) === numeric_image_identifier
+        );
+        if (target_image_record) {
+            target_image_record.diced_prompt = master_record;
+            if (dice_payload.updated_analysis) {
+                target_image_record.analysis = dice_payload.updated_analysis;
+            } else {
+                const parsed_analysis = (() => {
+                    if (typeof target_image_record.analysis !== 'string') {
+                        return target_image_record.analysis;
+                    }
+                    try {
+                        return JSON.parse(target_image_record.analysis || '{}');
+                    } catch (_analysis_parse_error) {
+                        return {};
+                    }
+                })();
+                target_image_record.analysis = { ...(parsed_analysis || {}), diced_prompt: master_record };
+            }
+
+            const existing_card_element = searchResults.querySelector(`.card[data-id="${numeric_image_identifier}"]`);
+            if (existing_card_element) {
+                const previous_side = existing_card_element.getAttribute('data-side') || '1';
+                const previous_spin_degrees = existing_card_element.getAttribute('data-spin-deg');
+                const updated_card_html = renderCardMarkup(
+                    target_image_record,
+                    measureSingleCardHeight(target_image_record)
+                );
+                const temporary_container = document.createElement('div');
+                temporary_container.innerHTML = updated_card_html;
+                const replacement_card_element = temporary_container.firstElementChild;
+                existing_card_element.replaceWith(replacement_card_element);
+                if (replacement_card_element) {
+                    applyCardSideState(replacement_card_element, previous_side, {
+                        instant: true,
+                        override_spin_degrees: previous_spin_degrees !== null ? Number(previous_spin_degrees) : null
+                    });
+                }
+            }
+        }
+
+        const total_ingredients_count = master_record.ingredients.length;
+        const concreteness_percentage = Math.round((Number(master_record.metrics?.physicality_ratio) || 0) * 100);
+        showToast(
+            `✓ Saved ${master_record.prompt_id} to images.db (${total_ingredients_count} ingredients, ${concreteness_percentage}% concrete)`,
+            'success'
+        );
+    } catch (dice_processing_error) {
+        console.error('[SEARCH-DICER] Error dicing image:', dice_processing_error);
+        showToast(`Dicing failed: ${dice_processing_error.message}`, 'error');
+    }
+}
+
+// ============================================================================
+// CARD DELEGATION & DELETION
+// ============================================================================
+
+if (searchResults) {
+    searchResults.addEventListener('click', async (click_event) => {
+        // 1. Navigation Pill Face Switch (Face 2 -> Face 3, Face 3 -> Face 1)
+        const side_pill_button = click_event.target.closest('.card-side-pill[data-target-side]');
+        if (side_pill_button) {
+            click_event.stopPropagation();
+            const parent_card = side_pill_button.closest('.card');
+            applyCardSideState(parent_card, side_pill_button.getAttribute('data-target-side'));
             return;
         }
 
-        try {
-            await window.electronAPI.trashFile(fullPath);
-            modal.remove();
-            await deleteFromDatabase(id, cardElement);
-        } catch (error) {
-            console.error('Error deleting file from disk:', error);
-            showAlertModal(`Failed to delete file from computer: ${error.message}`, 'File Error');
-            modal.remove();
+        // 2. Re-Dice Prompt Button on Face 3
+        const dice_button_element = click_event.target.closest('.dice-card-btn');
+        if (dice_button_element) {
+            click_event.stopPropagation();
+            const target_image_identifier = dice_button_element.dataset.id;
+            dice_button_element.disabled = true;
+            await diceSingleImageAndRefreshCard(target_image_identifier);
+            dice_button_element.disabled = false;
+            return;
         }
-    };
 
-    // Close on background click
-    modal.onclick = (e) => {
-        if (e.target === modal) modal.remove();
-    };
-}
-
-// Perform DB Deletion
-async function deleteFromDatabase(id, cardElement) {
-    try {
-        const response = await fetch(`${API_BASE_URL}/images/${id}`, {
-            method: 'DELETE'
-        });
-
-        if (response.ok || response.status === 404) {
-            cardElement.style.opacity = '0';
-            setTimeout(() => cardElement.remove(), 300);
-
-            // Update count
-            const countText = resultsCount.textContent;
-            const currentCount = parseInt(countText.match(/\d+/)[0]);
-            resultsCount.textContent = `Found ${Math.max(0, currentCount - 1)} results`;
-        } else {
-            showAlertModal('Failed to delete entry from database', 'Database Error');
+        // 3. Open in Prompt Dicer External Link
+        const open_dicer_link = click_event.target.closest('.open-dicer-link');
+        if (open_dicer_link) {
+            click_event.stopPropagation();
+            return;
         }
-    } catch (error) {
-        console.error('Error deleting from DB:', error);
-        showAlertModal('Failed to delete entry from database: ' + error.message, 'Database Error');
-    }
-}
 
-// ============================================================================
-// TAG MANAGEMENT
-// ============================================================================
-
-const contextMenu = document.getElementById('contextMenu');
-let ctxTarget = null; // { id, tag, type, card }
-
-function showContextMenu(e, id, type, tag = null, card = null) {
-    console.log('[DEBUG] showContextMenu called:', { id, type, tag });
-    ctxTarget = { id, type, tag, card };
-    contextMenu.style.display = 'block';
-
-
-
-    contextMenu.style.left = `${e.clientX}px`;
-    contextMenu.style.top = `${e.clientY}px`;
-
-    // Show/Hide Items
-    const regenItem = document.getElementById('ctxRegenThumb');
-    const editItem = document.getElementById('ctxEdit');
-    const deleteItem = document.getElementById('ctxDelete');
-    const renameItem = document.getElementById('ctxRename');
-    const editSummaryItem = document.getElementById('ctxEditSummary');
-    const reparseSummaryItem = document.getElementById('ctxReparseSummary');
-    const reAnalyzeItem = document.getElementById('ctxReAnalyze');
-
-    if (type === 'thumbnail') {
-        regenItem.style.display = 'block';
-        editItem.style.display = 'none';
-        deleteItem.style.display = 'none';
-        if (renameItem) renameItem.style.display = 'none';
-        if (editSummaryItem) editSummaryItem.style.display = 'none';
-    } else if (type === 'file') {
-        regenItem.style.display = 'none';
-        editItem.style.display = 'none';
-        deleteItem.style.display = 'none';
-        if (renameItem) renameItem.style.display = 'block';
-        if (editSummaryItem) editSummaryItem.style.display = 'none';
-    } else if (type === 'summary') {
-        regenItem.style.display = 'none';
-        editItem.style.display = 'none';
-        deleteItem.style.display = 'none';
-        if (renameItem) renameItem.style.display = 'none';
-        if (editSummaryItem) editSummaryItem.style.display = 'block';
-        if (reparseSummaryItem) reparseSummaryItem.style.display = 'block';
-        if (reAnalyzeItem) reAnalyzeItem.style.display = 'block';
-    } else {
-        regenItem.style.display = 'none';
-        editItem.style.display = 'block';
-        deleteItem.style.display = 'block';
-        if (renameItem) renameItem.style.display = 'none';
-        if (editSummaryItem) editSummaryItem.style.display = 'none';
-        if (reparseSummaryItem) reparseSummaryItem.style.display = 'none';
-        if (reAnalyzeItem) reAnalyzeItem.style.display = 'none';
-    }
-}
-
-function hideContextMenu() {
-    contextMenu.style.display = 'none';
-    ctxTarget = null;
-}
-
-// Global click to hide context menu
-document.addEventListener('click', (e) => {
-    hideContextMenu();
-});
-
-// Context Menu Event Listener (Handles both Thumbnails and Tags)
-document.addEventListener('contextmenu', (e) => {
-    // Thumbnail Right-Click
-    const thumb = e.target.closest('.thumbnail-preview');
-    if (thumb) {
-        e.preventDefault();
-        const card = thumb.closest('.card');
-        const id = card.dataset.id;
-        showContextMenu(e, id, 'thumbnail', null, card);
-        return;
-    }
-
-    // Tag Right-Click
-    const tagEl = e.target.closest('.tag.editable');
-    if (tagEl) {
-        e.preventDefault();
-        e.stopPropagation();
-        showContextMenu(e, tagEl.dataset.id, tagEl.dataset.type, tagEl.dataset.tag);
-        return;
-    }
-
-    // Filename Right-Click
-    const fileLink = e.target.closest('.file-link');
-    if (fileLink) {
-        e.preventDefault();
-        e.stopPropagation();
-        const card = fileLink.closest('.card');
-        const id = card.dataset.id;
-        const filename = fileLink.textContent.trim();
-        showContextMenu(e, id, 'file', filename, card);
-        console.log('Right clicked file');
-        return;
-    }
-
-    // Description Right-Click
-    const summaryEl = e.target.closest('.summary-text');
-    if (summaryEl) {
-        e.preventDefault();
-        e.stopPropagation();
-        const id = summaryEl.dataset.id;
-        // Try to get clean text from cache instead of scraping innerText
-        const matched_image_record = (allImages.find(single_image => single_image.id == id)) || 
-                    (window.currentSearchResults && window.currentSearchResults.find(single_image => single_image.id == id));
-        const text = matched_image_record ? matched_image_record.analysis.summary : summaryEl.innerText.replace('Copy', '').trim();
-        showContextMenu(e, id, 'summary', text);
-        return;
-    }
-
-    hideContextMenu();
-});
-
-// Generate Embeddings Action
-const generateEmbeddingsBtn = document.getElementById('generateEmbeddingsBtn');
-const genProgress = document.getElementById('genProgress');
-
-if (generateEmbeddingsBtn) {
-    generateEmbeddingsBtn.addEventListener('click', async () => {
-        showConfirmModal('This will generate embeddings for all images using llama-server. This may take a while. Ensure llama-server is running with an embedding model loaded. Continue?', async () => {
-
-            generateEmbeddingsBtn.disabled = true;
-            generateEmbeddingsBtn.textContent = 'Generating...';
-            if (genProgress) {
-                genProgress.style.display = 'block';
-                genProgress.textContent = 'Starting...';
-            }
-
+        // 4. Regenerate Thumbnail Button on Back Identity Header
+        const regen_thumb_button = click_event.target.closest('.regen-thumb-btn');
+        if (regen_thumb_button) {
+            click_event.stopPropagation();
+            const target_image_identifier = regen_thumb_button.dataset.id;
+            const parent_card = regen_thumb_button.closest('.card');
+            regen_thumb_button.disabled = true;
+            regen_thumb_button.textContent = '...';
             try {
-                const response = await fetch(`${API_BASE_URL}/maintenance/generate-embeddings`, { method: 'POST' });
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    const text = decoder.decode(value);
-                    // Update UI with latest chunk
-                    if (genProgress) {
-                        const current = genProgress.textContent;
-                        const combined = current + text;
-                        genProgress.textContent = combined.slice(-200); // Show trail
-                    }
+                const response = await fetch(`${API_BASE_URL}/regenerate-thumbnail`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: target_image_identifier })
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    const refreshed_thumbnail_url = `${data.thumbPath}?t=${Date.now()}`;
+                    parent_card.querySelectorAll('.thumbnail-preview').forEach((thumbnail_image_element) => {
+                        thumbnail_image_element.src = refreshed_thumbnail_url;
+                        thumbnail_image_element.style.display = 'block';
+                    });
+                    parent_card.querySelectorAll('.thumb-fallback').forEach((fallback_element) => {
+                        fallback_element.style.display = 'none';
+                    });
+                    showToast('Thumbnail regenerated', 'success');
+                } else {
+                    showToast('Failed to regenerate thumbnail', 'error');
                 }
-
-                showAlertModal('Generation Complete!', 'Embeddings');
-                refreshData(); // Reload worker to pick up new file
-                fetchEmbeddingsStatus(); // Refresh the "Last updated" display
-
-            } catch (err) {
-                console.error('Generation Error:', err);
-                showAlertModal('Error generating embeddings: ' + err.message, 'Generation Error');
+            } catch (regeneration_network_error) {
+                console.error('[SEARCH-REGEN] Error regenerating thumbnail:', regeneration_network_error);
+                showToast('Error regenerating thumbnail', 'error');
             } finally {
-                generateEmbeddingsBtn.disabled = false;
-                generateEmbeddingsBtn.textContent = 'Generate Data';
-                if (genProgress) setTimeout(() => genProgress.style.display = 'none', 5000);
+                regen_thumb_button.disabled = false;
+                regen_thumb_button.textContent = '🔄 Regen';
             }
-        }, 'Continue', 'var(--accent)');
+            return;
+        }
+
+        // 5. Copy AI Summary Text Button
+        const copy_button_element = click_event.target.closest('.copy-btn');
+        if (copy_button_element) {
+            click_event.stopPropagation();
+            const text_to_copy = copy_button_element.dataset.text;
+            if (text_to_copy) {
+                navigator.clipboard.writeText(text_to_copy).then(() => {
+                    const original_label_text = copy_button_element.textContent;
+                    copy_button_element.textContent = 'Copied!';
+                    copy_button_element.style.borderColor = 'var(--accent)';
+                    copy_button_element.style.color = 'var(--accent)';
+                    setTimeout(() => {
+                        copy_button_element.textContent = original_label_text;
+                        copy_button_element.style.borderColor = 'var(--border)';
+                        copy_button_element.style.color = 'var(--text-secondary)';
+                    }, 2000);
+                }).catch((clipboard_error) => {
+                    console.error('Failed to copy to clipboard', clipboard_error);
+                });
+            }
+            return;
+        }
+
+        // 6. Thumbnail Preview Lightbox
+        if (click_event.target.classList.contains('thumbnail-preview')) {
+            click_event.stopPropagation();
+            const full_filesystem_path = click_event.target.dataset.fullpath;
+            if (full_filesystem_path) showImagePreview(full_filesystem_path);
+            return;
+        }
+
+        // 7. Tag Chip Search Filtering
+        const tag_chip_element = click_event.target.closest('.tag.editable');
+        if (tag_chip_element) {
+            click_event.stopPropagation();
+            const tag_text_value = tag_chip_element.dataset.tag;
+            const data_collection_type = tag_chip_element.dataset.type;
+            if (tag_text_value) {
+                const filter_type = data_collection_type === 'objects' ? 'object' : 'tag';
+                addTagFilter(tag_text_value, filter_type);
+            }
+            return;
+        }
+
+        // 8. Delete Image Button
+        const delete_button_element = click_event.target.closest('.delete-btn');
+        if (delete_button_element) {
+            click_event.stopPropagation();
+            const image_identifier = delete_button_element.dataset.id;
+            const card_element = delete_button_element.closest('.card');
+            const full_filesystem_path = card_element?.querySelector('.file-link')?.dataset.path || '';
+            showDeleteModal(image_identifier, full_filesystem_path, card_element, deleteFromDatabase);
+            return;
+        }
+
+        // 9. Add Tag Button
+        const add_tag_button_element = click_event.target.closest('.add-tag-btn');
+        if (add_tag_button_element) {
+            click_event.stopPropagation();
+            const image_identifier = add_tag_button_element.dataset.id;
+            const tag_or_object_type = add_tag_button_element.dataset.type;
+            addTag(image_identifier, tag_or_object_type);
+            return;
+        }
+
+        // 10. Three-Sided Equilateral Card Prism Rotation: Side 1 (Summary) -> Side 2 (Tags) -> Side 3 (Dicer) -> Side 1
+        const card_element = click_event.target.closest('.card');
+        if (card_element) {
+            const is_interactive_target = click_event.target.closest('button, a, input, label, .file-link, .tag, .thumbnail-preview');
+            if (!is_interactive_target) {
+                const current_side = card_element.getAttribute('data-side') || (card_element.classList.contains('flipped') ? '2' : '1');
+                const next_side = current_side === '1' ? '2' : (current_side === '2' ? '3' : '1');
+                applyCardSideState(card_element, next_side);
+            }
+        }
+    });
+
+    searchResults.addEventListener('change', (change_event) => {
+        if (change_event.target.classList.contains('card-select-cb')) {
+            const image_identifier = change_event.target.dataset.id;
+            const card_element = change_event.target.closest('.card');
+            if (change_event.target.checked) {
+                selectedIds.add(String(image_identifier));
+                if (card_element) card_element.classList.add('selected');
+            } else {
+                selectedIds.delete(String(image_identifier));
+                if (card_element) card_element.classList.remove('selected');
+            }
+            updateProcessButton();
+        }
     });
 }
 
-// Embeddings Status Display
-const embeddingsStatusEl = document.getElementById('embeddingsStatus');
-
-async function fetchEmbeddingsStatus() {
-    if (!embeddingsStatusEl) return;
+/**
+ * WHAT: Deletes an image record via `DELETE /images/:id`, animates out its card, and updates the result count.
+ * WHY:  Passed as an explicit callback to `showDeleteModal` so modal UI remains decoupled from search state.
+ *
+ * @param {string | number} image_identifier - Target image ID.
+ * @param {HTMLElement} card_element - Card element to fade out and remove.
+ */
+async function deleteFromDatabase(image_identifier, card_element) {
     try {
-        const res = await fetch(`${API_BASE_URL}/api/embeddings-status`);
-        if (!res.ok) throw new Error('Failed to fetch status');
-        const data = await res.json();
+        const http_response = await fetch(`${API_BASE_URL}/images/${image_identifier}`, {
+            method: 'DELETE'
+        });
 
-        if (data.exists && data.count > 0) {
-            const date = new Date(data.lastModified);
-            const formatted = date.toLocaleDateString(undefined, {
-                year: 'numeric', month: 'short', day: 'numeric',
-                hour: '2-digit', minute: '2-digit'
-            });
-            const sizeMB = (data.sizeBytes / (1024 * 1024)).toFixed(1);
-            embeddingsStatusEl.innerHTML = `<span style="color: var(--accent);">●</span> ${data.count.toLocaleString()} embeddings · ${sizeMB} MB · Updated ${formatted}`;
+        if (http_response.ok || http_response.status === 404) {
+            if (card_element) {
+                card_element.style.opacity = '0';
+                setTimeout(() => card_element.remove(), 300);
+            }
+
+            if (resultsCount) {
+                const count_match = resultsCount.textContent.match(/\d+/);
+                const current_count = count_match ? parseInt(count_match[0], 10) : 0;
+                resultsCount.textContent = `Found ${Math.max(0, current_count - 1)} results`;
+            }
         } else {
-            embeddingsStatusEl.innerHTML = `<span style="color: var(--text-secondary);">○</span> No embeddings generated yet. Click "Generate Data" to enable Hybrid & Semantic search.`;
+            showAlertModal('Failed to delete entry from database', 'Database Error');
         }
-    } catch (e) {
-        embeddingsStatusEl.textContent = '';
+    } catch (delete_error) {
+        console.error('Error deleting from DB:', delete_error);
+        showAlertModal('Failed to delete entry from database: ' + delete_error.message, 'Database Error');
     }
 }
 
-// Fetch on page load
-fetchEmbeddingsStatus();
+// ============================================================================
+// CONTEXT MENU & INLINE METADATA EDITING
+// ============================================================================
 
-// Rename Action
+/**
+ * WHAT: Positions and displays the custom right-click context menu for thumbnails, tags, files, or summaries.
+ * WHY:  Reveals only the menu actions relevant to the right-clicked target type.
+ */
+function showContextMenu(pointer_event, image_identifier, target_type, target_value = null, card_element = null) {
+    if (!contextMenu) return;
+    context_menu_target_state = {
+        id: image_identifier,
+        type: target_type,
+        tag: target_value,
+        card: card_element
+    };
+    contextMenu.style.display = 'block';
+    contextMenu.style.left = `${pointer_event.clientX}px`;
+    contextMenu.style.top = `${pointer_event.clientY}px`;
+
+    const regen_item = document.getElementById('ctxRegenThumb');
+    const edit_item = document.getElementById('ctxEdit');
+    const delete_item = document.getElementById('ctxDelete');
+    const rename_item = document.getElementById('ctxRename');
+    const edit_summary_item = document.getElementById('ctxEditSummary');
+    const reparse_summary_item = document.getElementById('ctxReparseSummary');
+    const reanalyze_item = document.getElementById('ctxReAnalyze');
+
+    if (target_type === 'thumbnail') {
+        if (regen_item) regen_item.style.display = 'block';
+        if (edit_item) edit_item.style.display = 'none';
+        if (delete_item) delete_item.style.display = 'none';
+        if (rename_item) rename_item.style.display = 'none';
+        if (edit_summary_item) edit_summary_item.style.display = 'none';
+    } else if (target_type === 'file') {
+        if (regen_item) regen_item.style.display = 'none';
+        if (edit_item) edit_item.style.display = 'none';
+        if (delete_item) delete_item.style.display = 'none';
+        if (rename_item) rename_item.style.display = 'block';
+        if (edit_summary_item) edit_summary_item.style.display = 'none';
+    } else if (target_type === 'summary') {
+        if (regen_item) regen_item.style.display = 'none';
+        if (edit_item) edit_item.style.display = 'none';
+        if (delete_item) delete_item.style.display = 'none';
+        if (rename_item) rename_item.style.display = 'none';
+        if (edit_summary_item) edit_summary_item.style.display = 'block';
+        if (reparse_summary_item) reparse_summary_item.style.display = 'block';
+        if (reanalyze_item) reanalyze_item.style.display = 'block';
+    } else {
+        if (regen_item) regen_item.style.display = 'none';
+        if (edit_item) edit_item.style.display = 'block';
+        if (delete_item) delete_item.style.display = 'block';
+        if (rename_item) rename_item.style.display = 'none';
+        if (edit_summary_item) edit_summary_item.style.display = 'none';
+        if (reparse_summary_item) reparse_summary_item.style.display = 'none';
+        if (reanalyze_item) reanalyze_item.style.display = 'none';
+    }
+}
+
+/**
+ * WHAT: Hides the context menu and clears the active target state.
+ * WHY:  Prevents stale right-click targets from persisting after menu dismissal.
+ */
+function hideContextMenu() {
+    if (contextMenu) contextMenu.style.display = 'none';
+    context_menu_target_state = null;
+}
+
+document.addEventListener('click', () => {
+    hideContextMenu();
+});
+
+document.addEventListener('contextmenu', (contextmenu_event) => {
+    const thumbnail_element = contextmenu_event.target.closest('.thumbnail-preview');
+    if (thumbnail_element) {
+        contextmenu_event.preventDefault();
+        const card_element = thumbnail_element.closest('.card');
+        showContextMenu(contextmenu_event, card_element.dataset.id, 'thumbnail', null, card_element);
+        return;
+    }
+
+    const tag_chip_element = contextmenu_event.target.closest('.tag.editable');
+    if (tag_chip_element) {
+        contextmenu_event.preventDefault();
+        contextmenu_event.stopPropagation();
+        showContextMenu(
+            contextmenu_event,
+            tag_chip_element.dataset.id,
+            tag_chip_element.dataset.type,
+            tag_chip_element.dataset.tag
+        );
+        return;
+    }
+
+    const file_link_element = contextmenu_event.target.closest('.file-link');
+    if (file_link_element) {
+        contextmenu_event.preventDefault();
+        contextmenu_event.stopPropagation();
+        const card_element = file_link_element.closest('.card');
+        const filename_string = file_link_element.textContent.trim();
+        showContextMenu(contextmenu_event, card_element.dataset.id, 'file', filename_string, card_element);
+        return;
+    }
+
+    const summary_text_element = contextmenu_event.target.closest('.summary-text');
+    if (summary_text_element) {
+        contextmenu_event.preventDefault();
+        contextmenu_event.stopPropagation();
+        const image_identifier = summary_text_element.dataset.id;
+        const matched_image_record = findCachedImageRecordById(image_identifier);
+        const summary_string = matched_image_record
+            ? matched_image_record.analysis.summary
+            : summary_text_element.innerText.replace('Copy', '').trim();
+        showContextMenu(contextmenu_event, image_identifier, 'summary', summary_string);
+        return;
+    }
+
+    hideContextMenu();
+});
+
+/**
+ * WHAT: Looks up an image record across `allImages` or `window.currentSearchResults` by ID.
+ * WHY:  Avoids duplicating cache lookup logic across summary editing, reparsing, re-analyzing, and tag updates.
+ *
+ * @param {string | number} image_identifier - Target image ID.
+ * @returns {Record<string, any> | null} Matched image record or `null`.
+ */
+function findCachedImageRecordById(image_identifier) {
+    return (
+        allImages.find((single_image_record) => single_image_record.id == image_identifier) ||
+        (window.currentSearchResults &&
+            window.currentSearchResults.find((single_image_record) => single_image_record.id == image_identifier)) ||
+        null
+    );
+}
+
+/**
+ * WHAT: Updates an image's cached analysis across `allImages`, `currentSearchResults`, and `filteredImages`,
+ *       then re-renders the visible DOM card in place.
+ * WHY:  Keeps all client-side caches synchronized with server updates without a full grid reload.
+ *
+ * @param {string | number} image_identifier - Target image ID.
+ * @param {Record<string, any>} updated_analysis_record - Normalized analysis payload.
+ * @param {string | undefined} [updated_at_timestamp] - Optional updated timestamp.
+ */
+function syncImageAnalysisInCachesAndDom(image_identifier, updated_analysis_record, updated_at_timestamp = undefined) {
+    const master_image_record = allImages.find((single_image_record) => single_image_record.id == image_identifier);
+    const result_image_record = window.currentSearchResults
+        ? window.currentSearchResults.find((single_image_record) => single_image_record.id == image_identifier)
+        : null;
+    const filtered_image_record = filteredImages
+        ? filteredImages.find((single_image_record) => single_image_record.id == image_identifier)
+        : null;
+
+    [master_image_record, result_image_record, filtered_image_record].forEach((cached_record) => {
+        if (cached_record) {
+            cached_record.analysis = updated_analysis_record;
+            if (updated_at_timestamp) cached_record.updated_at = updated_at_timestamp;
+        }
+    });
+
+    const target_image_record = master_image_record || result_image_record || filtered_image_record;
+    const card_element = document.querySelector(`.card[data-id="${image_identifier}"]`);
+    if (card_element && target_image_record) {
+        const previous_side = card_element.getAttribute('data-side') || '1';
+        const previous_spin_degrees = card_element.getAttribute('data-spin-deg');
+        const temporary_container = document.createElement('div');
+        temporary_container.innerHTML = renderCardMarkup(target_image_record, measureSingleCardHeight(target_image_record));
+        const replacement_card_element = temporary_container.firstElementChild;
+        card_element.replaceWith(replacement_card_element);
+        if (replacement_card_element) {
+            applyCardSideState(replacement_card_element, previous_side, {
+                instant: true,
+                override_spin_degrees: previous_spin_degrees !== null ? Number(previous_spin_degrees) : null
+            });
+        }
+    }
+}
+
+// ============================================================================
+// CONTEXT MENU ACTION HANDLERS
+// ============================================================================
+
 const ctxRename = document.getElementById('ctxRename');
 if (ctxRename) {
-    ctxRename.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (!ctxTarget) return;
-        const { id, tag: currentFilename } = ctxTarget;
+    ctxRename.addEventListener('click', (click_event) => {
+        click_event.stopPropagation();
+        if (!context_menu_target_state) return;
+        const { id: image_identifier, tag: current_filename } = context_menu_target_state;
         hideContextMenu();
 
-        // Strip extension for easier renaming
-        const currentBase = currentFilename.substring(0, currentFilename.lastIndexOf('.')) || currentFilename;
+        const current_base_name = current_filename.substring(0, current_filename.lastIndexOf('.')) || current_filename;
 
-        showTagInputModal('Rename File', currentBase, async (newName) => {
-            if (!newName || newName === currentBase) return;
+        showTagInputModal('Rename File', current_base_name, async (entered_new_name) => {
+            if (!entered_new_name || entered_new_name === current_base_name) return;
 
-            // Basic validation
-            if (newName.match(/[<>:"\/\\|?*]/)) {
+            if (entered_new_name.match(/[<>:"\/\\|?*]/)) {
                 showAlertModal('Invalid characters in filename. Avoid: < > : " / \\ | ? *', 'Invalid Name');
                 return;
             }
 
             try {
-                const res = await fetch(`${API_BASE_URL}/rename`, {
+                const http_response = await fetch(`${API_BASE_URL}/rename`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id, newFilename: newName })
+                    body: JSON.stringify({ id: image_identifier, newFilename: entered_new_name })
                 });
 
-                if (!res.ok) {
-                    const err = await res.json();
-                    throw new Error(err.error || 'Rename failed');
+                if (!http_response.ok) {
+                    const error_payload = await http_response.json();
+                    throw new Error(error_payload.error || 'Rename failed');
                 }
 
-                const data = await res.json();
-
-                // Update UI locally
-                const card = document.querySelector(`.card[data-id="${id}"]`);
-                if (card) {
-                    const fileLink = card.querySelector('.file-link');
-                    if (fileLink) {
-                        fileLink.textContent = data.newFilename;
-                        fileLink.dataset.path = data.newPath;
+                const rename_payload = await http_response.json();
+                const card_element = document.querySelector(`.card[data-id="${image_identifier}"]`);
+                if (card_element) {
+                    const file_link_element = card_element.querySelector('.file-link');
+                    if (file_link_element) {
+                        file_link_element.textContent = rename_payload.newFilename;
+                        file_link_element.dataset.path = rename_payload.newPath;
                     }
-                    // Search specific: update cache if needed
-                    const matched_image_record = allImages.find(single_image => single_image.id == id);
-                    if (img) {
-                        img.filename = data.newFilename;
-                        img.path = data.newPath;
+                    const matched_image_record = findCachedImageRecordById(image_identifier);
+                    if (matched_image_record) {
+                        matched_image_record.filename = rename_payload.newFilename;
+                        matched_image_record.path = rename_payload.newPath;
                     }
                 }
-            } catch (err) {
-                showAlertModal('Rename Error: ' + err.message, 'Rename error');
+            } catch (rename_error) {
+                showAlertModal('Rename Error: ' + rename_error.message, 'Rename error');
             }
         });
     });
 }
 
-// Thumbnail Regen Action
-document.getElementById('ctxRegenThumb').addEventListener('click', async () => {
-    if (!ctxTarget || ctxTarget.type !== 'thumbnail') return;
-    const { id, card } = ctxTarget;
-    hideContextMenu();
-    await regenerateThumbnail(id, card);
-});
+const ctxRegenThumb = document.getElementById('ctxRegenThumb');
+if (ctxRegenThumb) {
+    ctxRegenThumb.addEventListener('click', async () => {
+        if (!context_menu_target_state || context_menu_target_state.type !== 'thumbnail') return;
+        const { id: image_identifier, card: card_element } = context_menu_target_state;
+        hideContextMenu();
+        await regenerateThumbnail(image_identifier, card_element);
+    });
+}
 
-// Find Similar Action
 const ctxFindSimilar = document.getElementById('ctxFindSimilar');
 if (ctxFindSimilar) {
     ctxFindSimilar.addEventListener('click', () => {
-        if (!ctxTarget) return;
-        const { id } = ctxTarget;
+        if (!context_menu_target_state) return;
+        const { id: image_identifier } = context_menu_target_state;
         hideContextMenu();
-        findSimilar(id);
+        findSimilar(image_identifier);
     });
 }
 
-// Context Menu Actions
-document.getElementById('ctxEdit').addEventListener('click', (e) => {
-    e.stopPropagation(); // Prevent document click from hiding menu before we read ctxTarget
-    if (!ctxTarget) return;
-    const { id, tag, type } = ctxTarget;
-    hideContextMenu();
+const ctxEdit = document.getElementById('ctxEdit');
+if (ctxEdit) {
+    ctxEdit.addEventListener('click', (click_event) => {
+        click_event.stopPropagation();
+        if (!context_menu_target_state) return;
+        const { id: image_identifier, tag: original_tag_value, type: tag_collection_type } = context_menu_target_state;
+        hideContextMenu();
 
-    showTagInputModal(`Edit ${type.slice(0, -1)}`, tag, (newTag) => {
-        if (newTag && newTag.trim() !== tag) {
-            updateTag(id, type, tag, newTag.trim(), 'edit');
-        }
-    });
-});
-
-document.getElementById('ctxDelete').addEventListener('click', (e) => {
-    e.stopPropagation(); // Prevent document click from hiding menu before we read ctxTarget
-    if (!ctxTarget) return;
-    const { id, tag, type } = ctxTarget;
-    hideContextMenu();
-
-    showConfirmModal(`Delete "${tag}"?`, () => {
-        updateTag(id, type, tag, null, 'delete');
-    });
-});
-
-document.getElementById('ctxEditSummary').addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (!ctxTarget) return;
-    const { id, tag: currentSummary } = ctxTarget;
-    hideContextMenu();
-
-    showSummaryInputModal('Edit Description', currentSummary, (newSummary) => {
-        if (newSummary !== null && newSummary.trim() !== currentSummary) {
-            updateTag(id, 'summary', currentSummary, newSummary.trim(), 'edit');
-        }
-    });
-});
-
-document.getElementById('ctxReparseSummary').addEventListener('click', async (e) => {
-    e.stopPropagation();
-    if (!ctxTarget) return;
-    const { id } = ctxTarget;
-    hideContextMenu();
-
-    try {
-        const response = await fetch(`${API_BASE_URL}/reparse-analysis`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id })
+        showTagInputModal(`Edit ${tag_collection_type.slice(0, -1)}`, original_tag_value, (entered_new_tag) => {
+            if (entered_new_tag && entered_new_tag.trim() !== original_tag_value) {
+                updateTag(image_identifier, tag_collection_type, original_tag_value, entered_new_tag.trim(), 'edit');
+            }
         });
+    });
+}
 
-        const data = await response.json();
-        if (data.success) {
-            // Update local cache
-            const img = (allImages.find(i => i.id == id)) || 
-                        (window.currentSearchResults && window.currentSearchResults.find(i => i.id == id));
-            if (img) img.analysis = data.analysis;
+const ctxDelete = document.getElementById('ctxDelete');
+if (ctxDelete) {
+    ctxDelete.addEventListener('click', (click_event) => {
+        click_event.stopPropagation();
+        if (!context_menu_target_state) return;
+        const { id: image_identifier, tag: target_tag_value, type: tag_collection_type } = context_menu_target_state;
+        hideContextMenu();
 
-            // In-Place UI Update
-            const card = document.querySelector(`.card[data-id="${id}"]`);
-            if (card) {
-                card.outerHTML = createResultHtml(img, measureSingleCardHeight(img));
-            }
-            
-            showAlertModal('Successfully recovered tags and objects from processed description!', 'Success');
-        } else {
-            showAlertModal(data.message || 'Description could not be reparsed.', 'Reparse Failed');
-        }
-    } catch (error) {
-        showAlertModal('Error connecting to server for reparse.', 'Error');
-    }
-});
-
-document.getElementById('ctxReAnalyze').addEventListener('click', async (e) => {
-    e.stopPropagation();
-    if (!ctxTarget) return;
-    const { id } = ctxTarget;
-    hideContextMenu();
-
-    // Show a "Processing" message because AI can take time
-    const loadingModal = document.createElement('div');
-    loadingModal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10000; color: white; font-weight: bold; flex-direction: column; gap: 1rem;';
-    loadingModal.innerHTML = '<div>🔍 Analyzing Image...</div><div style="font-size: 0.8rem; font-weight: normal;">This may take a few seconds</div>';
-    document.body.appendChild(loadingModal);
-
-    try {
-        const response = await fetch(`${API_BASE_URL}/re-analyze`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id })
+        showConfirmModal(`Delete "${target_tag_value}"?`, () => {
+            updateTag(image_identifier, tag_collection_type, target_tag_value, null, 'delete');
         });
+    });
+}
 
-        const data = await response.json();
-        loadingModal.remove();
+const ctxEditSummary = document.getElementById('ctxEditSummary');
+if (ctxEditSummary) {
+    ctxEditSummary.addEventListener('click', (click_event) => {
+        click_event.stopPropagation();
+        if (!context_menu_target_state) return;
+        const { id: image_identifier, tag: current_summary_text } = context_menu_target_state;
+        hideContextMenu();
 
-        if (data.success) {
-            // Update local cache
-            const img = (allImages.find(i => i.id == id)) || 
-                        (window.currentSearchResults && window.currentSearchResults.find(i => i.id == id));
-            if (img) {
-                img.analysis = data.analysis;
-                img.updated_at = data.updated_at;
+        showSummaryInputModal('Edit Description', current_summary_text, (entered_new_summary) => {
+            if (entered_new_summary !== null && entered_new_summary.trim() !== current_summary_text) {
+                updateTag(image_identifier, 'summary', current_summary_text, entered_new_summary.trim(), 'edit');
             }
+        });
+    });
+}
 
-            // In-Place UI Update
-            const card = document.querySelector(`.card[data-id="${id}"]`);
-            if (card) {
-                card.outerHTML = createResultHtml(img, measureSingleCardHeight(img));
+const ctxReparseSummary = document.getElementById('ctxReparseSummary');
+if (ctxReparseSummary) {
+    ctxReparseSummary.addEventListener('click', async (click_event) => {
+        click_event.stopPropagation();
+        if (!context_menu_target_state) return;
+        const { id: image_identifier } = context_menu_target_state;
+        hideContextMenu();
+
+        try {
+            const http_response = await fetch(`${API_BASE_URL}/reparse-analysis`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: image_identifier })
+            });
+
+            const reparse_payload = await http_response.json();
+            if (reparse_payload.success) {
+                syncImageAnalysisInCachesAndDom(image_identifier, reparse_payload.analysis);
+                showAlertModal('Successfully recovered tags and objects from processed description!', 'Success');
+            } else {
+                showAlertModal(reparse_payload.message || 'Description could not be reparsed.', 'Reparse Failed');
             }
-            
-            // Success indicator (optional, maybe just visual update is enough)
-        } else {
-            showAlertModal(data.error || 'Re-analysis failed.', 'Error');
-        }
-    } catch (error) {
-        loadingModal.remove();
-        console.error('Re-analyze error:', error);
-        showAlertModal('Error connecting to server for re-analysis.', 'Error');
-    }
-});
-
-// Add Tag Logic
-async function addTag(id, type) {
-    showTagInputModal(`Add new ${type.slice(0, -1)}`, '', (newTag) => {
-        if (newTag && newTag.trim()) {
-            updateTag(id, type, null, newTag.trim(), 'add');
+        } catch (_reparse_error) {
+            showAlertModal('Error connecting to server for reparse.', 'Error');
         }
     });
 }
 
-// Custom Input Modal (Replaces prompt)
-// WHAT: Creates and displays a modal dialog prompting the user to input or edit a tag value.
-// WHY: We replace native browser prompts with a beautiful, accessible modal dialogue. To ensure security,
-// all dynamic parameter strings like the title or initial tag name are HTML-escaped using our central utility
-// before being injected into the HTML template, preventing any script injection payloads from executing.
-function showTagInputModal(modal_dialogue_title_text, initial_input_field_value_text, tag_submission_callback_function) {
-    // WHAT: Creating the modal container element and styling it to cover the entire screen viewport.
-    // WHY: A full-screen overlay backdrop blocks underlying interactions and focuses user attention on the input task.
-    const tag_input_modal_container_element = document.createElement('div');
-    tag_input_modal_container_element.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 9999;';
+const ctxReAnalyze = document.getElementById('ctxReAnalyze');
+if (ctxReAnalyze) {
+    ctxReAnalyze.addEventListener('click', async (click_event) => {
+        click_event.stopPropagation();
+        if (!context_menu_target_state) return;
+        const { id: image_identifier } = context_menu_target_state;
+        hideContextMenu();
 
-    // WHAT: Safely escaping our inputs and rendering the modal HTML markup structure.
-    // WHY: We HTML-escape both the title text and the initial field value using `escapeHtmlCharacters`
-    // to shield the application from Cross-Site Scripting (XSS) in case they contain malicious tag strings.
-    const escaped_modal_dialogue_title_text = escapeHtmlCharacters(modal_dialogue_title_text);
-    const escaped_initial_input_field_value_text = escapeHtmlCharacters(initial_input_field_value_text);
+        const loading_modal_element = document.createElement('div');
+        loading_modal_element.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10000; color: white; font-weight: bold; flex-direction: column; gap: 1rem;';
+        loading_modal_element.innerHTML = '<div>🔍 Analyzing Image...</div><div style="font-size: 0.8rem; font-weight: normal;">This may take a few seconds</div>';
+        document.body.appendChild(loading_modal_element);
 
-    tag_input_modal_container_element.innerHTML = `
-        <div style="background: var(--card-bg); padding: 2rem; border-radius: 12px; border: 1px solid var(--border); max-width: 400px; width: 90%;">
-            <h3 style="margin: 0 0 1rem 0; color: var(--text-primary);">${escaped_modal_dialogue_title_text}</h3>
-            <input type="text" id="tagInput" value="${escaped_initial_input_field_value_text}" style="width: 100%; padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary); margin-bottom: 1.5rem; font-size: 1rem;">
-            <div style="display: flex; gap: 1rem; justify-content: flex-end;">
-                <button id="cancelTagBtn" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer;">Cancel</button>
-                <button id="saveTagBtn" style="background: var(--accent); border: none; color: white; padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; font-weight: 500;">Save</button>
-            </div>
-        </div>
-    `;
+        try {
+            const http_response = await fetch(`${API_BASE_URL}/re-analyze`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: image_identifier })
+            });
 
-    // WHAT: Appending our new modal dialogue structure to the document body.
-    // WHY: The element must be attached to the active document DOM tree to render visually.
-    document.body.appendChild(tag_input_modal_container_element);
+            const reanalyze_payload = await http_response.json();
+            loading_modal_element.remove();
 
-    // WHAT: Querying and retrieving references to the inner interactive modal DOM elements.
-    // WHY: We need precise control over the text input and action buttons to wire up click and keystroke behaviors.
-    const text_input_field_element = tag_input_modal_container_element.querySelector('#tagInput');
-    const save_changes_button_element = tag_input_modal_container_element.querySelector('#saveTagBtn');
-    const cancel_changes_button_element = tag_input_modal_container_element.querySelector('#cancelTagBtn');
-
-    // WHAT: Defining the keydown event listener to close the modal dialogue when Escape is pressed.
-    // WHY: Pressing the Escape key is a universal web accessibility pattern to close dismissible overlays easily.
-    const keyboard_event_handler_function = (keyboard_event_object) => {
-        if (keyboard_event_object.key === 'Escape') {
-            cleanup_modal_and_remove_event_listeners();
-        }
-    };
-    document.addEventListener('keydown', keyboard_event_handler_function);
-
-    // WHAT: Removing keyboard event listeners and destroying the modal container element from the DOM.
-    // WHY: Cleanup prevents memory leaks and ensures that obsolete keyboard listeners do not persist in the global document context.
-    const cleanup_modal_and_remove_event_listeners = () => {
-        document.removeEventListener('keydown', keyboard_event_handler_function);
-        tag_input_modal_container_element.remove();
-    };
-
-    // WHAT: Extracting the input text, cleaning up modal DOM structures, and returning the value back through the callback trigger.
-    // WHY: We collect the final user input, close the overlay, and invoke the caller's success logic with the entered string.
-    const save_input_value_and_trigger_callback = () => {
-        const retrieved_input_value_string = text_input_field_element.value;
-        cleanup_modal_and_remove_event_listeners();
-        tag_submission_callback_function(retrieved_input_value_string);
-    };
-
-    // WHAT: Setting a minor delay to focus and highlight the text input field automatically.
-    // WHY: Directing user focus to the primary input element immediately upon rendering enhances the overall user experience.
-    setTimeout(() => {
-        text_input_field_element.focus();
-        text_input_field_element.select();
-    }, 10);
-
-    save_changes_button_element.onclick = save_input_value_and_trigger_callback;
-    cancel_changes_button_element.onclick = cleanup_modal_and_remove_event_listeners;
-
-    // WHAT: Binding an Enter keypress listener specifically on the text input field to submit values directly.
-    // WHY: Pressing Enter inside single-line form input fields is a standard user expectation for submitting values quickly.
-    text_input_field_element.addEventListener('keydown', (keyboard_event_object) => {
-        if (keyboard_event_object.key === 'Enter') {
-            keyboard_event_object.preventDefault();
-            keyboard_event_object.stopPropagation();
-            save_input_value_and_trigger_callback();
+            if (reanalyze_payload.success) {
+                syncImageAnalysisInCachesAndDom(
+                    image_identifier,
+                    reanalyze_payload.analysis,
+                    reanalyze_payload.updated_at
+                );
+            } else {
+                showAlertModal(reanalyze_payload.error || 'Re-analysis failed.', 'Error');
+            }
+        } catch (reanalyze_error) {
+            loading_modal_element.remove();
+            console.error('Re-analyze error:', reanalyze_error);
+            showAlertModal('Error connecting to server for re-analysis.', 'Error');
         }
     });
-
-    // WHAT: Binding a click handler on the backdrop itself to dismiss the modal dialogue.
-    // WHY: Clicking outside the dialog boundary represents an intuitive, secondary way to dismiss or cancel the modal overlay.
-    tag_input_modal_container_element.onclick = (mouse_click_event_object) => {
-        if (mouse_click_event_object.target === tag_input_modal_container_element) {
-            cleanup_modal_and_remove_event_listeners();
-        }
-    };
-}
-
-// Custom Textarea Modal for Summaries
-// WHAT: Creates and displays a larger modal dialog containing a textarea for editing image summary descriptions.
-// WHY: The AI-generated summaries can be long, requiring a multiline textarea. To ensure security,
-// all dynamic parameter strings like the title or initial summary value are HTML-escaped using our central utility
-// before being injected into the HTML template, preventing XSS injection if a summary contains HTML elements.
-function showSummaryInputModal(modal_dialogue_title_text, initial_text_area_value_text, summary_submission_callback_function) {
-    // WHAT: Creating the modal container element and styling it as a dark full-screen backdrop.
-    // WHY: A full-screen backdrop helps isolate the user's focus on the summary editing task.
-    const summary_input_modal_container_element = document.createElement('div');
-    summary_input_modal_container_element.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 9999;';
-
-    // WHAT: Safely HTML-escaping dynamic parameters to prevent XSS.
-    // WHY: Escaping shields the application from script injection in case an AI-generated description contains markup.
-    const escaped_modal_dialogue_title_text = escapeHtmlCharacters(modal_dialogue_title_text);
-    const escaped_initial_text_area_value_text = escapeHtmlCharacters(initial_text_area_value_text);
-
-    summary_input_modal_container_element.innerHTML = `
-        <div style="background: var(--card-bg); padding: 2rem; border-radius: 12px; border: 1px solid var(--border); max-width: 600px; width: 90%;">
-            <h3 style="margin: 0 0 1rem 0; color: var(--text-primary);">${escaped_modal_dialogue_title_text}</h3>
-            <textarea id="summaryInput" style="width: 100%; height: 200px; padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary); margin-bottom: 1.5rem; font-size: 0.9rem; line-height: 1.4; font-family: inherit; resize: vertical;">${escaped_initial_text_area_value_text}</textarea>
-            <div style="display: flex; gap: 1rem; justify-content: flex-end;">
-                <button id="cancelSummaryBtn" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer;">Cancel</button>
-                <button id="saveSummaryBtn" style="background: var(--accent); border: none; color: white; padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; font-weight: 500;">Save Changes</button>
-            </div>
-        </div>
-    `;
-
-    // WHAT: Appending the new modal container structure to the document body.
-    // WHY: The overlay must be added to the live DOM tree to become visible.
-    document.body.appendChild(summary_input_modal_container_element);
-
-    // WHAT: Querying and retrieving references to inner interactive input and action elements.
-    // WHY: We need access to these elements to bind listeners and extract values.
-    const summary_text_area_input_element = summary_input_modal_container_element.querySelector('#summaryInput');
-    const save_summary_changes_button_element = summary_input_modal_container_element.querySelector('#saveSummaryBtn');
-    const cancel_summary_changes_button_element = summary_input_modal_container_element.querySelector('#cancelSummaryBtn');
-
-    // WHAT: Declaring keyboard handler function to close modal on Escape keypress.
-    // WHY: Allows accessible keyboard navigation to dismiss overlay easily.
-    const keyboard_event_handler_function = (keyboard_event_object) => {
-        if (keyboard_event_object.key === 'Escape') {
-            cleanup_modal_and_remove_event_listeners();
-        }
-    };
-    document.addEventListener('keydown', keyboard_event_handler_function);
-
-    // WHAT: Deleting backdrop overlay and clearing document-level keyboard listeners.
-    // WHY: Teardown prevents memory leaks and active event handler conflicts.
-    const cleanup_modal_and_remove_event_listeners = () => {
-        document.removeEventListener('keydown', keyboard_event_handler_function);
-        summary_input_modal_container_element.remove();
-    };
-
-    // WHAT: Fetching input summary text, cleaning up elements, and firing success callback.
-    // WHY: Returns the updated multiline summary string back to the database update action.
-    const save_summary_value_and_trigger_callback = () => {
-        const retrieved_summary_value_string = summary_text_area_input_element.value;
-        cleanup_modal_and_remove_event_listeners();
-        summary_submission_callback_function(retrieved_summary_value_string);
-    };
-
-    // WHAT: Setting a microsecond timeout to focus and place the cursor at the end of the text.
-    // WHY: Puts the user in the edit flow immediately and positions the cursor at the end of existing text.
-    setTimeout(() => {
-        summary_text_area_input_element.focus();
-        summary_text_area_input_element.setSelectionRange(summary_text_area_input_element.value.length, summary_text_area_input_element.value.length);
-    }, 10);
-
-    save_summary_changes_button_element.onclick = save_summary_value_and_trigger_callback;
-    cancel_summary_changes_button_element.onclick = cleanup_modal_and_remove_event_listeners;
-
-    // WHAT: Permitting backdrop clicks to dismiss summary modal dialogue.
-    // WHY: Replicates standard web modal interface expectations.
-    summary_input_modal_container_element.onclick = (mouse_click_event_object) => {
-        if (mouse_click_event_object.target === summary_input_modal_container_element) {
-            cleanup_modal_and_remove_event_listeners();
-        }
-    };
-}
-
-// Custom Confirmation Modal (Replaces native confirm)
-async function showIntegrityCheckModal() {
-    return new Promise((resolve) => {
-        const modal = document.createElement('div');
-        modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; z-index: 10000; backdrop-filter: blur(4px);';
-
-        modal.innerHTML = `
-            <div style="background: var(--bg-secondary); padding: 2.5rem; border-radius: 16px; border: 1px solid var(--border); max-width: 450px; width: 90%; box-shadow: 0 20px 50px rgba(0,0,0,0.5);">
-                <h3 style="margin: 0 0 1.5rem 0; color: var(--accent); font-size: 1.5rem; display: flex; align-items: center; gap: 0.75rem;">
-                    <span>🛡️</span> Database Integrity Check
-                </h3>
-                
-                <p style="color: var(--text-secondary); margin-bottom: 2rem; font-size: 0.95rem; line-height: 1.5;">
-                    Select the tasks you would like to perform during the maintenance pass:
-                </p>
-
-                <div style="display: flex; flex-direction: column; gap: 1.25rem; margin-bottom: 2.5rem;">
-                    <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer; padding: 0.5rem; border-radius: 8px; transition: background 0.2s; hover: background: rgba(255,255,255,0.05);">
-                        <input type="checkbox" id="icRemoveMissing" checked style="width: 18px; height: 18px; accent-color: var(--accent);">
-                        <div>
-                            <div style="color: var(--text-primary); font-weight: 500;">Remove Missing Files</div>
-                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Delete database records for files no longer on disk.</div>
-                        </div>
-                    </label>
-
-                    <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer; padding: 0.5rem; border-radius: 8px; transition: background 0.2s;">
-                        <input type="checkbox" id="icRepairMetadata" checked style="width: 18px; height: 18px; accent-color: var(--accent);">
-                        <div>
-                            <div style="color: var(--text-primary); font-weight: 500;">Repair Metadata</div>
-                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Fix missing dimensions, resolution, and file size data.</div>
-                        </div>
-                    </label>
-
-                    <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer; padding: 0.5rem; border-radius: 8px; transition: background 0.2s;">
-                        <input type="checkbox" id="icRegenThumb" checked style="width: 18px; height: 18px; accent-color: var(--accent);">
-                        <div>
-                            <div style="color: var(--text-primary); font-weight: 500;">Regenerate Thumbnails</div>
-                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Rebuild missing thumbnails using the new unique ID scheme.</div>
-                        </div>
-                    </label>
-
-                    <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer; padding: 1rem; border-radius: 8px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2);">
-                        <input type="checkbox" id="icPurgeThumb" style="width: 18px; height: 18px; accent-color: #ef4444;">
-                        <div>
-                            <div style="color: #ef4444; font-weight: 600;">Purge Legacy Thumbnails</div>
-                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Wipe all old thumbnails to fix collisions. (Recommended)</div>
-                        </div>
-                    </label>
-                </div>
-
-                <div style="display: flex; gap: 1rem; justify-content: flex-end;">
-                    <button id="icCancelBtn" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.6rem 1.25rem; border-radius: 8px; cursor: pointer; font-weight: 500;">Cancel</button>
-                    <button id="icRunBtn" style="background: var(--accent); border: none; color: white; padding: 0.6rem 2rem; border-radius: 8px; cursor: pointer; font-weight: 600;">Run Check</button>
-                </div>
-            </div>
-        `;
-
-        document.body.appendChild(modal);
-
-        modal.querySelector('#icCancelBtn').onclick = () => {
-            modal.remove();
-            resolve(null);
-        };
-
-        modal.querySelector('#icRunBtn').onclick = () => {
-            const options = {
-                removeMissing: modal.querySelector('#icRemoveMissing').checked,
-                repairMetadata: modal.querySelector('#icRepairMetadata').checked,
-                regenThumbnails: modal.querySelector('#icRegenThumb').checked,
-                purgeThumbnails: modal.querySelector('#icPurgeThumb').checked
-            };
-            modal.remove();
-            resolve(options);
-        };
-    });
-}
-
-// WHAT: Creates, styles, and presents a customized double-confirmation modal dialogue overlay.
-// WHY: We replace standard browser alert or confirm prompts with beautiful UI elements. By escaping
-// all dynamic strings (message and confirm text) using `escapeHtmlCharacters`, we prevent potential
-// XSS vulnerabilities if filenames or user metadata contain embedded script blocks.
-function showConfirmModal(dialogue_message_text, action_on_confirmation_callback, action_confirm_button_text = 'Delete', action_confirm_button_color_hex = '#ef4444') {
-    // WHAT: Creating the modal container backdrop overlay.
-    // WHY: Viewport cover creates a clean dark backdrop focusing attention on the choice.
-    const confirmation_modal_container_element = document.createElement('div');
-    confirmation_modal_container_element.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;';
-
-    // WHAT: Safely escaping variable texts to block XSS and rendering the HTML skeleton.
-    // WHY: Escaping ensures that even if filenames contain custom script tags, they are rendered safely as textual content.
-    const escaped_dialogue_message_text = escapeHtmlCharacters(dialogue_message_text);
-    const escaped_action_confirm_button_text = escapeHtmlCharacters(action_confirm_button_text);
-
-    confirmation_modal_container_element.innerHTML = `
-        <div style="background: linear-gradient(135deg, var(--card-bg) 0%, ${action_confirm_button_color_hex === '#ef4444' ? '#450a0a' : '#064e3b'} 100%); padding: 2rem; border-radius: 12px; border: 2px solid ${action_confirm_button_color_hex}; max-width: 400px; width: 90%; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,0.7);">
-            <p style="margin: 0 0 1.5rem 0; color: var(--text-primary); font-size: 1.1rem; line-height: 1.4;">${escaped_dialogue_message_text}</p>
-            <div style="display: flex; gap: 1rem; justify-content: center;">
-                <button id="cancelConfirmBtn" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.5rem 1.5rem; border-radius: 6px; cursor: pointer; transition: background 0.2s;">Cancel</button>
-                <button id="okConfirmBtn" style="background: ${action_confirm_button_color_hex}; border: none; color: white; padding: 0.5rem 1.5rem; border-radius: 6px; cursor: pointer; font-weight: 600; box-shadow: 0 4px 12px ${action_confirm_button_color_hex}44; transition: transform 0.1s, filter 0.2s;">${escaped_action_confirm_button_text}</button>
-            </div>
-        </div>
-    `;
-
-    // WHAT: Rendering our dynamic container element to the document viewport structure.
-    // WHY: Elements must be added to the live document DOM structure to register visible layout nodes.
-    document.body.appendChild(confirmation_modal_container_element);
-
-    const ok_confirmation_action_button_element = confirmation_modal_container_element.querySelector('#okConfirmBtn');
-    const cancel_confirmation_action_button_element = confirmation_modal_container_element.querySelector('#cancelConfirmBtn');
-
-    // WHAT: Forcing input focus to the active confirmation trigger button.
-    // WHY: Setting default keyboard focus on the main action item ensures quick keyboard-only accessibility.
-    setTimeout(() => {
-        ok_confirmation_action_button_element.focus();
-    }, 10);
-
-    // WHAT: Dismantling the modal overlay and cleaning up registered document keyboard event listeners.
-    // WHY: Proper cleanups avoid resource bloats and unreferenced listener remnants in global page scopes.
-    const cleanup_modal_and_remove_event_listeners = () => {
-        document.removeEventListener('keydown', keyboard_event_handler_function);
-        confirmation_modal_container_element.remove();
-    };
-
-    // WHAT: Closing the modal first, then launching the supplied success function task.
-    // WHY: Executing callbacks after teardowns ensures clean DOM sequences and prevents double-triggers.
-    const execute_confirmed_action_callback = () => {
-        cleanup_modal_and_remove_event_listeners();
-        action_on_confirmation_callback();
-    };
-
-    ok_confirmation_action_button_element.onclick = execute_confirmed_action_callback;
-    cancel_confirmation_action_button_element.onclick = cleanup_modal_and_remove_event_listeners;
-
-    // WHAT: Permitting modal dismissal via click overlays on the backdrop element.
-    // WHY: Off-dialogue clicks represent an intuitive secondary path for dismissing choices.
-    confirmation_modal_container_element.onclick = (mouse_click_event_object) => {
-        if (mouse_click_event_object.target === confirmation_modal_container_element) {
-            cleanup_modal_and_remove_event_listeners();
-        }
-    };
-
-    // WHAT: Capturing global Enter and Escape keyboard keystrokes inside the modal dialogue.
-    // WHY: Enter triggers swift submission, whereas Escape aborts the overlay safely.
-    const keyboard_event_handler_function = (keyboard_event_object) => {
-        if (keyboard_event_object.key === 'Enter') {
-            keyboard_event_object.preventDefault();
-            execute_confirmed_action_callback();
-        } else if (keyboard_event_object.key === 'Escape') {
-            keyboard_event_object.preventDefault();
-            cleanup_modal_and_remove_event_listeners();
-        }
-    };
-
-    document.addEventListener('keydown', keyboard_event_handler_function);
-}
-
-// Custom Alert Modal (Replaces native alert)
-// WHAT: Creates, styles, and presents a customized alert dialogue box to replace native browser alerts.
-// WHY: Custom modals provide a more integrated user interface and look extremely premium. By escaping the
-// dynamic text parameters (title text and body message text) using `escapeHtmlCharacters`, we completely prevent
-// XSS vulnerabilities if the message contains user-supplied inputs or dynamic error logs containing HTML.
-function showAlertModal(alert_dialogue_body_message_text, alert_dialogue_header_title_text = 'Notification', on_ok_action_callback_function = null) {
-    // WHAT: Creating the modal container backdrop overlay element.
-    // WHY: Overlay visually blurs and darkens background sections, highlighting the modal dialogue context.
-    const alert_modal_container_element = document.createElement('div');
-    alert_modal_container_element.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;';
-
-    // WHAT: HTML-escaping the title and message strings to block injection exploits.
-    // WHY: Neutralizes any embedded script or tags, rendering them as standard text literals.
-    const escaped_alert_dialogue_header_title_text = escapeHtmlCharacters(alert_dialogue_header_title_text);
-    const escaped_alert_dialogue_body_message_text = escapeHtmlCharacters(alert_dialogue_body_message_text);
-
-    alert_modal_container_element.innerHTML = `
-        <div style="background: var(--card-bg); padding: 2rem; border-radius: 12px; border: 1px solid var(--border); max-width: 400px; width: 90%; text-align: center;">
-            <h3 style="margin: 0 0 1rem 0; color: var(--text-primary);">${escaped_alert_dialogue_header_title_text}</h3>
-            <p style="margin: 0 0 1.5rem 0; color: var(--text-primary); font-size: 1.1rem;">${escaped_alert_dialogue_body_message_text}</p>
-            <div style="display: flex; gap: 1rem; justify-content: center;">
-                <button id="okAlertBtn" style="background: var(--accent); border: none; color: white; padding: 0.5rem 1.5rem; border-radius: 6px; cursor: pointer; font-weight: 500;">OK</button>
-            </div>
-        </div>
-    `;
-
-    // WHAT: Injecting the alert modal element nodes into the main document body context.
-    // WHY: Nodes must belong to the active DOM layout hierarchy to render visually.
-    document.body.appendChild(alert_modal_container_element);
-
-    const ok_alert_button_element = alert_modal_container_element.querySelector('#okAlertBtn');
-
-    // WHAT: Directing user navigation focus directly onto the primary interactive OK confirm trigger button.
-    // WHY: Setting direct keyboard focus ensures excellent page accessibility for non-mouse users.
-    setTimeout(() => {
-        ok_alert_button_element.focus();
-    }, 10);
-
-    // WHAT: Dismantling the modal elements and removing the global keyboard keydown listener block.
-    // WHY: Teardowns ensure no garbage references or obsolete listeners clutter page scopes.
-    const cleanup_modal_and_remove_event_listeners = () => {
-        document.removeEventListener('keydown', keyboard_event_handler_function);
-        alert_modal_container_element.remove();
-        if (on_ok_action_callback_function) {
-            on_ok_action_callback_function();
-        }
-    };
-
-    ok_alert_button_element.onclick = cleanup_modal_and_remove_event_listeners;
-
-    // WHAT: Allowing click overlays on the outer backdrop container to close or dismiss alert prompts.
-    // WHY: Backdrop dismissal matches user interaction expectations on clean web dialog layouts.
-    alert_modal_container_element.onclick = (mouse_click_event_object) => {
-        if (mouse_click_event_object.target === alert_modal_container_element) {
-            cleanup_modal_and_remove_event_listeners();
-        }
-    };
-
-    // WHAT: Capturing general Enter and Escape keyboard keystrokes to submit alert screens.
-    // WHY: High accessibility demands fast keyboard navigation patterns to skip alerts.
-    const keyboard_event_handler_function = (keyboard_event_object) => {
-        if (keyboard_event_object.key === 'Enter' || keyboard_event_object.key === 'Escape') {
-            keyboard_event_object.preventDefault();
-            cleanup_modal_and_remove_event_listeners();
-        }
-    };
-
-    document.addEventListener('keydown', keyboard_event_handler_function);
 }
 
 /**
- * @function showBulkRenameModal
- * @description Creates an interactive HTML overlay for renaming search results.
- * 
- * DESIGN RATIONALE:
- * - Uses modern CSS for a premium "dark mode" aesthetic.
- * - Provides a scrollable preview of targeted files for user confidence.
- * - Handles 'Enter' and 'Escape' keys for efficiency.
- * 
- * @param {Set} selectedIdsSet - The unique IDs of the checked images.
- * @param {Array} imagesArray - The master list of image metadata.
- * @returns {Promise<string|null>} Resolves with the new base name or null if aborted.
+ * WHAT: Prompts the user to enter a new tag or object and submits it via `updateTag`.
+ * WHY:  Wires the `+` button on card backs cleanly to `showTagInputModal`.
+ *
+ * @param {string | number} image_identifier - Target image ID.
+ * @param {'tags' | 'objects'} tag_collection_type - Target metadata array.
  */
-// WHAT: Creates, configures, and displays the batch rename modal dialogue.
-// WHY: Batch file renames are high-impact metadata operations. We construct a scrollable visual list of targeted
-// filenames. To prevent XSS injection, all targeted filenames and recent rename chip values are HTML-escaped
-// using `escapeHtmlCharacters` before rendering. All variables are written according to the `can_be_long` protocol.
-function showBulkRenameModal(selected_image_ids_set, cached_images_metadata_array) {
-    return new Promise((promise_resolution_handler_function) => {
-        // WHAT: Creating the modal container backdrop overlay element.
-        // WHY: Overlays isolate user attention and block background document interactions.
-        const bulk_rename_backdrop_element = document.createElement('div');
-        bulk_rename_backdrop_element.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;';
-
-        // WHAT: Converting set IDs to human-readable filenames and escaping each to block script injection.
-        // WHY: Filenames are loaded dynamically from filesystems and databases, presenting an XSS threat if rendered unescaped.
-        const retrieved_target_filenames_list = Array.from(selected_image_ids_set).map((each_image_id_string) => {
-            const matched_image_metadata_object = cached_images_metadata_array.find((each_cached_image) => {
-                return String(each_cached_image.id) === each_image_id_string;
-            });
-            const filename_string_value = matched_image_metadata_object ? matched_image_metadata_object.filename : `Image #${each_image_id_string}`;
-            return escapeHtmlCharacters(filename_string_value);
-        });
-
-        // WHAT: Building scrollable list item HTML tags safely.
-        // WHY: Limits preview list to 100 entries to prevent memory and DOM lag on large batch operations.
-        const compiled_preview_list_items_html_string = retrieved_target_filenames_list.slice(0, 100).map((escaped_filename_item) => `
-            <li style="padding: 0.25rem 0; border-bottom: 1px solid rgba(255,255,255,0.05); color: var(--text-secondary); font-size: 0.85rem; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                📄 ${escaped_filename_item}
-            </li>
-        `).join('');
-
-        const compiled_overflow_indicator_html_string = retrieved_target_filenames_list.length > 100 
-            ? `<li style="padding: 0.25rem 0; color: #a78bfa; font-size: 0.8rem; text-align: center;">...and ${retrieved_target_filenames_list.length - 100} more</li>` 
-            : '';
-
-        bulk_rename_backdrop_element.innerHTML = `
-            <div style="background: linear-gradient(135deg, var(--card-bg) 0%, #1e1b4b 100%); padding: 2rem; border-radius: 12px; border: 2px solid #8b5cf6; max-width: 450px; width: 90%; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,0.7);">
-                <h3 style="margin: 0 0 0.5rem 0; color: var(--text-primary); font-size: 1.25rem;">Bulk Rename Results</h3>
-                <p style="margin: 0 0 1rem 0; color: #c4b5fd; font-size: 0.9rem;">Targeting ${selected_image_ids_set.size} selected image(s).</p>
-                
-                <div style="background: rgba(0,0,0,0.3); border: 1px solid #4c1d95; border-radius: 6px; padding: 0.5rem; margin-bottom: 1.5rem; max-height: 150px; overflow-y: auto;">
-                    <ul style="list-style: none; padding: 0; margin: 0;">
-                        ${compiled_preview_list_items_html_string}
-                        ${compiled_overflow_indicator_html_string}
-                    </ul>
-                </div>
-
-                <div style="margin-bottom: 1.5rem; text-align: left;">
-                    <label style="display: block; color: #a78bfa; font-size: 0.85rem; margin-bottom: 0.5rem;">New Base Name (e.g. "coffee")</label>
-                    
-                    ${(() => {
-                        const list_of_recent_renames_array = getRecentRenames();
-                        if (list_of_recent_renames_array.length === 0) {
-                            return '';
-                        }
-                        return `
-                            <div id="recentRenamesContainer" style="margin-bottom: 0.75rem; display: flex; flex-wrap: wrap; gap: 0.4rem; padding: 0.5rem; background: rgba(0,0,0,0.2); border-radius: 6px; border: 1px dashed rgba(167, 139, 250, 0.3);">
-                                <span style="font-size: 0.7rem; color: #8b5cf6; width: 100%; margin-bottom: 0.2rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Recent:</span>
-                                ${list_of_recent_renames_array.map((each_recent_name_string) => {
-                                    const escaped_recent_name_string = escapeHtmlCharacters(each_recent_name_string);
-                                    return `
-                                        <span class="recent-rename-chip" 
-                                              style="background: rgba(139, 92, 246, 0.15); border: 1px solid rgba(139, 92, 246, 0.3); color: #c4b5fd; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; cursor: pointer; transition: all 0.2s;"
-                                              onmouseover="this.style.background='rgba(139, 92, 246, 0.3)'; this.style.borderColor='#8b5cf6';"
-                                              onmouseout="this.style.background='rgba(139, 92, 246, 0.15)'; this.style.borderColor='rgba(139, 92, 246, 0.3)';"
-                                              onclick="document.getElementById('renameBaseInput').value = '${escaped_recent_name_string.replace(/'/g, "\\'")}'; document.getElementById('renameBaseInput').focus();">
-                                            ${escaped_recent_name_string}
-                                        </span>
-                                    `;
-                                }).join('')}
-                            </div>
-                        `;
-                    })()}
-
-                    <input type="text" id="renameBaseInput" placeholder="Enter base name..." style="width: 100%; padding: 0.75rem; border-radius: 6px; border: 1px solid #4c1d95; background: var(--bg-color); color: var(--text-primary); font-size: 1rem; outline: none; box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);">
-                    <p style="margin: 0.5rem 0 0 0; color: #8b5cf6; font-size: 0.75rem;">Fills gaps in sequence automatically: coffee_001, etc.</p>
-                </div>
-
-                <div style="display: flex; gap: 1rem; justify-content: flex-end;">
-                    <button id="cancelRenameBtn" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.5rem 1.5rem; border-radius: 6px; cursor: pointer; transition: all 0.2s;">Cancel</button>
-                    <button id="goRenameBtn" style="background: #8b5cf6; border: none; color: white; padding: 0.5rem 1.5rem; border-radius: 6px; cursor: pointer; font-weight: 500; transition: background 0.2s;">Go</button>
-                </div>
-            </div>
-        `;
-
-        document.body.appendChild(bulk_rename_backdrop_element);
-
-        const text_input_field_element = bulk_rename_backdrop_element.querySelector('#renameBaseInput');
-        const confirm_action_button_element = bulk_rename_backdrop_element.querySelector('#goRenameBtn');
-        const cancel_action_button_element = bulk_rename_backdrop_element.querySelector('#cancelRenameBtn');
-
-        // WHAT: Automatically focusing the input text field after display rendering delay.
-        // WHY: Guides user navigation seamlessly to start typing without requiring manual cursor clicks.
-        setTimeout(() => {
-            text_input_field_element.focus();
-        }, 50);
-
-        // WHAT: Standardizing modal closing logic and cleanups.
-        // WHY: Removes structural events and element trees from active page memories when resolving promises.
-        const close_modal_and_resolve_promise_action = (final_entered_value_string) => {
-            document.removeEventListener('keydown', keyboard_event_handler_function);
-            bulk_rename_backdrop_element.remove();
-            promise_resolution_handler_function(final_entered_value_string);
-        };
-
-        const validate_and_submit_changes_action = () => {
-            const trimmed_input_value_string = text_input_field_element.value.trim();
-            if (trimmed_input_value_string) {
-                close_modal_and_resolve_promise_action(trimmed_input_value_string);
-            } else {
-                // Flash border color in red to denote missing required text field values
-                text_input_field_element.style.border = '1px solid #ef4444';
-                setTimeout(() => {
-                    text_input_field_element.style.border = '1px solid var(--border)';
-                }, 1000);
-            }
-        };
-
-        confirm_action_button_element.onclick = validate_and_submit_changes_action;
-        cancel_action_button_element.onclick = () => {
-            close_modal_and_resolve_promise_action(null);
-        };
-
-        // WHAT: Capturing general keystrokes specifically inside document contexts.
-        // WHY: Intercepts Escape and Enter keypress mappings for accessible navigation controls.
-        const keyboard_event_handler_function = (keyboard_event_object) => {
-            if (keyboard_event_object.key === 'Escape') {
-                keyboard_event_object.preventDefault();
-                close_modal_and_resolve_promise_action(null);
-            } else if (keyboard_event_object.key === 'Enter') {
-                keyboard_event_object.preventDefault();
-                validate_and_submit_changes_action();
-            }
-        };
-
-        document.addEventListener('keydown', keyboard_event_handler_function);
-        
-        cancel_action_button_element.onmouseover = () => {
-            cancel_action_button_element.style.background = 'rgba(255,255,255,0.05)';
-        };
-        cancel_action_button_element.onmouseout = () => {
-            cancel_action_button_element.style.background = 'transparent';
-        };
-        confirm_action_button_element.onmouseover = () => {
-            confirm_action_button_element.style.filter = 'brightness(1.1)';
-        };
-        confirm_action_button_element.onmouseout = () => {
-            confirm_action_button_element.style.filter = 'brightness(1)';
-        };
+async function addTag(image_identifier, tag_collection_type) {
+    showTagInputModal(`Add new ${tag_collection_type.slice(0, -1)}`, '', (entered_new_tag) => {
+        if (entered_new_tag && entered_new_tag.trim()) {
+            updateTag(image_identifier, tag_collection_type, null, entered_new_tag.trim(), 'add');
+        }
     });
 }
 
-// Update Tag Backend Call
-async function updateTag(id, type, oldTag, newTag, action) {
+/**
+ * WHAT: Applies an immutable tag, object, or summary edit via pure `deduplicateAndNormalizeAnalysisRecord`,
+ *       persists to `/update-tags`, and updates local caches and DOM.
+ * WHY:  Eliminates in-place array mutations on cached image objects while keeping UI responsive.
+ */
+async function updateTag(image_identifier, target_field_type, old_tag_value, new_tag_value, edit_action) {
     try {
-        // 1. Update master list (allImages)
-        const masterImage = allImages.find(single_image_record => single_image_record.id == id);
+        const target_image_record = findCachedImageRecordById(image_identifier);
+        if (!target_image_record) throw new Error('Image not found in any local cache');
 
-        // 2. Update current search results (if exists)
-        const resultImage = window.currentSearchResults ? window.currentSearchResults.find(single_image_record => single_image_record.id == id) : null;
+        const base_analysis_record = target_image_record.analysis || {};
+        let draft_analysis_record;
 
-        const image = masterImage || resultImage;
-        if (!image) throw new Error('Image not found in any local cache');
-
-        let analysis = image.analysis || {};
-
-        if (type === 'summary') {
-            analysis.summary = newTag; // Here newTag is actually the new description
+        if (target_field_type === 'summary') {
+            draft_analysis_record = {
+                ...base_analysis_record,
+                summary: new_tag_value
+            };
         } else {
-            let list = analysis[type] || [];
-            if (action === 'edit') {
-                const idx = list.indexOf(oldTag);
-                if (idx !== -1) list[idx] = newTag;
-            } else if (action === 'delete') {
-                list = list.filter(t => t !== oldTag);
-            } else if (action === 'add') {
-                if (!list.includes(newTag)) list.push(newTag);
+            const current_items_list = Array.isArray(base_analysis_record[target_field_type])
+                ? base_analysis_record[target_field_type].slice()
+                : [];
+            let next_items_list = current_items_list;
+
+            if (edit_action === 'edit') {
+                next_items_list = current_items_list.map((existing_item) =>
+                    existing_item === old_tag_value ? new_tag_value : existing_item
+                );
+            } else if (edit_action === 'delete') {
+                next_items_list = current_items_list.filter((existing_item) => existing_item !== old_tag_value);
+            } else if (edit_action === 'add' && !current_items_list.includes(new_tag_value)) {
+                next_items_list = [...current_items_list, new_tag_value];
             }
-            analysis[type] = list; // Update the list
+
+            draft_analysis_record = {
+                ...base_analysis_record,
+                [target_field_type]: next_items_list
+            };
         }
 
-        // Standardize and cleanup
-        deduplicateTags(analysis);
+        const normalized_analysis_record = deduplicateAndNormalizeAnalysisRecord(draft_analysis_record);
 
-        // Update BOTH references to ensure consistency
-        if (masterImage) masterImage.analysis = analysis;
-        if (resultImage) resultImage.analysis = analysis;
-
-        // Also update filteredImages if it exists (for pagination consistency)
-        const filteredImage = filteredImages ? filteredImages.find(single_image_record => single_image_record.id == id) : null;
-        if (filteredImage) filteredImage.analysis = analysis;
-
-        // 3. Send update to server
-        const response = await fetch(`${API_BASE_URL}/update-tags`, {
+        const http_response = await fetch(`${API_BASE_URL}/update-tags`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id, analysis })
+            body: JSON.stringify({ id: image_identifier, analysis: normalized_analysis_record })
         });
 
-        if (!response.ok) throw new Error('Update failed');
+        if (!http_response.ok) throw new Error('Update failed');
 
-        // Refresh stats list
         loadStats();
 
-        // 4. In-Place UI Update
-        const card = document.querySelector(`.card[data-id="${id}"]`);
-        if (card) {
-            // Re-render only the inner content to preserve card structure if needed, 
-            // but createResultHtml returns a full card string.
-            // Let's replace the whole card's content or outer if simpler.
-            const newHtml = createResultHtml(image, measureSingleCardHeight(image));
-            card.outerHTML = newHtml;
+        const card_element = document.querySelector(`.card[data-id="${image_identifier}"]`);
+        if (card_element) {
+            syncImageAnalysisInCachesAndDom(image_identifier, normalized_analysis_record);
         } else {
-            // Fallback for extreme cases (shouldn't happen if card is visible)
             await executeSearchQuery();
         }
-
-    } catch (error) {
-        console.error('Tag update error:', error);
-        showAlertModal('Failed to update tags: ' + error.message, 'Tag Update Error');
+    } catch (tag_update_error) {
+        console.error('Tag update error:', tag_update_error);
+        showAlertModal('Failed to update tags: ' + tag_update_error.message, 'Tag Update Error');
     }
 }
 
-
 // ============================================================================
-// IMAGE PREVIEW POPUP
+// STATS & THUMBNAIL REGENERATION
 // ============================================================================
-// Shows full-size image in a modal overlay
-async function showImagePreview(imagePath) {
-    try {
-        console.log('[IMAGE PREVIEW] Path from search:', imagePath);
 
-        // Read the file using Electron API
-        const fileBuffer = await window.electronAPI.readFile(imagePath);
-        const blob = new Blob([fileBuffer]);
-        const url = URL.createObjectURL(blob);
-
-        // Create modal overlay
-        const modal = document.createElement('div');
-        modal.style.cssText = `
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            background: rgba(0,0,0,0.95);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 10000;
-            cursor: pointer;
-            overflow: hidden;
-        `;
-
-        // Create image element
-        const modal_lightbox_image_element = document.createElement('img');
-        modal_lightbox_image_element.src = url;
-        modal_lightbox_image_element.style.cssText = `
-            max-width: 95vw;
-            max-height: 95vh;
-            width: auto;
-            height: auto;
-            object-fit: contain;
-            border-radius: 8px;
-            cursor: default;
-            box-shadow: 0 0 50px rgba(0,0,0,0.5);
-        `;
-
-        // Error handling
-        modal_lightbox_image_element.onerror = () => {
-            console.error('Failed to load image:', imagePath);
-            modal.remove();
-            URL.revokeObjectURL(url);
-            showAlertModal('Failed to load image', 'Preview Error');
-        };
-
-        modal.appendChild(img);
-
-        // Create hint element
-        const hint = document.createElement('div');
-        hint.textContent = 'PRESS ANY KEY or Click anywhere TO EXIT';
-        hint.style.cssText = `
-            position: absolute;
-            top: 2rem;
-            left: 50%;
-            transform: translateX(-50%);
-            color: rgba(255,255,255,0.5);
-            font-size: 0.9rem;
-            letter-spacing: 0.05em;
-            text-transform: uppercase;
-            pointer-events: none;
-            background: rgba(0,0,0,0.3);
-            padding: 0.5rem 1rem;
-            border-radius: 20px;
-        `;
-        modal.appendChild(hint);
-
-        document.body.appendChild(modal);
-
-        // Close on background click (and image click since we removed stopPropagation)
-        modal.addEventListener('click', () => {
-            modal.remove();
-            URL.revokeObjectURL(url);
-            document.removeEventListener('keydown', keyHandler);
-        });
-
-        // Close on any key press
-        const keyHandler = (e) => {
-            modal.remove();
-            URL.revokeObjectURL(url);
-            document.removeEventListener('keydown', keyHandler);
-        };
-        document.addEventListener('keydown', keyHandler);
-
-    } catch (error) {
-        console.error('[IMAGE PREVIEW] Error loading image:', error);
-        showAlertModal(`Image File Not Found!\n\nPath: ${imagePath}\n\nThe file may have been moved or the path may be incorrect.`, 'File Error');
-    }
-}
-
-// Load Stats
+/**
+ * WHAT: Fetches `/stats` to populate top discovery tags/objects and autocomplete catalogs.
+ * WHY:  Keeps sidebar tag clouds and autocomplete suggestions up to date after edits.
+ */
 async function loadStats() {
     try {
-        const response = await fetch(`${API_BASE_URL}/stats`);
-        if (!response.ok) throw new Error('Failed to fetch stats');
+        const http_response = await fetch(`${API_BASE_URL}/stats`);
+        if (!http_response.ok) throw new Error('Failed to fetch stats');
 
-        const stats = await response.json();
+        const stats_payload = await http_response.json();
+        const top_tags_list_element = document.getElementById('topTagsList');
+        const top_objects_list_element = document.getElementById('topObjectsList');
 
-        // Render Tags
-        const topTagsList = document.getElementById('topTagsList');
-        // Store for autocomplete
-        allKnownTags = stats.tags || [];
-        allKnownObjects = stats.objects || [];
+        allKnownTags = stats_payload.tags || [];
+        allKnownObjects = stats_payload.objects || [];
 
-        if (stats.tags.length === 0) {
-            topTagsList.innerHTML = '<span style="color: var(--text-secondary); font-size: 0.9rem;">No tags found</span>';
-        } else {
-            topTagsList.innerHTML = stats.tags.slice(0, 20).map(tag => {
-                const safeName = tag.name.replace(/'/g, "\\'");
-                return `
-                    <span class="tag" style="cursor: pointer;" onclick="setSearchQuery('${safeName}')">
-                        #${tag.name} <span style="opacity: 0.6; font-size: 0.8em;">(${tag.count})</span>
-                    </span>
-                `;
-            }).join('');
+        if (top_tags_list_element) {
+            if (allKnownTags.length === 0) {
+                top_tags_list_element.innerHTML = '<span style="color: var(--text-secondary); font-size: 0.9rem;">No tags found</span>';
+            } else {
+                top_tags_list_element.innerHTML = allKnownTags.slice(0, 20).map((tag_entry) => {
+                    const safe_escaped_attribute = escapeHtmlCharacters(tag_entry.name).replace(/'/g, "\\'");
+                    return `
+                        <span class="tag" style="cursor: pointer;" onclick="setSearchQuery('${safe_escaped_attribute}')">
+                            #${escapeHtmlCharacters(tag_entry.name)} <span style="opacity: 0.6; font-size: 0.8em;">(${tag_entry.count})</span>
+                        </span>
+                    `;
+                }).join('');
+            }
         }
 
-        // Render Objects
-        const topObjectsList = document.getElementById('topObjectsList');
-        if (stats.objects.length === 0) {
-            topObjectsList.innerHTML = '<span style="color: var(--text-secondary); font-size: 0.9rem;">No objects found</span>';
-        } else {
-            topObjectsList.innerHTML = stats.objects.slice(0, 20).map(obj => {
-                const safeName = obj.name.replace(/'/g, "\\'");
-                return `
-                    <span class="tag" style="background-color: rgba(16, 185, 129, 0.2); color: #34d399; cursor: pointer;" onclick="setObjectQuery('${safeName}')">
-                        ${obj.name} <span style="opacity: 0.6; font-size: 0.8em;">(${obj.count})</span>
-                    </span>
-                `;
-            }).join('');
+        if (top_objects_list_element) {
+            if (allKnownObjects.length === 0) {
+                top_objects_list_element.innerHTML = '<span style="color: var(--text-secondary); font-size: 0.9rem;">No objects found</span>';
+            } else {
+                top_objects_list_element.innerHTML = allKnownObjects.slice(0, 20).map((object_entry) => {
+                    const safe_escaped_attribute = escapeHtmlCharacters(object_entry.name).replace(/'/g, "\\'");
+                    return `
+                        <span class="tag" style="background-color: rgba(16, 185, 129, 0.2); color: #34d399; cursor: pointer;" onclick="setObjectQuery('${safe_escaped_attribute}')">
+                            ${escapeHtmlCharacters(object_entry.name)} <span style="opacity: 0.6; font-size: 0.8em;">(${object_entry.count})</span>
+                        </span>
+                    `;
+                }).join('');
+            }
         }
-
-    } catch (error) {
-        console.error('Error loading stats:', error);
-        document.getElementById('topTagsList').innerHTML = '<span style="color: var(--text-secondary);">Error loading tags</span>';
-        document.getElementById('topObjectsList').innerHTML = '<span style="color: var(--text-secondary);">Error loading objects</span>';
+    } catch (stats_error) {
+        console.error('Error loading stats:', stats_error);
+        const top_tags_list_element = document.getElementById('topTagsList');
+        const top_objects_list_element = document.getElementById('topObjectsList');
+        if (top_tags_list_element) top_tags_list_element.innerHTML = '<span style="color: var(--text-secondary);">Error loading tags</span>';
+        if (top_objects_list_element) top_objects_list_element.innerHTML = '<span style="color: var(--text-secondary);">Error loading objects</span>';
     }
 }
 
-// Regenerate Thumbnail Logic
-async function regenerateThumbnail(id, cardElement) {
+/**
+ * WHAT: Requests server-side thumbnail regeneration for an image and cache-busts the card thumbnail image.
+ * WHY:  Fixes corrupted or stale AVIF thumbnails directly from the search grid.
+ */
+async function regenerateThumbnail(image_identifier, card_element) {
     try {
-        const thumbImg = cardElement.querySelector('.thumbnail-preview');
-        thumbImg.style.opacity = '0.5';
+        const thumbnail_image_element = card_element?.querySelector('.thumbnail-preview');
+        if (thumbnail_image_element) thumbnail_image_element.style.opacity = '0.5';
 
-        const response = await fetch(`${API_BASE_URL}/regenerate-thumbnail`, {
+        const http_response = await fetch(`${API_BASE_URL}/regenerate-thumbnail`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id })
+            body: JSON.stringify({ id: image_identifier })
         });
 
-        if (!response.ok) throw new Error('Regeneration failed');
+        if (!http_response.ok) throw new Error('Regeneration failed');
 
-        const data = await response.json();
-
-        // Refresh the image by appending a timestamp to bypass cache
-        if (data.thumbPath) {
-            thumbImg.src = `${data.thumbPath}?t=${Date.now()}`;
+        const regeneration_payload = await http_response.json();
+        if (regeneration_payload.thumbPath && thumbnail_image_element) {
+            thumbnail_image_element.src = `${regeneration_payload.thumbPath}?t=${Date.now()}`;
         }
-
-    } catch (error) {
-        console.error('Thumbnail regeneration error:', error);
-        showAlertModal('Failed to regenerate thumbnail: ' + error.message, 'Regeneration Error');
+    } catch (regeneration_error) {
+        console.error('Thumbnail regeneration error:', regeneration_error);
+        showAlertModal('Failed to regenerate thumbnail: ' + regeneration_error.message, 'Regeneration Error');
     } finally {
-        const thumbImg = cardElement.querySelector('.thumbnail-preview');
-        if (thumbImg) thumbImg.style.opacity = '1';
+        const thumbnail_image_element = card_element?.querySelector('.thumbnail-preview');
+        if (thumbnail_image_element) thumbnail_image_element.style.opacity = '1';
     }
 }
 
-// Helper: Add tag/object to filter from sidebar click
-window.setSearchQuery = (term) => {
-    addTagFilter(term, 'tag');
+window.setSearchQuery = (tag_term) => {
+    addTagFilter(tag_term, 'tag');
 };
 
-window.setObjectQuery = (term) => {
-    addTagFilter(term, 'object');
+window.setObjectQuery = (object_term) => {
+    addTagFilter(object_term, 'object');
 };
 
 // ============================================================================
 // TAG FILTER: AUTOCOMPLETE & CHIP MANAGEMENT
 // ============================================================================
 
-function addTagFilter(name, type) {
-    const targetSet = type === 'tag' ? selectedTagFilters : selectedObjectFilters;
-    if (targetSet.has(name)) return; // Already selected
-    targetSet.add(name);
+/**
+ * WHAT: Adds a tag or object chip to the active filter sets and triggers a search.
+ * WHY:  Avoids duplicate chips and clears the autocomplete dropdown cleanly.
+ */
+function addTagFilter(filter_name, filter_type) {
+    const target_filter_set = filter_type === 'tag' ? selectedTagFilters : selectedObjectFilters;
+    if (target_filter_set.has(filter_name)) return;
+    target_filter_set.add(filter_name);
     renderFilterChips();
     if (tagFilterInput) tagFilterInput.value = '';
     hideAutocomplete();
     executeSearchQuery();
 }
 
-function removeTagFilter(name, type) {
-    const targetSet = type === 'tag' ? selectedTagFilters : selectedObjectFilters;
-    targetSet.delete(name);
+/**
+ * WHAT: Removes a tag or object chip from the active filter sets and re-runs search.
+ * WHY:  Allows instant one-click removal of filter chips.
+ */
+function removeTagFilter(filter_name, filter_type) {
+    const target_filter_set = filter_type === 'tag' ? selectedTagFilters : selectedObjectFilters;
+    target_filter_set.delete(filter_name);
     renderFilterChips();
     executeSearchQuery();
 }
 
+/**
+ * WHAT: Renders active tag and object filter chips inside `#tagFilterChips` with remove buttons.
+ * WHY:  Escapes all chip labels to prevent XSS and binds remove listeners cleanly.
+ */
 function renderFilterChips() {
     if (!tagFilterChips) return;
-    let html = '';
-    selectedTagFilters.forEach(tag => {
-        html += `<span class="filter-chip chip-tag">#${tag} <span class="chip-remove" data-name="${tag}" data-type="tag">&times;</span></span>`;
+    let compiled_chips_html = '';
+    selectedTagFilters.forEach((tag_name) => {
+        const escaped_tag_name = escapeHtmlCharacters(tag_name);
+        compiled_chips_html += `<span class="filter-chip chip-tag">#${escaped_tag_name} <span class="chip-remove" data-name="${escaped_tag_name}" data-type="tag">&times;</span></span>`;
     });
-    selectedObjectFilters.forEach(obj => {
-        html += `<span class="filter-chip chip-object">&boxbox; ${obj} <span class="chip-remove" data-name="${obj}" data-type="object">&times;</span></span>`;
+    selectedObjectFilters.forEach((object_name) => {
+        const escaped_object_name = escapeHtmlCharacters(object_name);
+        compiled_chips_html += `<span class="filter-chip chip-object">&boxbox; ${escaped_object_name} <span class="chip-remove" data-name="${escaped_object_name}" data-type="object">&times;</span></span>`;
     });
-    tagFilterChips.innerHTML = html;
+    tagFilterChips.innerHTML = compiled_chips_html;
 
-    // Attach remove handlers
-    tagFilterChips.querySelectorAll('.chip-remove').forEach(btn => {
-        btn.addEventListener('click', () => {
-            removeTagFilter(btn.dataset.name, btn.dataset.type);
+    tagFilterChips.querySelectorAll('.chip-remove').forEach((remove_button_element) => {
+        remove_button_element.addEventListener('click', () => {
+            removeTagFilter(remove_button_element.dataset.name, remove_button_element.dataset.type);
         });
     });
 }
 
-function showAutocomplete(query) {
+/**
+ * WHAT: Renders the tag/object autocomplete dropdown using pure `rankTagAutocompleteMatches`.
+ * WHY:  Separates matching/filtering logic from DOM construction and wires click listeners cleanly.
+ */
+function showAutocomplete(raw_query_string) {
     if (!tagAutocomplete) return;
-    const q = query.toLowerCase();
-    const combined = [
-        ...allKnownTags.map(t => ({ ...t, type: 'tag' })),
-        ...allKnownObjects.map(o => ({ ...o, type: 'object' }))
-    ];
 
-    // Filter: match query, exclude already selected
-    const matches = combined.filter(item => {
-        if (item.type === 'tag' && selectedTagFilters.has(item.name)) return false;
-        if (item.type === 'object' && selectedObjectFilters.has(item.name)) return false;
-        return item.name.toLowerCase().includes(q);
-    }).slice(0, 15);
+    const ranked_matches = rankTagAutocompleteMatches(
+        allKnownTags,
+        allKnownObjects,
+        selectedTagFilters,
+        selectedObjectFilters,
+        raw_query_string,
+        15
+    );
 
-    if (matches.length === 0) {
+    if (ranked_matches.length === 0) {
         hideAutocomplete();
         return;
     }
 
-    tagAutocomplete.innerHTML = matches.map((item, i) => `
-        <div class="tag-autocomplete-item${i === acActiveIndex ? ' active' : ''}" data-name="${item.name}" data-type="${item.type}">
+    tagAutocomplete.innerHTML = ranked_matches.map((match_item, match_index) => `
+        <div class="tag-autocomplete-item${match_index === autocomplete_active_index ? ' active' : ''}" data-name="${escapeHtmlCharacters(match_item.name)}" data-type="${match_item.type}">
             <span>
-                <span class="ac-type ${item.type === 'tag' ? 'ac-tag' : 'ac-obj'}">${item.type === 'tag' ? 'tag' : 'obj'}</span>
-                ${item.name}
+                <span class="ac-type ${match_item.type === 'tag' ? 'ac-tag' : 'ac-obj'}">${match_item.type === 'tag' ? 'tag' : 'obj'}</span>
+                ${escapeHtmlCharacters(match_item.name)}
             </span>
-            <span class="ac-count">(${item.count})</span>
+            <span class="ac-count">(${match_item.count})</span>
         </div>
     `).join('');
 
     tagAutocomplete.style.display = 'block';
 
-    // Click handlers
-    tagAutocomplete.querySelectorAll('.tag-autocomplete-item').forEach(autocomplete_option_element => {
-        el.addEventListener('click', () => {
+    tagAutocomplete.querySelectorAll('.tag-autocomplete-item').forEach((autocomplete_option_element) => {
+        autocomplete_option_element.addEventListener('click', () => {
             addTagFilter(autocomplete_option_element.dataset.name, autocomplete_option_element.dataset.type);
         });
     });
 }
 
+/**
+ * WHAT: Hides the autocomplete dropdown and resets keyboard selection index.
+ * WHY:  Keeps dropdown state clean after selection, Escape, or outside clicks.
+ */
 function hideAutocomplete() {
     if (tagAutocomplete) {
         tagAutocomplete.style.display = 'none';
         tagAutocomplete.innerHTML = '';
     }
-    acActiveIndex = -1;
+    autocomplete_active_index = -1;
 }
 
-// Wire up the filter input
 if (tagFilterInput) {
     tagFilterInput.addEventListener('input', () => {
         const filter_query_trimmed_value = tagFilterInput.value.trim();
-        acActiveIndex = -1;
+        autocomplete_active_index = -1;
         if (filter_query_trimmed_value.length > 0) {
             showAutocomplete(filter_query_trimmed_value);
         } else {
@@ -2475,38 +1881,43 @@ if (tagFilterInput) {
         }
     });
 
-    tagFilterInput.addEventListener('keydown', (e) => {
-        const items = tagAutocomplete ? tagAutocomplete.querySelectorAll('.tag-autocomplete-item') : [];
-        if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            acActiveIndex = Math.min(acActiveIndex + 1, items.length - 1);
-            items.forEach((el, i) => el.classList.toggle('active', i === acActiveIndex));
-        } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            acActiveIndex = Math.max(acActiveIndex - 1, 0);
-            items.forEach((el, i) => el.classList.toggle('active', i === acActiveIndex));
-        } else if (e.key === 'Enter') {
-            e.preventDefault();
-            if (acActiveIndex >= 0 && items[acActiveIndex]) {
-                const el = items[acActiveIndex];
-                addTagFilter(autocomplete_option_element.dataset.name, autocomplete_option_element.dataset.type);
+    tagFilterInput.addEventListener('keydown', (keyboard_event_object) => {
+        const autocomplete_item_elements = tagAutocomplete
+            ? tagAutocomplete.querySelectorAll('.tag-autocomplete-item')
+            : [];
+
+        if (keyboard_event_object.key === 'ArrowDown') {
+            keyboard_event_object.preventDefault();
+            autocomplete_active_index = Math.min(autocomplete_active_index + 1, autocomplete_item_elements.length - 1);
+            autocomplete_item_elements.forEach((option_element, option_index) =>
+                option_element.classList.toggle('active', option_index === autocomplete_active_index)
+            );
+        } else if (keyboard_event_object.key === 'ArrowUp') {
+            keyboard_event_object.preventDefault();
+            autocomplete_active_index = Math.max(autocomplete_active_index - 1, 0);
+            autocomplete_item_elements.forEach((option_element, option_index) =>
+                option_element.classList.toggle('active', option_index === autocomplete_active_index)
+            );
+        } else if (keyboard_event_object.key === 'Enter') {
+            keyboard_event_object.preventDefault();
+            if (autocomplete_active_index >= 0 && autocomplete_item_elements[autocomplete_active_index]) {
+                const selected_option_element = autocomplete_item_elements[autocomplete_active_index];
+                addTagFilter(selected_option_element.dataset.name, selected_option_element.dataset.type);
             }
-        } else if (e.key === 'Escape') {
+        } else if (keyboard_event_object.key === 'Escape') {
             hideAutocomplete();
         }
     });
 
-    // Close autocomplete when clicking outside
-    document.addEventListener('click', (e) => {
-        if (!tagFilterInput.contains(e.target) && !tagAutocomplete.contains(e.target)) {
+    document.addEventListener('click', (click_event) => {
+        if (!tagFilterInput.contains(click_event.target) && (!tagAutocomplete || !tagAutocomplete.contains(click_event.target))) {
             hideAutocomplete();
         }
     });
 }
 
-// AND/OR toggle triggers re-search
-document.querySelectorAll('input[name="tagLogic"]').forEach(radio => {
-    radio.addEventListener('change', () => {
+document.querySelectorAll('input[name="tagLogic"]').forEach((logic_radio_element) => {
+    logic_radio_element.addEventListener('change', () => {
         if (selectedTagFilters.size > 0 || selectedObjectFilters.size > 0) {
             executeSearchQuery();
         }
@@ -2517,93 +1928,77 @@ document.querySelectorAll('input[name="tagLogic"]').forEach(radio => {
 // FIND SIMILAR
 // ============================================================================
 
-async function findSimilar(imageId) {
-    // 1. Try to find in lastWorkerResults
-    let allData = lastWorkerResults || [];
-    let source = allData.find(single_image_record => single_image_record.id == imageId);
+/**
+ * WHAT: Populates tag/object OR filters and a truncated summary query from a reference image.
+ * WHY:  Delegates JSON parsing and field extraction to pure `extractSimilarImageSearchState`.
+ */
+async function findSimilar(image_identifier) {
+    const cached_results_list = lastWorkerResults || [];
+    let source_image_record = cached_results_list.find((single_image_record) => single_image_record.id == image_identifier);
 
-    // 2. If not found (e.g., initial load), fetch from server
-    if (!source) {
+    if (!source_image_record) {
         try {
-            const response = await fetch(`${API_BASE_URL}/images?id=${imageId}`);
-            if (response.ok) {
-                const data = await response.json();
-                source = data.image; // Assuming server returns { image: ... }
+            const http_response = await fetch(`${API_BASE_URL}/images?id=${image_identifier}`);
+            if (http_response.ok) {
+                const image_payload = await http_response.json();
+                source_image_record = image_payload.image;
             }
-        } catch (err) {
-            console.error('Failed to fetch similar source image:', err);
+        } catch (fetch_similar_error) {
+            console.error('Failed to fetch similar source image:', fetch_similar_error);
         }
     }
 
-    if (!source) {
-        // Fallback: If we still don't have it, perform a search once to populate results
-        if (allData.length === 0) {
-            await executeSearchQuery(); // This is async now but we don't have a promise yet...
-            // We'll just alert for now or retry once results are in.
-            setTimeout(() => findSimilar(imageId), 1000); 
+    if (!source_image_record) {
+        if (cached_results_list.length === 0) {
+            await executeSearchQuery();
+            setTimeout(() => findSimilar(image_identifier), 1000);
             return;
         }
         showAlertModal('Image data not found. Try searching first.', 'Find Similar');
         return;
     }
 
-    // ENSURE DATA IS PARSED (Server returns stringified JSON)
-    if (typeof source.analysis === 'string') {
-        try {
-            source.analysis = JSON.parse(source.analysis || '{}');
-        } catch (e) {
-            console.error('[FIND-SIMILAR] Failed to parse analysis JSON:', e);
-            source.analysis = {};
-        }
-    }
-    if (typeof source.metadata === 'string') {
-        try {
-            source.metadata = JSON.parse(source.metadata || '{}');
-        } catch (e) {
-            source.metadata = {};
-        }
-    }
+    const {
+        tags_to_select,
+        objects_to_select,
+        truncated_summary_query,
+        parsed_analysis_record
+    } = extractSimilarImageSearchState(source_image_record);
 
-    const analysis = source.analysis || {};
-    const tags = analysis.tags || [];
-    const objects = analysis.objects || [];
-    const summary = analysis.summary || '';
+    source_image_record.analysis = parsed_analysis_record;
 
-    // Clear existing filters
     selectedTagFilters.clear();
     selectedObjectFilters.clear();
 
-    // Populate tag filters with source image's tags
-    tags.forEach(t => selectedTagFilters.add(t));
-    objects.forEach(o => selectedObjectFilters.add(o));
+    tags_to_select.forEach((tag_label) => selectedTagFilters.add(tag_label));
+    objects_to_select.forEach((object_label) => selectedObjectFilters.add(object_label));
 
-    // Set logic to OR (we want images matching ANY of the tags)
-    const orRadio = document.querySelector('input[name="tagLogic"][value="OR"]');
-    if (orRadio) orRadio.checked = true;
+    const or_logic_radio = document.querySelector('input[name="tagLogic"][value="OR"]');
+    if (or_logic_radio) or_logic_radio.checked = true;
 
-    // Put a truncated summary into the text search for additional context
-    const truncSummary = summary.split(/\s+/).slice(0, 6).join(' ');
-    searchQuery.value = truncSummary;
-
+    if (searchQuery) searchQuery.value = truncated_summary_query;
     renderFilterChips();
 
-    // Show banner
-    if (similarBanner) {
+    if (similarBanner && similarBannerName) {
         similarBanner.style.display = 'flex';
-        similarBannerName.textContent = source.filename || `ID ${imageId}`;
+        similarBannerName.textContent = source_image_record.filename || `ID ${image_identifier}`;
     }
 
     executeSearchQuery();
 }
 
+/**
+ * WHAT: Clears active "Find Similar" filters and restores default AND tag logic.
+ * WHY:  Lets users exit similarity exploration in one click.
+ */
 function clearSimilarMode() {
     selectedTagFilters.clear();
     selectedObjectFilters.clear();
-    searchQuery.value = '';
+    if (searchQuery) searchQuery.value = '';
     renderFilterChips();
 
-    const andRadio = document.querySelector('input[name="tagLogic"][value="AND"]');
-    if (andRadio) andRadio.checked = true;
+    const and_logic_radio = document.querySelector('input[name="tagLogic"][value="AND"]');
+    if (and_logic_radio) and_logic_radio.checked = true;
 
     if (similarBanner) similarBanner.style.display = 'none';
 
@@ -2614,417 +2009,369 @@ if (clearSimilarBtn) {
     clearSimilarBtn.addEventListener('click', clearSimilarMode);
 }
 
-// Store last worker results for findSimilar lookups
-let lastWorkerResults = [];
-
-
-// Note: searchBtn and searchQuery event listeners are attached in the main event listener setup above.
-
-// Initialize
-loadStats();
-initializeSearchSystem();
-updateModelIndicator();
-setInterval(updateModelIndicator, 10000);
-
-async function updateModelIndicator() {
-    const nameLabel = document.getElementById('activeModelName');
-    const statusDot = document.getElementById('modelStatusDot');
-    if (!nameLabel || !statusDot) return;
-
-    try {
-        // 1. Get our local config
-        const configRes = await fetch('/api/config');
-        if (!configRes.ok) return;
-        const config = await configRes.json();
-        const configuredModel = config.visionModel || "";
-
-        // 2. Query dynamic model discovery via server proxy
-        const statusRes = await fetch('/api/proxy/models');
-        if (!statusRes.ok) {
-            statusDot.style.background = '#ff4444'; // Red for error/offline
-            nameLabel.textContent = configuredModel || 'llama-server Offline';
-            nameLabel.title = 'llama-server is offline (Probe port 8080 failed)';
-            return;
-        }
-
-        const data = await statusRes.json();
-        const loadedModels = data.data || [];
-        const rawModels = data.models || [];
-
-        // Check if the configured model is running, or auto-detect the active model
-        let activeModelId = configuredModel;
-        let isLoaded = false;
-
-        if (configuredModel) {
-            isLoaded = loadedModels.some(m => m.id === configuredModel || (m.aliases && m.aliases.includes(configuredModel))) ||
-                       rawModels.some(m => m.name === configuredModel || (m.aliases && m.aliases.includes(configuredModel)));
-        } else if (loadedModels.length > 0 || rawModels.length > 0) {
-            // In auto-detect mode, the server's first loaded model is active
-            isLoaded = true;
-            const primaryRaw = rawModels[0];
-            const primaryData = loadedModels[0];
-            activeModelId = primaryRaw?.name || primaryRaw?.aliases?.[0] || primaryData?.id || 'Active Model';
-        }
-
-        nameLabel.textContent = activeModelId || 'Local AI Connected';
-        nameLabel.title = `Active Model: ${activeModelId}`;
-
-        if (isLoaded) {
-            statusDot.style.background = '#00ff00'; // Pure Green for Loaded/Active
-            statusDot.title = `Model is active and ready: ${activeModelId}`;
-        } else {
-            statusDot.style.background = '#f59e0b'; // Amber for Standby / Available
-            statusDot.title = 'Model on standby (will JIT load or needs selection)';
-        }
-
-    } catch (e) {
-        console.warn('Failed to update model indicator:', e);
-        statusDot.style.background = '#ff4444';
-    }
-}
-
-// URL parameters are now handled by processUrlParams() called during initializeSearchSystem()
-
-// File Link Handler (Show in Folder)
-document.addEventListener("click", (e) => {
-    const file_link_anchor_element = click_event.target.closest(".file-link");
-    if (!file_link_anchor_element) return;
-
-    const fullPath = file_link_anchor_element.dataset.path;
-
-    if (window.electronAPI && window.electronAPI.showInFolder) {
-        window.electronAPI.showInFolder(fullPath);
-    } else {
-        console.warn('Electron API not available. File path:', fullPath);
-        showAlertModal('This feature requires Electron. File path: ' + fullPath, 'System Limitation');
-    }
-});
-
+// ============================================================================
+// MODEL STATUS INDICATOR & FILE LINK HANDLER
+// ============================================================================
 // ============================================================================
 // BATCH CONTROLS & SELECTION LOGIC
 // ============================================================================
 
-const selectMissingBtn = document.getElementById('selectMissingBtn');
-const unselectAllBtn = document.getElementById('unselectAllBtn');
-const processSelectedBtn = document.getElementById('processSelectedBtn');
-const dbPromptType = document.getElementById('dbPromptType');
-const validateBtn = document.getElementById('validateBtn');
-const validationStatus = document.getElementById('validationStatus');
-const validationText = document.getElementById('validationText');
-const validationProgressBar = document.getElementById('validationProgressBar');
-const closeStatus = document.getElementById('closeStatus');
-
-
-// Checkbox Delegation
-searchResults.addEventListener('change', (e) => {
-    if (e.target.classList.contains('card-select-cb')) {
-        const id = e.target.dataset.id;
-        const card = e.target.closest('.card');
-        if (e.target.checked) {
-            selectedIds.add(String(id));
-            if (card) card.classList.add('selected');
-        } else {
-            selectedIds.delete(String(id));
-            if (card) card.classList.remove('selected');
-        }
-        updateProcessButton();
-    }
-});
-
+/**
+ * WHAT: Synchronizes button labels, disabled states, and visibility with `selectedIds.size`.
+ * WHY:  Gives immediate feedback when selecting or clearing cards for batch operations.
+ */
 function updateProcessButton() {
-    const count = selectedIds.size;
+    const selected_count = selectedIds.size;
     if (processSelectedBtn) {
-        processSelectedBtn.textContent = `Process (${count})`;
-        processSelectedBtn.disabled = count === 0;
-        processSelectedBtn.style.opacity = count === 0 ? '0.5' : '1';
+        processSelectedBtn.textContent = `Process (${selected_count})`;
+        processSelectedBtn.disabled = selected_count === 0;
+        processSelectedBtn.style.opacity = selected_count === 0 ? '0.5' : '1';
     }
-    
-    const bulkRenameBtn = document.getElementById('bulkRenameBtn');
-    if (bulkRenameBtn) {
-        bulkRenameBtn.disabled = count === 0;
-        bulkRenameBtn.style.opacity = count === 0 ? '0.5' : '1';
+
+    const bulk_rename_button = document.getElementById('bulkRenameBtn');
+    if (bulk_rename_button) {
+        bulk_rename_button.disabled = selected_count === 0;
+        bulk_rename_button.style.opacity = selected_count === 0 ? '0.5' : '1';
     }
 
     if (unselectAllBtn) {
-        unselectAllBtn.style.display = count > 0 ? 'block' : 'none';
+        unselectAllBtn.style.display = selected_count > 0 ? 'block' : 'none';
     }
 }
 
-// 0.5 Bulk Rename
 const bulkRenameBtn = document.getElementById('bulkRenameBtn');
 if (bulkRenameBtn) {
     bulkRenameBtn.addEventListener('click', async () => {
         if (selectedIds.size === 0) return;
 
-        // In search.js we use the new custom modal, passing allImages for name lookups
-        const baseName = await showBulkRenameModal(selectedIds, allImages);
-        if (!baseName || !baseName.trim()) return;
+        const base_name_input = await showBulkRenameModal(selectedIds, allImages, getRecentRenames());
+        if (!base_name_input || !base_name_input.trim()) return;
 
         bulkRenameBtn.disabled = true;
-        const originalText = bulkRenameBtn.textContent;
+        const original_button_label = bulkRenameBtn.textContent;
         bulkRenameBtn.textContent = 'Renaming...';
 
         try {
-            const response = await fetch(`${API_BASE_URL}/bulk-rename`, {
+            const http_response = await fetch(`${API_BASE_URL}/bulk-rename`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     ids: Array.from(selectedIds),
-                    baseName: baseName.trim()
+                    baseName: base_name_input.trim()
                 })
             });
 
-            const data = await response.json();
-            
-            if (response.ok && data.success) {
-                saveRecentRename(baseName.trim());
-                showAlertModal(data.message || 'Successfully renamed files', 'Rename Complete');
+            const bulk_rename_payload = await http_response.json();
+
+            if (http_response.ok && bulk_rename_payload.success) {
+                saveRecentRename(base_name_input.trim());
+                showAlertModal(bulk_rename_payload.message || 'Successfully renamed files', 'Rename Complete');
                 selectedIds.clear();
                 updateProcessButton();
                 await refreshData();
             } else {
-                showAlertModal(data.error || 'Failed to bulk rename', 'Rename Error');
+                showAlertModal(bulk_rename_payload.error || 'Failed to bulk rename', 'Rename Error');
             }
-        } catch (err) {
-            console.error('Bulk rename failed:', err);
+        } catch (bulk_rename_error) {
+            console.error('Bulk rename failed:', bulk_rename_error);
             showAlertModal('Error communicating with server.', 'Error');
         } finally {
             bulkRenameBtn.disabled = false;
-            bulkRenameBtn.textContent = originalText;
+            bulkRenameBtn.textContent = original_button_label;
         }
     });
 }
 
-// 1. Select Missing
 if (selectMissingBtn) {
     selectMissingBtn.addEventListener('click', () => {
-        let count = 0;
-        filteredImages.forEach(single_image_record => {
-            const analysis = img.analysis || {};
-            if (!analysis.summary || !analysis.tags || analysis.tags.length === 0 || !analysis.objects || analysis.objects.length === 0) {
+        let newly_selected_count = 0;
+        filteredImages.forEach((single_image_record) => {
+            const analysis_record = single_image_record.analysis || {};
+            if (
+                !analysis_record.summary ||
+                !analysis_record.tags ||
+                analysis_record.tags.length === 0 ||
+                !analysis_record.objects ||
+                analysis_record.objects.length === 0
+            ) {
                 selectedIds.add(String(single_image_record.id));
-                count++;
+                newly_selected_count++;
 
-                const cb = document.querySelector(`.card-select-cb[data-id="${img.id}"]`);
-                if (cb) cb.checked = true;
-                const card = document.querySelector(`.card[data-id="${img.id}"]`);
-                if (card) card.classList.add('selected');
+                const checkbox_element = document.querySelector(`.card-select-cb[data-id="${single_image_record.id}"]`);
+                if (checkbox_element) checkbox_element.checked = true;
+                const card_element = document.querySelector(`.card[data-id="${single_image_record.id}"]`);
+                if (card_element) card_element.classList.add('selected');
             }
         });
 
-        if (count > 0) {
+        if (newly_selected_count > 0) {
             updateProcessButton();
-            showAlertModal(`Successfully selected ${count} images with missing data.`, 'Selection Complete');
+            showAlertModal(`Successfully selected ${newly_selected_count} images with missing data.`, 'Selection Complete');
         } else {
             showAlertModal('No visible images found with missing data.', 'Auto Selection');
         }
     });
 }
 
-// 2. Unselect All
 if (unselectAllBtn) {
     unselectAllBtn.addEventListener('click', () => {
         selectedIds.clear();
-        document.querySelectorAll('.card-select-cb').forEach(cb => cb.checked = false);
-        document.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected'));
+        document.querySelectorAll('.card-select-cb').forEach((checkbox_element) => {
+            checkbox_element.checked = false;
+        });
+        document.querySelectorAll('.card.selected').forEach((card_element) => {
+            card_element.classList.remove('selected');
+        });
         updateProcessButton();
     });
 }
 
-// 3. Process Selected
 if (processSelectedBtn) {
     processSelectedBtn.addEventListener('click', () => {
         if (selectedIds.size === 0) return;
 
-        showConfirmModal(`Re-analyze ${selectedIds.size} images with mode: "${dbPromptType.value}"?`, async () => {
+        showConfirmModal(
+            `Re-analyze ${selectedIds.size} images with mode: "${dbPromptType.value}"?`,
+            async () => {
+                processSelectedBtn.disabled = true;
+                processSelectedBtn.textContent = 'Processing...';
 
-            processSelectedBtn.disabled = true;
-            processSelectedBtn.textContent = 'Processing...';
+                const target_image_identifiers = Array.from(selectedIds);
+                const selected_prompt_type = dbPromptType.value;
+                const total_images_count = target_image_identifiers.length;
+                let success_count = 0;
 
-            const ids = Array.from(selectedIds);
-            const promptType = dbPromptType.value;
-            const total = ids.length;
-            let successCount = 0;
-            let failedCount = 0;
-
-            if (validationStatus) {
-                validationStatus.style.display = 'block';
-                validationText.textContent = 'Starting batch...';
-                validationProgressBar.style.width = '0%';
-            }
-
-            for (let i = 0; i < total; i++) {
-                if (validationText) validationText.textContent = `Processing image ${i + 1} of ${total}...`;
-
-                try {
-                    const response = await fetch(`${API_BASE_URL}/batch-analyze`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ ids: [ids[i]], promptType })
-                    });
-
-                    if (response.ok) successCount++;
-                    else failedCount++;
-                } catch (e) {
-                    console.error(e);
-                    failedCount++;
+                if (validationStatus) {
+                    validationStatus.style.display = 'block';
+                    validationText.textContent = 'Starting batch...';
+                    validationProgressBar.style.width = '0%';
                 }
-                if (validationProgressBar) validationProgressBar.style.width = `${Math.round(((i + 1) / total) * 100)}%`;
-            }
 
-            if (validationText) validationText.textContent = `Batch Complete! Success: ${successCount}`;
+                for (let item_index = 0; item_index < total_images_count; item_index++) {
+                    if (validationText) {
+                        validationText.textContent = `Processing image ${item_index + 1} of ${total_images_count}...`;
+                    }
 
-            selectedIds.clear();
-            await refreshData();
-            updateProcessButton();
+                    try {
+                        const http_response = await fetch(`${API_BASE_URL}/batch-analyze`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                ids: [target_image_identifiers[item_index]],
+                                promptType: selected_prompt_type
+                            })
+                        });
 
-            setTimeout(() => {
-                if (validationStatus) validationStatus.style.display = 'none';
-            }, 2000);
+                        if (http_response.ok) success_count++;
+                    } catch (batch_item_error) {
+                        console.error(batch_item_error);
+                    }
 
-        }, 'Start Batch', '#10b981');
+                    if (validationProgressBar) {
+                        validationProgressBar.style.width = `${Math.round(((item_index + 1) / total_images_count) * 100)}%`;
+                    }
+                }
+
+                if (validationText) validationText.textContent = `Batch Complete! Success: ${success_count}`;
+
+                selectedIds.clear();
+                await refreshData();
+                updateProcessButton();
+
+                setTimeout(() => {
+                    if (validationStatus) validationStatus.style.display = 'none';
+                }, 2000);
+            },
+            'Start Batch',
+            '#10b981'
+        );
     });
 }
 
-// 4. Validate (Integrity Check)
 if (validateBtn) {
     validateBtn.addEventListener('click', async () => {
-        const options = await showIntegrityCheckModal();
-        if (!options) return;
+        const selected_integrity_options = await showIntegrityCheckModal();
+        if (!selected_integrity_options) return;
 
         validateBtn.disabled = true;
-        const originalText = validateBtn.innerHTML;
+        const original_button_html = validateBtn.innerHTML;
         validateBtn.innerHTML = '🔄 Checking...';
 
-        let validateInterval;
+        let validate_polling_interval;
 
         if (validationStatus) {
             validationStatus.style.display = 'block';
             validationText.textContent = 'Starting integrity check...';
             validationProgressBar.style.width = '2%';
 
-            validateInterval = setInterval(async () => {
+            validate_polling_interval = setInterval(async () => {
                 try {
-                    const statusRes = await fetch(`${API_BASE_URL}/validate-status`);
-                    if (statusRes.ok) {
-                        const statusData = await statusRes.json();
-                        validationText.textContent = statusData.status;
-                        validationProgressBar.style.width = `${Math.max(2, statusData.progress)}%`;
+                    const status_http_response = await fetch(`${API_BASE_URL}/validate-status`);
+                    if (status_http_response.ok) {
+                        const status_payload = await status_http_response.json();
+                        validationText.textContent = status_payload.status;
+                        validationProgressBar.style.width = `${Math.max(2, status_payload.progress)}%`;
                     }
-                } catch(e) {}
+                } catch (_polling_error) {}
             }, 250);
         }
 
         try {
-            const res = await fetch(`${API_BASE_URL}/validate-database`, {
+            const http_response = await fetch(`${API_BASE_URL}/validate-database`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ options, reanalyze: false })
+                body: JSON.stringify({ options: selected_integrity_options, reanalyze: false })
             });
-            const data = await res.json();
-            
-            if (validateInterval) clearInterval(validateInterval);
-            
-            const r = data.results;
+            const validation_payload = await http_response.json();
 
+            if (validate_polling_interval) clearInterval(validate_polling_interval);
+            if (!http_response.ok || !validation_payload || !validation_payload.results) {
+                throw new Error(validation_payload?.error || `Validation failed (HTTP ${http_response.status})`);
+            }
+
+            const validation_results = validation_payload.results;
             if (validationProgressBar) validationProgressBar.style.width = '100%';
 
-            let message = `<strong>Check Complete</strong><br>`;
-            if (r.purged > 0) message += `🔥 Purged ${r.purged} legacy thumbnails<br>`;
-            if (r.duplicatesRemoved > 0) message += `🧹 Removed ${r.duplicatesRemoved} duplicates<br>`;
-            if (r.metadataRepaired > 0) message += `🔧 Repaired ${r.metadataRepaired} metadata<br>`;
-            if (r.missing > 0) message += `🗑️ Removed ${r.missing} missing files<br>`;
-            if (r.fixedThumbnails > 0) message += `🖼️ Fixed ${r.fixedThumbnails} thumbnails<br>`;
-            if (r.errors.length > 0) message += `⚠️ ${r.errors.length} errors occurred`;
+            let report_html_message = `<strong>Check Complete</strong><br>`;
+            if (validation_results.purged > 0) report_html_message += `🔥 Purged ${validation_results.purged} legacy thumbnails<br>`;
+            if (validation_results.duplicatesRemoved > 0) report_html_message += `🧹 Removed ${validation_results.duplicatesRemoved} duplicates<br>`;
+            if (validation_results.metadataRepaired > 0) report_html_message += `🔧 Repaired ${validation_results.metadataRepaired} metadata<br>`;
+            if (validation_results.missing > 0) report_html_message += `🗑️ Removed ${validation_results.missing} missing files<br>`;
+            if (validation_results.fixedThumbnails > 0) report_html_message += `🖼️ Fixed ${validation_results.fixedThumbnails} thumbnails<br>`;
+            if (validation_results.orphanedEmbeddingsPruned > 0) report_html_message += `🧬 Pruned ${validation_results.orphanedEmbeddingsPruned} orphaned embedding vectors<br>`;
+            if (validation_results.errors.length > 0) report_html_message += `⚠️ ${validation_results.errors.length} errors occurred`;
 
-            if (r.purged === 0 && r.duplicatesRemoved === 0 && r.metadataRepaired === 0 && r.missing === 0 && r.fixedThumbnails === 0 && r.errors.length === 0) {
-                message += "✅ Database is healthy!";
+            if (
+                validation_results.purged === 0 &&
+                validation_results.duplicatesRemoved === 0 &&
+                validation_results.metadataRepaired === 0 &&
+                validation_results.missing === 0 &&
+                validation_results.fixedThumbnails === 0 &&
+                (validation_results.orphanedEmbeddingsPruned || 0) === 0 &&
+                validation_results.errors.length === 0
+            ) {
+                report_html_message += '✅ Database & Embeddings are healthy!';
             }
 
-            if (validationText) validationText.innerHTML = message;
+            if (validationText) validationText.innerHTML = report_html_message;
 
-                await refreshData();
+            await refreshData();
+            await fetchEmbeddingsStatus();
 
-                // Keep status visible longer if we did something
-                const delay = (r.duplicatesRemoved > 0 || r.metadataRepaired > 0 || r.missing > 0) ? 5000 : 3000;
+            const hide_delay_milliseconds =
+                validation_results.duplicatesRemoved > 0 ||
+                validation_results.metadataRepaired > 0 ||
+                validation_results.missing > 0
+                    ? 5000
+                    : 3000;
 
-                setTimeout(() => {
-                    if (validationStatus) validationStatus.style.display = 'none';
-                }, delay);
-            } catch (e) {
-                showAlertModal('Check failed: ' + e.message, 'Integrity Check Error');
+            setTimeout(() => {
                 if (validationStatus) validationStatus.style.display = 'none';
-            } finally {
-                validateBtn.disabled = false;
-                validateBtn.innerHTML = originalText;
-            }
+            }, hide_delay_milliseconds);
+        } catch (validation_error) {
+            showAlertModal('Check failed: ' + validation_error.message, 'Integrity Check Error');
+            if (validationStatus) validationStatus.style.display = 'none';
+        } finally {
+            if (validate_polling_interval) clearInterval(validate_polling_interval);
+            validateBtn.disabled = false;
+            validateBtn.innerHTML = original_button_html;
+        }
     });
 }
 
 if (closeStatus) {
     closeStatus.addEventListener('click', () => {
-        validationStatus.style.display = 'none';
+        if (validationStatus) validationStatus.style.display = 'none';
     });
 }
+
 // ============================================================================
-// STORAGE HELPERS
+// STORAGE & DISCOVERY DRAWER HELPERS
 // ============================================================================
+
+/**
+ * WHAT: Reads the list of recent bulk-rename base names from `localStorage`.
+ * WHY:  Provides quick-pick history chips inside the bulk rename modal.
+ *
+ * @returns {readonly string[]} Array of recent base names.
+ */
 function getRecentRenames() {
     try {
-        const stored = localStorage.getItem('recentRenames');
-        return stored ? JSON.parse(stored) : [];
-    } catch (e) {
+        const stored_json = localStorage.getItem('recentRenames');
+        return stored_json ? JSON.parse(stored_json) : [];
+    } catch (_storage_error) {
         return [];
     }
 }
 
-function saveRecentRename(name) {
-    if (!name || !name.trim()) return;
-    const trimmed = name.trim();
-    let recent = getRecentRenames();
-    // Remove if already exists to move it to the top
-    recent = recent.filter(r => r !== trimmed);
-    recent.unshift(trimmed);
-    // Keep only last 10
-    recent = recent.slice(0, 10);
-localStorage.setItem('recentRenames', JSON.stringify(recent));
+/**
+ * WHAT: Updates and persists the recent bulk-rename base name list using pure `computeUpdatedRecentRenamesList`.
+ * WHY:  Delegates deduplication and truncation to a pure state transition before writing `localStorage`.
+ */
+function saveRecentRename(base_name_string) {
+    if (!base_name_string || !base_name_string.trim()) return;
+    const updated_recent_renames = computeUpdatedRecentRenamesList(getRecentRenames(), base_name_string, 10);
+    localStorage.setItem('recentRenames', JSON.stringify(updated_recent_renames));
 }
 
-// ============================================================================
-// DISCOVERY TAGS TOGGLE
-// ============================================================================
+/**
+ * WHAT: Initializes the collapsible Discovery Tags drawer state from `localStorage`.
+ * WHY:  Remembers the user's preferred collapsed/expanded state across sessions.
+ */
 function initDiscoveryToggle() {
-    const toggle = document.getElementById('discoveryToggle');
-    const content = document.getElementById('discoveryContent');
-    
-    if (!toggle || !content) return;
+    const discovery_toggle_button = document.getElementById('discoveryToggle');
+    const discovery_content_container = document.getElementById('discoveryContent');
 
-    // Load initial state
-    const isHidden = localStorage.getItem('discoveryTagsHidden') === 'true';
-    if (isHidden) {
-        toggle.classList.add('collapsed');
-        content.classList.add('collapsed');
-        content.classList.remove('show');
+    if (!discovery_toggle_button || !discovery_content_container) return;
+
+    const is_initially_hidden = localStorage.getItem('discoveryTagsHidden') === 'true';
+    if (is_initially_hidden) {
+        discovery_toggle_button.classList.add('collapsed');
+        discovery_content_container.classList.add('collapsed');
+        discovery_content_container.classList.remove('show');
     }
 
-    toggle.addEventListener('click', () => {
-        const hiding = !content.classList.contains('collapsed');
-        
-        if (hiding) {
-            toggle.classList.add('collapsed');
-            content.classList.add('collapsed');
-            content.classList.remove('show');
+    discovery_toggle_button.addEventListener('click', () => {
+        const should_hide = !discovery_content_container.classList.contains('collapsed');
+
+        if (should_hide) {
+            discovery_toggle_button.classList.add('collapsed');
+            discovery_content_container.classList.add('collapsed');
+            discovery_content_container.classList.remove('show');
             localStorage.setItem('discoveryTagsHidden', 'true');
         } else {
-            toggle.classList.remove('collapsed');
-            content.classList.remove('collapsed');
-            content.classList.add('show');
+            discovery_toggle_button.classList.remove('collapsed');
+            discovery_content_container.classList.remove('collapsed');
+            discovery_content_container.classList.add('show');
             localStorage.setItem('discoveryTagsHidden', 'false');
         }
     });
 }
 
-// Initialize everything
+// ============================================================================
+// BOOTSTRAP
+// ============================================================================
+
+// WHAT: Listens for clicks on `.file-link` elements across the document and reveals the file in the OS file explorer.
+// WHY: Cards can be dynamically paginated or injected, so delegated document listening handles all current and future file links.
+document.addEventListener("click", (click_event) => {
+    const file_link_anchor_element = click_event.target.closest(".file-link");
+    if (!file_link_anchor_element) return;
+
+    const full_filesystem_path = file_link_anchor_element.dataset.path;
+
+    if (window.electronAPI && window.electronAPI.showInFolder) {
+        window.electronAPI.showInFolder(full_filesystem_path);
+    } else {
+        console.warn('Electron API not available. File path:', full_filesystem_path);
+        showAlertModal('This feature requires Electron. File path: ' + full_filesystem_path, 'System Limitation');
+    }
+});
+
+initializeSearchSystem();
+updateModelIndicator();
+setInterval(updateModelIndicator, 10000);
+
 requestAnimationFrame(() => {
     initDiscoveryToggle();
     loadStats();

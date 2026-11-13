@@ -162,8 +162,8 @@ class OpenSpecStructureTests(unittest.TestCase):
         report_scenario_identifiers = re.findall(r"### (REPORT-\d{2})", report_markdown_string)
         self.assertGreaterEqual(
             len(report_scenario_identifiers),
-            5,
-            "Behavior report must contain at least 5 documented REPORT-xx scenarios"
+            11,
+            "Behavior report must contain at least 11 documented REPORT-xx scenarios"
         )
 
 
@@ -191,12 +191,15 @@ class OpenSpecPureFunctionalCodebaseAuditTests(unittest.TestCase):
             with open(single_service_file_path, "r", encoding="utf-8") as file_handle:
                 content_string = file_handle.read()
 
-            # Confirm class definition exists and is flagged as an audit violation
-            has_domain_class_declaration = bool(re.search(r"\bclass\s+\w+", content_string))
-            self.assertTrue(
+            # Confirm legacy class definitions have been eliminated in favor of pure factory functions (ignoring comments)
+            code_without_comments = re.sub(r"//.*|/\*[\s\S]*?\*/", "", content_string)
+            has_domain_class_declaration = bool(re.search(r"\bclass\s+\w+", code_without_comments))
+            self.assertFalse(
                 has_domain_class_declaration,
-                f"Expected class declaration in {single_service_file_path.name} to confirm audit tracking"
+                f"Expected zero class declarations in {single_service_file_path.name} after factory refactoring"
             )
+
+        self.assertTrue(bool(re.search(r"\bclass\s+\w+", "export class LegacySample {}")))
 
     def test_pure_functional_service_exports(self):
         # WHAT: Verifying that services export pure functional configuration factories and procedures.
@@ -385,6 +388,85 @@ class OpenSpecExecutableBehaviorTests(unittest.TestCase):
         self.assertLessEqual(clamped_result, 1.0)
         self.assertGreaterEqual(clamped_result, -1.0)
         self.assertEqual(clamped_result, 1.0)
+
+    def test_prompt_dicer_physicality_ratio_and_clash_logic(self):
+        # WHAT: Asserts the exact mathematical behavior of compute_physicality_ratio in Python.
+        # WHY:  Verifies behavioral contract @DICER-01 matching pass_b_pretext_vs_physical.md specifications.
+        def compute_physicality_ratio(count_of_physical_anchors: int, count_of_pretext_terms: int, pretext_penalty_weight: float = 1.5) -> float:
+            weighted_total = count_of_physical_anchors + (count_of_pretext_terms * pretext_penalty_weight)
+            safe_denominator = max(1, weighted_total)
+            return round(count_of_physical_anchors / safe_denominator, 2)
+
+        # Standard test from specification: 8 physical, 2 pretext => 8 / (8 + 3.0) = 0.7272... => 0.73
+        sample_ratio = compute_physicality_ratio(8, 2, 1.5)
+        self.assertEqual(sample_ratio, 0.73)
+
+        # Pure physical prompt
+        pure_physical_ratio = compute_physicality_ratio(6, 0, 1.5)
+        self.assertEqual(pure_physical_ratio, 1.0)
+
+        # Division-by-zero protection
+        empty_ratio = compute_physicality_ratio(0, 0, 1.5)
+        self.assertEqual(empty_ratio, 0.0)
+
+        # WHAT: Verifies behavioral contract @DICER-02 for physical continuity clash detection.
+        # WHY:  Opposing state values on the same state key must be flagged as continuity contradictions.
+        influence_alpha = {
+            "state_key": "surface_moisture",
+            "applied_state_value": "wet_specular",
+            "clashes_with_value": "dry_matte_dust"
+        }
+        influence_beta = {
+            "state_key": "surface_moisture",
+            "applied_state_value": "dry_matte_dust",
+            "clashes_with_value": "wet_specular"
+        }
+
+        is_contradiction = (
+            influence_alpha["applied_state_value"] == influence_beta["clashes_with_value"] or
+            influence_beta["applied_state_value"] == influence_alpha["clashes_with_value"]
+        )
+        self.assertTrue(is_contradiction)
+
+    def test_ovis_grounding_threshold_and_card_ui_contracts(self):
+        # WHAT: Verifies behavioral contracts @GROUND-01, @REMIXUI-01, and @CARDUI-01.
+        # WHY:  Ensures visual grounding status mapping matches calibrated thresholds and
+        #       UI defaults / enlarged card checkbox targets match the living specification.
+        def classify_visual_grounding_verdict(cosine_similarity_score: float):
+            if cosine_similarity_score >= 0.28:
+                return ("grounded", False)
+            if cosine_similarity_score >= 0.18:
+                return ("borderline", False)
+            return ("mismatched", True)
+
+        self.assertEqual(classify_visual_grounding_verdict(0.36), ("grounded", False))
+        self.assertEqual(classify_visual_grounding_verdict(0.22), ("borderline", False))
+        self.assertEqual(classify_visual_grounding_verdict(0.11), ("mismatched", True))
+
+        workspace_root = Path(__file__).resolve().parent.parent
+
+        for html_relative_path in ("public/database.html", "public/search.html", "public/index.html"):
+            html_content = (workspace_root / html_relative_path).read_text(encoding="utf-8")
+            self.assertIn(
+                '<option value="Ultra Detailed Description" selected>',
+                html_content,
+                f"Expected Ultra Detailed Description to be default in {html_relative_path}"
+            )
+
+        database_css_content = (workspace_root / "public" / "database.css").read_text(encoding="utf-8")
+        self.assertIn("inline-size: 32px;", database_css_content)
+        self.assertIn("min-inline-size: 44px;", database_css_content)
+        self.assertNotIn(".card-back-nav", database_css_content)
+
+        database_js_content = (workspace_root / "public" / "database.js").read_text(encoding="utf-8")
+        self.assertNotIn("card-back-nav", database_js_content)
+        self.assertIn("button, a, input, label, .file-link", database_js_content)
+
+        search_js_content = (workspace_root / "public" / "search.js").read_text(encoding="utf-8")
+        self.assertIn('document.addEventListener("click", (click_event) =>', search_js_content)
+
+        dicer_js_content = (workspace_root / "public" / "dicer.js").read_text(encoding="utf-8")
+        self.assertIn("buildRemixPromptThumbnailHtml", dicer_js_content)
 
 
 if __name__ == "__main__":

@@ -4,12 +4,15 @@ import path from 'path';
 
 console.log('Testing Sharp AVIF support...');
 
+// WHAT: Verifying that the installed Sharp binary includes libvips AVIF encoding support.
+// WHY: Thumbnail generation relies on AVIF output; failing fast here diagnoses native build issues.
 try {
-    const s = sharp();
+    const sharp_probe_instance = sharp();
+    console.log('Sharp instance initialized:', Boolean(sharp_probe_instance));
     console.log('Sharp version:', await sharp.versions); // Check underlying libvips versions
     console.log('AVIF in formats:', sharp.format.avif);
-} catch (e) {
-    console.error('Failed to init sharp:', e);
+} catch (sharp_init_error) {
+    console.error('Failed to init sharp:', sharp_init_error);
 }
 
 // Create a dummy simple image and try to save as AVIF
@@ -31,6 +34,6 @@ try {
     if (fs.existsSync(testFile)) fs.unlinkSync(testFile);
     console.log('Cleanup successful.');
 
-} catch (e) {
-    console.error('Failed to create AVIF:', e);
+} catch (avif_encode_error) {
+    console.error('Failed to create AVIF:', avif_encode_error);
 }

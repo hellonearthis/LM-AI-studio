@@ -51,12 +51,13 @@ export const STANDARD_CLASSIFICATION_TAXONOMIES = Object.freeze({
  */
 export const create_ovis_omni_configuration = (optional_custom_endpoint_override = null) => {
     const environment_specified_endpoint = process.env.OVIS_SERVER_URL;
-    const default_candidate_endpoints = [
-        optional_custom_endpoint_override,
-        environment_specified_endpoint,
-        'http://127.0.0.1:8082',
-        'http://localhost:8082'
-    ];
+    const default_candidate_endpoints = optional_custom_endpoint_override
+        ? [optional_custom_endpoint_override]
+        : [
+            environment_specified_endpoint,
+            'http://127.0.0.1:8082',
+            'http://localhost:8082'
+        ];
 
     const candidate_endpoint_urls = Object.freeze(
         Array.from(
@@ -236,50 +237,63 @@ export const classify_image_zero_shot = async (
  * WHAT: Thin backward-compatible adapter delegating calls to pure functional routines.
  * WHY: Supports existing callers expecting class-like method signatures without violating pure functional architecture.
  */
-export class OvisOmniClient {
-    constructor(optional_endpoint_override = null) {
-        this.configuration = create_ovis_omni_configuration(optional_endpoint_override);
-        this.active_endpoint_url = this.configuration.active_endpoint_url;
-        this.detected_hardware_device_name = 'unknown';
-        this.embedding_vector_dimensions = this.configuration.embedding_vector_dimensions;
-        this.is_server_online = false;
-        this.last_health_check_timestamp_milliseconds = 0;
-        this.health_check_cache_duration_milliseconds = 5000;
-        this.standard_classification_taxonomies = this.configuration.standard_classification_taxonomies;
-    }
+// WHAT: Pure factory adapter delegating calls to pure functional Ovis-Omni routines without `class` or `this`.
+// WHY: Replaces mutable class instances with functional closures while keeping existing method callers compatible.
+export function createOvisOmniClient(optional_endpoint_override = null) {
+    const configuration = create_ovis_omni_configuration(optional_endpoint_override);
+    let client_health_state = {
+        active_endpoint_url: configuration.active_endpoint_url,
+        detected_hardware_device_name: 'unknown',
+        is_server_online: false,
+        last_health_check_timestamp_milliseconds: 0
+    };
+    const health_check_cache_duration_milliseconds = 5000;
 
-    async checkHealth(force_refresh_probe = false) {
-        const current_timestamp_milliseconds = Date.now();
-        const is_health_cache_still_valid = (
-            !force_refresh_probe &&
-            (current_timestamp_milliseconds - this.last_health_check_timestamp_milliseconds) < this.health_check_cache_duration_milliseconds
-        );
+    return {
+        get configuration() { return configuration; },
+        get active_endpoint_url() { return client_health_state.active_endpoint_url; },
+        get detected_hardware_device_name() { return client_health_state.detected_hardware_device_name; },
+        get is_server_online() { return client_health_state.is_server_online; },
+        embedding_vector_dimensions: configuration.embedding_vector_dimensions,
+        standard_classification_taxonomies: configuration.standard_classification_taxonomies,
 
-        if (is_health_cache_still_valid) {
-            return this.is_server_online;
+        async checkHealth(force_refresh_probe = false) {
+            const current_timestamp_milliseconds = Date.now();
+            const is_health_cache_still_valid = (
+                !force_refresh_probe &&
+                (current_timestamp_milliseconds - client_health_state.last_health_check_timestamp_milliseconds) < health_check_cache_duration_milliseconds
+            );
+
+            if (is_health_cache_still_valid) {
+                return client_health_state.is_server_online;
+            }
+
+            const probe_result = await probe_ovis_server_health(configuration);
+            client_health_state = {
+                active_endpoint_url: probe_result.responsive_endpoint_url,
+                detected_hardware_device_name: probe_result.hardware_device_name,
+                is_server_online: probe_result.is_online,
+                last_health_check_timestamp_milliseconds: current_timestamp_milliseconds
+            };
+            return probe_result.is_online;
+        },
+
+        async generateImageEmbedding(physical_image_file_path) {
+            return generate_image_multimodal_embedding(configuration, physical_image_file_path);
+        },
+
+        async generateTextEmbedding(text_search_query) {
+            return generate_text_multimodal_embedding(configuration, text_search_query);
+        },
+
+        async classifyImageZeroShot(physical_image_file_path, candidate_taxonomic_labels, classification_facet_name = 'visual_facet') {
+            return classify_image_zero_shot(configuration, physical_image_file_path, candidate_taxonomic_labels, classification_facet_name);
         }
-
-        const probe_result = await probe_ovis_server_health(this.configuration);
-        this.is_server_online = probe_result.is_online;
-        this.active_endpoint_url = probe_result.responsive_endpoint_url;
-        this.detected_hardware_device_name = probe_result.hardware_device_name;
-        this.last_health_check_timestamp_milliseconds = current_timestamp_milliseconds;
-        return probe_result.is_online;
-    }
-
-    async generateImageEmbedding(physical_image_file_path) {
-        return generate_image_multimodal_embedding(this.configuration, physical_image_file_path);
-    }
-
-    async generateTextEmbedding(text_search_query) {
-        return generate_text_multimodal_embedding(this.configuration, text_search_query);
-    }
-
-    async classifyImageZeroShot(physical_image_file_path, candidate_taxonomic_labels, classification_facet_name = 'visual_facet') {
-        return classify_image_zero_shot(this.configuration, physical_image_file_path, candidate_taxonomic_labels, classification_facet_name);
-    }
+    };
 }
 
-// WHAT: Default singleton adapter instance for legacy server.js route handlers.
+export const OvisOmniClient = createOvisOmniClient;
+
+// WHAT: Default singleton adapter instance for server route handlers.
 // WHY: Ensures zero breaking changes for existing Express routes.
-export const ovis_omni_client_instance = new OvisOmniClient();
+export const ovis_omni_client_instance = createOvisOmniClient();

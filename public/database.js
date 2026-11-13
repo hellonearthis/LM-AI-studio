@@ -1,30 +1,37 @@
+import {
+    computeCardPixelWidthFromGridWidth,
+    computeTriangularPrismRadiusPixels,
+    computeNextPrismSpinDegrees,
+    getCardGrad,
+    escapeCardHtmlText,
+    extractDicedPromptMasterRecord,
+    renderDicedPromptBackDetailsHtml,
+    buildCardThumbnailBlockHtml,
+    buildCardBackIdentityHeaderHtml,
+    createCardHtml
+} from "./modules/databaseCardRenderers.js?v=3";
+
 // ============================================================================
 // IMAGE ANALYSIS STUDIO - DATABASE VIEWER
 // ============================================================================
 // This file handles loading and displaying saved image analyses from the
 // database, including thumbnails, metadata, and AI analysis results.
 
+import { escapeHtmlCharacters } from './modules/cardCore.js';
+import { computeUpdatedRecentRenamesList } from './modules/searchFilters.js';
+import {
+    showImagePreview,
+    showIntegrityCheckModal,
+    showBulkRenameModal,
+    showTagInputModal,
+    showConfirmModal
+} from './modules/uiModals.js';
+
 // ============================================================================
 // DOM ELEMENT REFERENCES
 // ============================================================================
 const dbGrid = document.getElementById('dbGrid');
 const loadingDb = document.getElementById('loadingDb');
-
-// WHAT: Escapes special characters within a given string that have semantic meaning in HTML.
-// WHY: We replace characters like '&', '<', '>', '"', and "'" with their corresponding HTML safe entity values.
-// This prevents the web browser from interpreting user-supplied or AI-generated string fields as HTML code,
-// thereby neutralizing potential Cross-Site Scripting (XSS) code injection attempts.
-function escapeHtmlCharacters(input_string_to_be_escaped) {
-    if (!input_string_to_be_escaped) {
-        return '';
-    }
-    return String(input_string_to_be_escaped)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-}
 
 // ============================================================================
 // TOAST NOTIFICATIONS
@@ -40,7 +47,7 @@ function showToast(message, type = 'info') {
 
     toast.innerHTML = `
         <span style="font-size: 1.2rem;">${icon}</span>
-        <span>${message}</span>
+        <span>${escapeHtmlCharacters(message)}</span>
     `;
 
     document.body.appendChild(toast);
@@ -169,6 +176,10 @@ async function loadNextPage() {
 
     } catch (page_load_error) {
         console.error('[DB] Page Load Error:', page_load_error);
+        if (loadingDb) {
+            loadingDb.style.display = 'block';
+            loadingDb.textContent = `Error loading database: ${page_load_error.message}`;
+        }
     } finally {
         isLoading = false;
     }
@@ -194,6 +205,27 @@ function setupSentinel() {
  * WHY: Pre-measures text heights using PretextLayout to prevent Cumulative Layout Shift (CLS),
  *      then appends new card elements at the bottom of the grid without disturbing preceding rows.
  */
+/**
+ * WHAT: Computes the responsive card column width in pixels for a grid container width.
+ * WHY: Matches the CSS rule `repeat(auto-fill, minmax(min(100%, 420px), 1fr))` with a `16px` gap so both Pretext measurement and 3D prism radius stay exact without querying every card.
+ */
+function syncGridPrismGeometry() {
+    if (!dbGrid) return;
+    const sample_card_element = dbGrid.querySelector('.card');
+    const measured_card_width = (sample_card_element && sample_card_element.clientWidth > 0)
+        ? sample_card_element.clientWidth
+        : computeCardPixelWidthFromGridWidth(dbGrid.offsetWidth);
+    const prism_radius_pixels = computeTriangularPrismRadiusPixels(measured_card_width);
+    dbGrid.style.setProperty('--prism-r', `${prism_radius_pixels}px`);
+}
+
+if (typeof ResizeObserver !== 'undefined' && dbGrid) {
+    const database_grid_prism_resize_observer = new ResizeObserver(() => {
+        syncGridPrismGeometry();
+    });
+    database_grid_prism_resize_observer.observe(dbGrid);
+}
+
 function renderBatch(deduplicated_batch_images) {
     // PRE-MEASUREMENT STEP:
     // We use PretextLayout to calculate exactly how many pixels of height the 
@@ -201,15 +233,23 @@ function renderBatch(deduplicated_batch_images) {
     let summaryHeightsMap = new Map();
     if (window.PretextLayout && window.PretextLayout.ready) {
         const grid_container_pixel_width = dbGrid.offsetWidth > 0 ? dbGrid.offsetWidth : 1000;
-        // Calculate responsive column count matching minmax(300px, 1fr)
-        const responsive_column_count = Math.max(1, Math.floor((grid_container_pixel_width + 16) / (300 + 16)));
-        const calculated_card_pixel_width = (grid_container_pixel_width - (responsive_column_count - 1) * 16) / responsive_column_count;
+        const calculated_card_pixel_width = computeCardPixelWidthFromGridWidth(grid_container_pixel_width);
         const text_usable_pixel_width = Math.max(100, calculated_card_pixel_width - 24); // Account for card padding (0.75rem * 2)
 
         const text_measurement_payload_array = deduplicated_batch_images.map(image_record => {
-            const analysis = (typeof image_record.analysis === 'string')
-                ? JSON.parse(image_record.analysis || '{}') : (image_record.analysis || {});
-            return { id: image_record.id, text: analysis.summary || '' };
+            // WHAT: Safely parses the stored analysis JSON string without crashing the batch render.
+            // WHY: A single corrupted JSON string in SQLite must not abort rendering all other image cards.
+            let parsed_analysis_record = {};
+            if (typeof image_record.analysis === 'string') {
+                try {
+                    parsed_analysis_record = JSON.parse(image_record.analysis || '{}') || {};
+                } catch (_json_parse_error) {
+                    parsed_analysis_record = {};
+                }
+            } else if (image_record.analysis && typeof image_record.analysis === 'object') {
+                parsed_analysis_record = image_record.analysis;
+            }
+            return { id: image_record.id, text: parsed_analysis_record.summary || '' };
         });
 
         summaryHeightsMap = window.PretextLayout.measureBatch(text_measurement_payload_array, text_usable_pixel_width, 'database');
@@ -230,6 +270,7 @@ function renderBatch(deduplicated_batch_images) {
 
     // Final DOM injection directly into the row grid
     dbGrid.insertAdjacentHTML('beforeend', batchHtml);
+    syncGridPrismGeometry();
 }
 
 /**
@@ -292,130 +333,159 @@ function measureSingleCardHeight(img, context = 'database') {
     return result.height;
 }
 
-const BRICKS_GRADS = ['purple', 'blue', 'green', 'orange', 'pink'];
-function getCardGrad(id) {
-    const numericId = typeof id === 'string' ? id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) : id;
-    return BRICKS_GRADS[numericId % BRICKS_GRADS.length];
+async function diceSingleImageAndRefreshCard(target_image_identifier) {
+    const numeric_image_identifier = Number(target_image_identifier);
+    if (!numeric_image_identifier) return;
+
+    showToast(`🧩 Dicing prompt for image #${numeric_image_identifier} (Pass A–D)...`, 'info');
+    try {
+        const http_dice_response = await fetch(`${API_BASE_URL}/api/dicer/dice`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                image_id: numeric_image_identifier,
+                media_type: 'image',
+                run_pass_d: true
+            })
+        });
+
+        if (!http_dice_response.ok) {
+            const error_payload = await http_dice_response.json();
+            throw new Error(error_payload.error || 'Dicing request failed');
+        }
+
+        const dice_payload = await http_dice_response.json();
+        const master_record = dice_payload.master_record;
+
+        const local_image_record = imagesData.find(
+            single_image_record => Number(single_image_record.id) === numeric_image_identifier
+        );
+        if (local_image_record) {
+            local_image_record.diced_prompt = master_record;
+            if (dice_payload.updated_analysis) {
+                local_image_record.analysis = dice_payload.updated_analysis;
+            } else {
+                const parsed_analysis = (() => {
+                    if (typeof local_image_record.analysis !== 'string') {
+                        return local_image_record.analysis;
+                    }
+                    try {
+                        return JSON.parse(local_image_record.analysis || '{}');
+                    } catch (analysis_parse_error) {
+                        return {};
+                    }
+                })();
+                local_image_record.analysis = { ...(parsed_analysis || {}), diced_prompt: master_record };
+            }
+
+            const existing_card_element = document.querySelector(`.card[data-id="${numeric_image_identifier}"]`);
+            if (existing_card_element) {
+                const previous_side = existing_card_element.getAttribute('data-side') || '1';
+                const previous_spin_degrees = existing_card_element.getAttribute('data-spin-deg');
+                const updated_card_html = createCardHtml(
+                    local_image_record,
+                    measureSingleCardHeight(local_image_record)
+                );
+                const temporary_container = document.createElement('div');
+                temporary_container.innerHTML = updated_card_html;
+                const replacement_card_element = temporary_container.firstElementChild;
+                existing_card_element.replaceWith(replacement_card_element);
+                if (replacement_card_element) {
+                    applyCardSideState(replacement_card_element, previous_side, {
+                        instant: true,
+                        override_spin_degrees: previous_spin_degrees !== null ? Number(previous_spin_degrees) : null
+                    });
+                }
+            }
+        }
+
+        const total_ingredients = master_record.ingredients.length;
+        const concreteness_pct = Math.round((Number(master_record.metrics?.physicality_ratio) || 0) * 100);
+        showToast(
+            `✓ Saved ${master_record.prompt_id} to images.db (${total_ingredients} ingredients, ${concreteness_pct}% concrete)`,
+            'success'
+        );
+    } catch (dice_error) {
+        console.error('[DATABASE-DICER] Error dicing image:', dice_error);
+        showToast(`Dicing failed: ${dice_error.message}`, 'error');
+    }
 }
 
-function createCardHtml(img, summaryHeight, isPriority = false, isEager = false) {
-    // Parse stored JSON data (handle if already parsed or string)
-    let analysis = img.analysis;
-    if (typeof analysis === 'string') {
-        try { analysis = JSON.parse(analysis || '{}'); } catch (e) { analysis = {}; }
-    } else {
-        analysis = analysis || {};
+/**
+ * WHAT: Updates a card element's active face (`1`, `2`, or `3`) and triggers its 3D Y-axis prism spin.
+ * WHY: Advances `--spin-deg` smoothly in 120-degree steps and optionally suppresses animation when re-rendering a card in place.
+ */
+function applyCardSideState(card_element, target_side, transition_options = {}) {
+    if (!card_element) return;
+    const normalized_side = ['1', '2', '3'].includes(String(target_side)) ? String(target_side) : '1';
+    const previous_side = card_element.getAttribute('data-side') || '1';
+    const current_spin_degrees = Number(card_element.getAttribute('data-spin-deg')) || 0;
+
+    syncGridPrismGeometry();
+
+    const next_spin_degrees = Number.isFinite(transition_options.override_spin_degrees)
+        ? Number(transition_options.override_spin_degrees)
+        : computeNextPrismSpinDegrees(current_spin_degrees, previous_side, normalized_side);
+
+    const card_inner_element = card_element.querySelector('.card-inner');
+    if (transition_options.instant && card_inner_element) {
+        card_inner_element.style.transition = 'none';
     }
 
-    let metadata = img.metadata;
-    if (typeof metadata === 'string') {
-        try { metadata = JSON.parse(metadata || '{}'); } catch (e) { metadata = {}; }
+    card_element.setAttribute('data-side', normalized_side);
+    card_element.setAttribute('data-spin-deg', String(next_spin_degrees));
+    card_element.style.setProperty('--spin-deg', `${next_spin_degrees}deg`);
+
+    if (normalized_side === '1') {
+        card_element.classList.remove('flipped');
     } else {
-        metadata = metadata || {};
+        card_element.classList.add('flipped');
     }
-    const date = new Date(img.created_at).toLocaleDateString();
 
-    // Extract key metadata fields for display
-    const width = img.width || metadata.ImageWidth || metadata.ExifImageWidth || metadata.PixelXDimension || 'N/A';
-    const height = img.height || metadata.ImageHeight || metadata.ExifImageHeight || metadata.PixelYDimension || 'N/A';
+    card_element.querySelectorAll('.card-side-pill[data-target-side]').forEach(pill_button => {
+        const pill_target_side = pill_button.getAttribute('data-target-side');
+        if (pill_target_side === normalized_side && normalized_side !== '1') {
+            pill_button.classList.add('active');
+        } else {
+            pill_button.classList.remove('active');
+        }
+    });
 
-    // Format full metadata
-    const metadataStr = Object.entries(metadata)
-        .filter(([key]) => !['ImageWidth', 'ImageHeight', 'ExifImageWidth', 'ExifImageHeight'].includes(key))
-        .map(([key, val]) => `${key}: ${val}`)
-        .join('\n');
-
-    // Thumbnail path logic (ID-based)
-    const timeStamp = img.updated_at ? new Date(img.updated_at).getTime() : (img.created_at ? new Date(img.created_at).getTime() : '');
-    const displayPath = `thumbnails/id_${img.id}.avif${timeStamp ? '?t=' + timeStamp : ''}`;
-
-    const fullPath = img.path;
-    const isSelected = selectedIds.has(String(img.id));
-
-    return `
-        <div class="card ${isSelected ? 'selected' : ''}" data-id="${img.id}" data-grad="${getCardGrad(img.id)}">
-            <div class="card-inner">
-                <!-- FRONT FACE -->
-                <div class="card-front">
-                    <div style="display: flex; gap: 1rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;">
-                        <!--Thumbnail Image -->
-                        <img src="${displayPath}" 
-                                data-fullpath="${fullPath}"
-                                class="thumbnail-preview"
-                                loading="${isEager ? 'eager' : 'lazy'}"
-                                decoding="async"
-                                ${isPriority ? 'fetchpriority="high"' : ''}
-                                width="100"
-                                height="100"
-                                onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
-                                style="width: 100px; height: 100px; object-fit: cover; border-radius: 8px; cursor: pointer;"
-                                title="Click to view full size">
-                        <!-- Fallback -->
-                        <div class="thumb-fallback" style="display: none; width: 100px; height: 100px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px; flex-direction: column; align-items: center; justify-content: center; gap: 0.25rem; font-size: 0.7rem; color: var(--text-secondary); text-align: center; padding: 0.5rem;">
-                            <span>No Preview</span>
-                            <button class="regen-thumb-btn" data-id="${img.id}" style="background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary); cursor: pointer; border-radius: 4px; padding: 2px 6px; font-size: 0.65rem;" title="Regenerate Thumbnail">
-                                🔄 Regen
-                            </button>
-                        </div>
-                        <!-- Image Info -->
-                        <div style="flex: 1; min-width: 0;">
-                            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                                <div style="flex: 1; min-width: 0;">
-                                    <h2 class="card-filename file-link" data-path="${img.path}" style="margin: 0; border: none; font-size: 1.1rem; cursor: pointer; color: var(--accent); text-decoration: none; display: block;" title="${(metadataStr || 'No extra metadata').replace(/"/g, '&quot;')}">${img.filename}</h2>
-                                    <small style="color: var(--text-secondary);">${date} • ${width}w ${height}h</small>
-                                </div>
-                                <div style="display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-end;">
-                                    <button class="delete-btn" data-id="${img.id}" style="background: transparent; border: 1px solid #ef4444; color: #ef4444; padding: 0.25rem 0.5rem; border-radius: 6px; cursor: pointer; font-size: 0.75rem; transition: all 0.2s;" title="Delete Image">X</button>
-                                    <!-- Selection Checkbox -->
-                                    <div style="display: flex; align-items: center; gap: 0.25rem;">
-                                        <input type="checkbox" class="card-select-cb" data-id="${img.id}" ${isSelected ? 'checked' : ''} style="cursor: pointer; transform: scale(1.2);">
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- AI Summary Section -->
-                    <div class="analysis-section" style="flex: 1;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-                            <h3 style="font-size: 0.9rem; color: var(--text-secondary); margin: 0;">AI Summary</h3>
-                            <button class="copy-btn" data-text="${(analysis.summary || '').replace(/"/g, '&quot;')}" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.15rem 0.4rem; border-radius: 4px; cursor: pointer; font-size: 0.65rem; white-space: nowrap;" title="Copy to clipboard">Copy</button>
-                        </div>
-                        <p class="${summaryHeight ? 'pretext-measured' : ''}" style="margin: 0; font-size: 0.9rem; color: var(--text-primary); line-height: 1.5; ${summaryHeight ? ` min-height: ${summaryHeight}px;` : ''}">${analysis.summary || 'No summary'}</p>
-                    </div>
-
-                    <div style="margin-top: 1rem; text-align: right;">
-                        <span style="font-size: 0.7rem; color: var(--text-secondary); opacity: 0.6;">Click card to reveal details ↻</span>
-                    </div>
-                </div>
-
-                <!-- BACK FACE -->
-                <div class="card-back">
-                    <div class="tags-section">
-                        <div class="tags-container" style="margin-bottom: 1rem;">
-                            <strong style="font-size: 0.8rem; color: var(--text-secondary); display: block; margin-bottom: 0.5rem;">Detected Objects:</strong>
-                            ${(analysis.objects || []).map(obj => `<span class="tag editable" data-id="${img.id}" data-type="objects" data-tag="${obj}" style="background-color: rgba(16, 185, 129, 0.2); color: #34d399; cursor: pointer; font-size: 0.75rem; margin-bottom: 4px;" title="Click to search, Right-click to edit">${obj}</span>`).join('')}
-                            <button class="add-tag-btn" data-id="${img.id}" data-type="objects" title="Add Object">+</button>
-                        </div>
-                        <div class="tags-container">
-                            <strong style="font-size: 0.8rem; color: var(--text-secondary); display: block; margin-bottom: 0.5rem;">Image Tags:</strong>
-                            ${(analysis.tags || []).map(tag => `<span class="tag editable" data-id="${img.id}" data-type="tags" data-tag="${tag}" style="cursor: pointer; font-size: 0.75rem; margin-bottom: 4px;" title="Click to search, Right-click to edit">${tag}</span>`).join('')}
-                            ${analysis.scene_type ? `<span class="tag" style="background-color: rgba(129, 140, 248, 0.2); color: #818cf8; font-size: 0.75rem; margin-bottom: 4px;">${analysis.scene_type}</span>` : ''}
-                            <button class="add-tag-btn" data-id="${img.id}" data-type="tags" title="Add Tag">+</button>
-                        </div>
-                    </div>
-
-                    <div style="margin-top: 2rem; text-align: center;">
-                        <span style="font-size: 0.75rem; color: var(--accent); cursor: pointer; padding: 0.5rem; border: 1px solid var(--accent); border-radius: 6px;" onclick="this.closest('.card').classList.remove('flipped')">Back to Summary</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    `;
+    if (transition_options.instant && card_inner_element && typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                card_inner_element.style.transition = '';
+            });
+        });
+    }
 }
 
-// Handle Regenerate Thumbnail and Copy Click (Delegated)
+// Handle Regenerate Thumbnail, Copy, Side Switch, and Three-Sided Card Cycle (Delegated)
 dbGrid.addEventListener('click', async (e) => {
+    const side_pill_button = e.target.closest('.card-side-pill[data-target-side]');
+    if (side_pill_button) {
+        e.stopPropagation();
+        const parent_card = side_pill_button.closest('.card');
+        applyCardSideState(parent_card, side_pill_button.getAttribute('data-target-side'));
+        return;
+    }
+
+    const dice_button_element = e.target.closest('.dice-card-btn');
+    if (dice_button_element) {
+        e.stopPropagation();
+        const target_image_identifier = dice_button_element.dataset.id;
+        dice_button_element.disabled = true;
+        await diceSingleImageAndRefreshCard(target_image_identifier);
+        dice_button_element.disabled = false;
+        return;
+    }
+
+    const open_dicer_link = e.target.closest('.open-dicer-link');
+    if (open_dicer_link) {
+        e.stopPropagation();
+        return;
+    }
+
     // Copy Button Click
     const copyBtn = e.target.closest('.copy-btn');
     if (copyBtn) {
@@ -455,15 +525,16 @@ dbGrid.addEventListener('click', async (e) => {
 
             if (response.ok) {
                 const data = await response.json();
-                // Find grid item and update image src to force reload
+                // Update thumbnail across all three 3D card sides so cache busting applies everywhere
                 const card = btn.closest('.card');
-                const thumbnail_image_element = card.querySelector('.thumbnail-preview');
-                const fallback = card.querySelector('.thumb-fallback');
-
-                // Add timestamp to force browser cache bypass
-                img.src = `${data.thumbPath}?t=${Date.now()}`;
-                thumbnail_image_element.style.display = 'block';
-                fallback.style.display = 'none';
+                const refreshed_thumbnail_url = `${data.thumbPath}?t=${Date.now()}`;
+                card.querySelectorAll('.thumbnail-preview').forEach(thumbnail_image_element => {
+                    thumbnail_image_element.src = refreshed_thumbnail_url;
+                    thumbnail_image_element.style.display = 'block';
+                });
+                card.querySelectorAll('.thumb-fallback').forEach(fallback_element => {
+                    fallback_element.style.display = 'none';
+                });
 
             } else {
                 showToast('Failed to regenerate thumbnail', 'error');
@@ -491,118 +562,20 @@ dbGrid.addEventListener('click', async (e) => {
         return;
     }
 
-    // NEW: Card Flip Toggle
+    // Three-Sided Card Flip Cycle: Side 1 (Summary) -> Side 2 (Tags) -> Side 3 (Diced Prompt) -> Side 1
     const card = e.target.closest('.card');
     if (card) {
-        // Only flip if we didn't click an interactive element
-        const isInteractive = e.target.closest('button, input, .file-link, .tag, .thumbnail-preview');
+        // Only cycle sides if we didn't click an interactive element
+        const isInteractive = e.target.closest('button, a, input, label, .file-link, .tag, .thumbnail-preview');
         if (!isInteractive) {
-            card.classList.toggle('flipped');
+            const current_side = card.getAttribute('data-side') || (card.classList.contains('flipped') ? '2' : '1');
+            const next_side = current_side === '1' ? '2' : (current_side === '2' ? '3' : '1');
+            applyCardSideState(card, next_side);
         }
     }
 });
 
 // ============================================================================
-// IMAGE PREVIEW POPUP
-// ============================================================================
-// Shows full-size image in a modal overlay
-async function showImagePreview(imagePath) {
-    try {
-        console.log('[IMAGE PREVIEW] Path from database:', imagePath);
-
-        // Read the file using Electron API
-        const fileBuffer = await window.electronAPI.readFile(imagePath);
-        const blob = new Blob([fileBuffer]);
-        const url = URL.createObjectURL(blob);
-
-        // Create modal overlay
-        const modal = document.createElement('div');
-        modal.style.cssText = `
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            background: rgba(0,0,0,0.95);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 10000;
-            cursor: pointer;
-            overflow: hidden;
-        `;
-
-        // Create image element
-        const modal_lightbox_image_element = document.createElement('img');
-        modal_lightbox_image_element.src = url;
-        modal_lightbox_image_element.style.cssText = `
-            max-width: 95vw;
-            max-height: 95vh;
-            width: auto;
-            height: auto;
-            object-fit: contain;
-            border-radius: 8px;
-            cursor: default;
-            box-shadow: 0 0 50px rgba(0,0,0,0.5);
-        `;
-
-        // Error handling
-        modal_lightbox_image_element.onerror = () => {
-            console.error('Failed to load image:', imagePath);
-            modal.remove();
-            URL.revokeObjectURL(url);
-            showToast('Failed to load image', 'error');
-        };
-
-        // Prevent clicks on image from closing modal
-        // img.addEventListener('click', (e) => {
-        //     e.stopPropagation();
-        // });
-
-        modal.appendChild(img);
-
-        // Create hint element
-        const hint = document.createElement('div');
-        hint.textContent = 'PRESS ANY KEY or Click anywhere TO EXIT';
-        hint.style.cssText = `
-            position: absolute;
-            top: 2rem;
-            left: 50%;
-            transform: translateX(-50%);
-            color: rgba(255,255,255,0.5);
-            font-size: 0.9rem;
-            letter-spacing: 0.05em;
-            text-transform: uppercase;
-            pointer-events: none;
-            background: rgba(0,0,0,0.3);
-            padding: 0.5rem 1rem;
-            border-radius: 20px;
-        `;
-        modal.appendChild(hint);
-
-        document.body.appendChild(modal);
-
-        // Close on background click
-        modal.addEventListener('click', () => {
-            modal.remove();
-            URL.revokeObjectURL(url);
-            document.removeEventListener('keydown', keyHandler);
-        });
-
-        // Close on any key press
-        const keyHandler = (e) => {
-            modal.remove();
-            URL.revokeObjectURL(url);
-            document.removeEventListener('keydown', keyHandler);
-        };
-        document.addEventListener('keydown', keyHandler);
-
-    } catch (error) {
-        console.error('[IMAGE PREVIEW] Error loading image:', error);
-        showToast(`Image File Not Found!\nPath: ${imagePath}`, 'error');
-    }
-}
-
 // [Deleted old deleteFromDatabase - see new implementation below]
 
 // ============================================================================
@@ -645,85 +618,9 @@ const validationText = document.getElementById('validationText');
 const validationProgressBar = document.getElementById('validationProgressBar');
 const closeStatus = document.getElementById('closeStatus');
 
-async function showIntegrityCheckModal() {
-    return new Promise((resolve) => {
-        const modal = document.createElement('div');
-        modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; z-index: 10000; backdrop-filter: blur(4px);';
-
-        modal.innerHTML = `
-            <div style="background: var(--bg-secondary); padding: 2.5rem; border-radius: 16px; border: 1px solid var(--border); max-width: 450px; width: 90%; box-shadow: 0 20px 50px rgba(0,0,0,0.5);">
-                <h3 style="margin: 0 0 1.5rem 0; color: var(--accent); font-size: 1.5rem; display: flex; align-items: center; gap: 0.75rem;">
-                    <span>🛡️</span> Database Integrity Check
-                </h3>
-                
-                <p style="color: var(--text-secondary); margin-bottom: 2rem; font-size: 0.95rem; line-height: 1.5;">
-                    Select the tasks you would like to perform during the maintenance pass:
-                </p>
-
-                <div style="display: flex; flex-direction: column; gap: 1.25rem; margin-bottom: 2.5rem;">
-                    <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer; padding: 0.5rem; border-radius: 8px; transition: background 0.2s; hover: background: rgba(255,255,255,10.05);">
-                        <input type="checkbox" id="icRemoveMissing" checked style="width: 18px; height: 18px; accent-color: var(--accent);">
-                        <div>
-                            <div style="color: var(--text-primary); font-weight: 500;">Remove Missing Files</div>
-                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Delete database records for files no longer on disk.</div>
-                        </div>
-                    </label>
-
-                    <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer; padding: 0.5rem; border-radius: 8px; transition: background 0.2s;">
-                        <input type="checkbox" id="icRepairMetadata" checked style="width: 18px; height: 18px; accent-color: var(--accent);">
-                        <div>
-                            <div style="color: var(--text-primary); font-weight: 500;">Repair Metadata</div>
-                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Fix missing dimensions, resolution, and file size data.</div>
-                        </div>
-                    </label>
-
-                    <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer; padding: 0.5rem; border-radius: 8px; transition: background 0.2s;">
-                        <input type="checkbox" id="icRegenThumb" checked style="width: 18px; height: 18px; accent-color: var(--accent);">
-                        <div>
-                            <div style="color: var(--text-primary); font-weight: 500;">Regenerate Thumbnails</div>
-                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Rebuild missing thumbnails using the new unique ID scheme.</div>
-                        </div>
-                    </label>
-
-                    <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer; padding: 1rem; border-radius: 8px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2);">
-                        <input type="checkbox" id="icPurgeThumb" style="width: 18px; height: 18px; accent-color: #ef4444;">
-                        <div>
-                            <div style="color: #ef4444; font-weight: 600;">Purge Legacy Thumbnails</div>
-                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Wipe all old thumbnails to fix collisions. (Recommended)</div>
-                        </div>
-                    </label>
-                </div>
-
-                <div style="display: flex; gap: 1rem; justify-content: flex-end;">
-                    <button id="icCancelBtn" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.6rem 1.25rem; border-radius: 8px; cursor: pointer; font-weight: 500;">Cancel</button>
-                    <button id="icRunBtn" style="background: var(--accent); border: none; color: white; padding: 0.6rem 2rem; border-radius: 8px; cursor: pointer; font-weight: 600;">Run Check</button>
-                </div>
-            </div>
-        `;
-
-        document.body.appendChild(modal);
-
-        modal.querySelector('#icCancelBtn').onclick = () => {
-            modal.remove();
-            resolve(null);
-        };
-
-        modal.querySelector('#icRunBtn').onclick = () => {
-            const options = {
-                removeMissing: modal.querySelector('#icRemoveMissing').checked,
-                repairMetadata: modal.querySelector('#icRepairMetadata').checked,
-                regenThumbnails: modal.querySelector('#icRegenThumb').checked,
-                purgeThumbnails: modal.querySelector('#icPurgeThumb').checked
-            };
-            modal.remove();
-            resolve(options);
-        };
-    });
-}
-
 if (validateBtn) {
     validateBtn.addEventListener('click', async () => {
-        const options = await showIntegrityCheckModal();
+        const options = await showIntegrityCheckModal({ includeValidateDiced: true });
         if (!options) return;
 
         validateBtn.disabled = true;
@@ -771,10 +668,20 @@ if (validateBtn) {
             if (r.metadataRepaired > 0) message += `🔧 Repaired ${r.metadataRepaired} metadata<br>`;
             if (r.missing > 0) message += `🗑️ Removed ${r.missing} missing files<br>`;
             if (r.fixedThumbnails > 0) message += `🖼️ Fixed ${r.fixedThumbnails} thumbnails<br>`;
+            if (r.dicedStaleReDiced > 0) message += `🧩 Re-diced ${r.dicedStaleReDiced} stale prompts (description changed)<br>`;
+            if (r.dicedMissingRepaired > 0) message += `🧩 Diced ${r.dicedMissingRepaired} missing prompts<br>`;
+            if (r.dicedDesyncedRepaired > 0) message += `🔗 Synced ${r.dicedDesyncedRepaired} image rows<br>`;
+            if (r.dicedOrphansCleaned > 0) message += `🧹 Cleaned ${r.dicedOrphansCleaned} orphaned diced entries<br>`;
+            if (r.orphanedEmbeddingsPruned > 0) message += `🧬 Pruned ${r.orphanedEmbeddingsPruned} orphaned embedding vectors<br>`;
             if (r.errors.length > 0) message += `⚠️ ${r.errors.length} errors occurred`;
 
-            if (r.purged === 0 && r.duplicatesRemoved === 0 && r.metadataRepaired === 0 && r.missing === 0 && r.fixedThumbnails === 0 && r.errors.length === 0) {
-                message += "✅ Database is healthy!";
+            if (
+                r.purged === 0 && r.duplicatesRemoved === 0 && r.metadataRepaired === 0
+                && r.missing === 0 && r.fixedThumbnails === 0 && r.errors.length === 0
+                && (r.dicedStaleReDiced || 0) === 0 && (r.dicedMissingRepaired || 0) === 0
+                && (r.dicedDesyncedRepaired || 0) === 0 && (r.orphanedEmbeddingsPruned || 0) === 0
+            ) {
+                message += "✅ Database, Diced Prompts & Embeddings are healthy!";
             }
 
             validationText.innerHTML = message;
@@ -788,7 +695,11 @@ if (validateBtn) {
             }, 5000);
 
             // Refresh grid if changes were made
-            if (r.missing > 0 || r.fixedThumbnails > 0 || r.purged > 0) {
+            if (
+                r.missing > 0 || r.fixedThumbnails > 0 || r.purged > 0
+                || (r.dicedStaleReDiced || 0) > 0 || (r.dicedMissingRepaired || 0) > 0
+                || (r.dicedDesyncedRepaired || 0) > 0
+            ) {
                 setTimeout(() => {
                     initDatabase(); // Reload current view
                 }, 1000);
@@ -796,9 +707,10 @@ if (validateBtn) {
 
         } catch (err) {
             console.error('Validation error:', err);
-            validationText.textContent = 'Error: ' + err.message;
-            validationProgressBar.style.backgroundColor = '#ef4444';
+            if (validationText) validationText.textContent = 'Error: ' + err.message;
+            if (validationProgressBar) validationProgressBar.style.backgroundColor = '#ef4444';
         } finally {
+            if (validateInterval) clearInterval(validateInterval);
             validateBtn.disabled = false;
             validateBtn.innerHTML = originalText;
         }
@@ -876,194 +788,93 @@ function showModal(modal_dialogue_header_title_text, modal_dialogue_body_message
     });
 }
 
-/**
- * @function showBulkRenameModal
- * @description Creates and manages a custom HTML overlay for bulk renaming files.
- * Why a custom modal? Modern Electron environments often block native prompt() for security.
- * A custom UI also allows us to show the user exactly which files are targeted.
- * 
- * @param {Set} selectedIdsSet - A set of Image IDs currently selected in the UI.
- * @param {Array} imagesArray - The full local cache of image objects to pull filenames from.
- */
-// WHAT: Creates, configures, and displays the batch rename modal dialogue.
-// WHY: Batch file renames are high-impact metadata operations. We construct a scrollable visual list of targeted
-// filenames. To prevent XSS injection, all targeted filenames and recent rename chip values are HTML-escaped
-// using `escapeHtmlCharacters` before rendering. All variables are written according to the `can_be_long` protocol.
-function showBulkRenameModal(selected_image_ids_set, cached_images_metadata_array) {
-    return new Promise((promise_resolution_handler_function) => {
-        // WHAT: Creating the modal container backdrop overlay element.
-        // WHY: Overlays isolate user attention and block background document interactions.
-        const bulk_rename_backdrop_element = document.createElement('div');
-        bulk_rename_backdrop_element.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;';
-
-        // WHAT: Converting set IDs to human-readable filenames and escaping each to block script injection.
-        // WHY: Filenames are loaded dynamically from filesystems and databases, presenting an XSS threat if rendered unescaped.
-        const retrieved_target_filenames_list = Array.from(selected_image_ids_set).map((each_image_id_string) => {
-            const matched_image_metadata_object = cached_images_metadata_array.find((each_cached_image) => {
-                return String(each_cached_image.id) === each_image_id_string;
-            });
-            const filename_string_value = matched_image_metadata_object ? matched_image_metadata_object.filename : `Record ID: ${each_image_id_string}`;
-            return escapeHtmlCharacters(filename_string_value);
-        });
-
-        // WHAT: Building scrollable list item HTML tags safely.
-        // WHY: Limits preview list to 100 entries to prevent memory and DOM lag on large batch operations.
-        const compiled_preview_list_items_html_string = retrieved_target_filenames_list.slice(0, 100).map((escaped_filename_item) => `
-            <li style="padding: 0.25rem 0; border-bottom: 1px solid rgba(255,255,255,0.05); color: var(--text-secondary); font-size: 0.85rem; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                📄 ${escaped_filename_item}
-            </li>
-        `).join('');
-
-        const compiled_overflow_indicator_html_string = retrieved_target_filenames_list.length > 100 
-            ? `<li style="padding: 0.25rem 0; color: var(--accent); font-size: 0.8rem; text-align: center;">...and ${retrieved_target_filenames_list.length - 100} more</li>` 
-            : '';
-
-        bulk_rename_backdrop_element.innerHTML = `
-            <div style="background: var(--card-bg); padding: 2rem; border-radius: 12px; border: 1px solid var(--border); max-width: 450px; width: 90%; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,0.5);">
-                <h3 style="margin: 0 0 0.5rem 0; color: var(--text-primary); font-size: 1.25rem;">Bulk Rename</h3>
-                <p style="margin: 0 0 1rem 0; color: var(--text-secondary); font-size: 0.9rem;">You are renaming ${selected_image_ids_set.size} file(s) in this batch.</p>
-                
-                <div style="background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem; margin-bottom: 1.5rem; max-height: 150px; overflow-y: auto;">
-                    <ul style="list-style: none; padding: 0; margin: 0;">
-                        ${compiled_preview_list_items_html_string}
-                        ${compiled_overflow_indicator_html_string}
-                    </ul>
-                </div>
-
-                <div style="margin-bottom: 1.5rem; text-align: left;">
-                    <label style="display: block; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.5rem;">New Base Name (e.g. "holiday")</label>
-
-                    ${(() => {
-                        const list_of_recent_renames_array = getRecentRenames();
-                        if (list_of_recent_renames_array.length === 0) {
-                            return '';
-                        }
-                        return `
-                            <div id="recentRenamesContainer" style="margin-bottom: 0.75rem; display: flex; flex-wrap: wrap; gap: 0.4rem; padding: 0.5rem; background: rgba(0,0,0,0.2); border-radius: 6px; border: 1px dashed rgba(167, 139, 250, 0.3);">
-                                <span style="font-size: 0.7rem; color: var(--accent); width: 100%; margin-bottom: 0.2rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Recent:</span>
-                                ${list_of_recent_renames_array.map((each_recent_name_string) => {
-                                    const escaped_recent_name_string = escapeHtmlCharacters(each_recent_name_string);
-                                    return `
-                                        <span class="recent-rename-chip" 
-                                              style="background: rgba(139, 92, 246, 0.15); border: 1px solid rgba(139, 92, 246, 0.3); color: #c4b5fd; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; cursor: pointer; transition: all 0.2s;"
-                                              onmouseover="this.style.background='rgba(139, 92, 246, 0.3)'; this.style.borderColor='var(--accent)';"
-                                              onmouseout="this.style.background='rgba(139, 92, 246, 0.15)'; this.style.borderColor='rgba(139, 92, 246, 0.3)';"
-                                              onclick="document.getElementById('renameBaseInput').value = '${escaped_recent_name_string.replace(/'/g, "\\'")}'; document.getElementById('renameBaseInput').focus();">
-                                            ${escaped_recent_name_string}
-                                        </span>
-                                    `;
-                                }).join('')}
-                            </div>
-                        `;
-                    })()}
-
-                    <input type="text" id="renameBaseInput" placeholder="Enter base name..." style="width: 100%; padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-color); color: var(--text-primary); font-size: 1rem; outline: none;">
-                    <p style="margin: 0.5rem 0 0 0; color: var(--text-secondary); font-size: 0.75rem;">Sequence logic: holiday_001, holiday_002, etc.</p>
-                </div>
-
-                <div style="display: flex; gap: 1rem; justify-content: flex-end;">
-                    <button id="cancelRenameBtn" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.5rem 1.5rem; border-radius: 6px; cursor: pointer; transition: all 0.2s;">Cancel</button>
-                    <button id="goRenameBtn" style="background: var(--accent); border: none; color: white; padding: 0.5rem 1.5rem; border-radius: 6px; cursor: pointer; font-weight: 500; transition: background 0.2s;">Go</button>
-                </div>
-            </div>
-        `;
-
-        document.body.appendChild(bulk_rename_backdrop_element);
-
-        const text_input_field_element = bulk_rename_backdrop_element.querySelector('#renameBaseInput');
-        const confirm_action_button_element = bulk_rename_backdrop_element.querySelector('#goRenameBtn');
-        const cancel_action_button_element = bulk_rename_backdrop_element.querySelector('#cancelRenameBtn');
-
-        // WHAT: Automatically focusing the input text field after display rendering delay.
-        // WHY: Guides user navigation seamlessly to start typing without requiring manual cursor clicks.
-        setTimeout(() => {
-            text_input_field_element.focus();
-        }, 50);
-
-        // WHAT: Standardizing modal closing logic and cleanups.
-        // WHY: Removes structural events and element trees from active page memories when resolving promises.
-        const close_modal_and_resolve_promise_action = (final_entered_value_string) => {
-            document.removeEventListener('keydown', keyboard_event_handler_function);
-            bulk_rename_backdrop_element.remove();
-            promise_resolution_handler_function(final_entered_value_string);
-        };
-
-        const validate_and_submit_changes_action = () => {
-            const trimmed_input_value_string = text_input_field_element.value.trim();
-            if (trimmed_input_value_string) {
-                close_modal_and_resolve_promise_action(trimmed_input_value_string);
-            } else {
-                // Flash border color in red to denote missing required text field values
-                text_input_field_element.style.border = '1px solid #ef4444';
-                setTimeout(() => {
-                    text_input_field_element.style.border = '1px solid var(--border)';
-                }, 1000);
-            }
-        };
-
-        confirm_action_button_element.onclick = validate_and_submit_changes_action;
-        cancel_action_button_element.onclick = () => {
-            close_modal_and_resolve_promise_action(null);
-        };
-
-        // WHAT: Capturing general keystrokes specifically inside document contexts.
-        // WHY: Intercepts Escape and Enter keypress mappings for accessible navigation controls.
-        const keyboard_event_handler_function = (keyboard_event_object) => {
-            if (keyboard_event_object.key === 'Escape') {
-                keyboard_event_object.preventDefault();
-                close_modal_and_resolve_promise_action(null);
-            } else if (keyboard_event_object.key === 'Enter') {
-                keyboard_event_object.preventDefault();
-                validate_and_submit_changes_action();
-            }
-        };
-
-        document.addEventListener('keydown', keyboard_event_handler_function);
-        
-        cancel_action_button_element.onmouseover = () => {
-            cancel_action_button_element.style.background = 'rgba(255,255,255,0.05)';
-        };
-        cancel_action_button_element.onmouseout = () => {
-            cancel_action_button_element.style.background = 'transparent';
-        };
-        confirm_action_button_element.onmouseover = () => {
-            confirm_action_button_element.style.filter = 'brightness(1.1)';
-        };
-        confirm_action_button_element.onmouseout = () => {
-            confirm_action_button_element.style.filter = 'brightness(1)';
-        };
-    });
-}
 
 // 1. Select Missing
 if (selectMissingBtn) {
     selectMissingBtn.addEventListener('click', () => {
         let count = 0;
+        const is_dicer_mode = dbPromptType && dbPromptType.value === 'Prompt Dicer';
+
         imagesData.forEach(single_image_record => {
             let analysis = {};
             try {
-                analysis = typeof img.analysis === 'string' ? JSON.parse(img.analysis) : (img.analysis || {});
+                analysis = typeof single_image_record.analysis === 'string'
+                    ? JSON.parse(single_image_record.analysis)
+                    : (single_image_record.analysis || {});
             } catch (e) { }
 
-            // Criteria: Missing Summary OR Missing Tags OR Missing Objects OR Missing Resolution
-            if (!analysis.summary || !analysis.tags || analysis.tags.length === 0 || !analysis.objects || analysis.objects.length === 0 || !img.width || !img.height) {
+            const diced_record = extractDicedPromptMasterRecord(single_image_record, analysis);
+            const is_missing_data = is_dicer_mode
+                ? !diced_record
+                : (!analysis.summary || !analysis.tags || analysis.tags.length === 0 || !analysis.objects || analysis.objects.length === 0 || !single_image_record.width || !single_image_record.height);
+
+            if (is_missing_data) {
                 selectedIds.add(String(single_image_record.id));
                 count++;
 
                 // Updates visual check
-                const checkbox = document.querySelector(`.card-select-cb[data-id="${img.id}"]`);
+                const checkbox = document.querySelector(`.card-select-cb[data-id="${single_image_record.id}"]`);
                 if (checkbox) checkbox.checked = true;
 
-                const card = document.querySelector(`.card[data-id="${img.id}"]`);
+                const card = document.querySelector(`.card[data-id="${single_image_record.id}"]`);
                 if (card) card.classList.add('selected');
             }
         });
 
         if (count > 0) {
             updateProcessButton();
-            // Optional: Removed success alert to be less intrusive
         } else {
-            showModal('Auto-Selection', 'No loaded images found with missing data.');
+            showModal('Auto-Selection', is_dicer_mode ? 'All loaded images already have a diced prompt Master Record!' : 'No loaded images found with missing data.');
+        }
+    });
+}
+
+// 1b. Validate & Sync All Diced Prompts in Library
+const diceAllPromptsBtn = document.getElementById('diceAllPromptsBtn');
+if (diceAllPromptsBtn) {
+    diceAllPromptsBtn.addEventListener('click', async () => {
+        diceAllPromptsBtn.disabled = true;
+        const original_button_label = diceAllPromptsBtn.textContent;
+        diceAllPromptsBtn.textContent = '🧩 Validating & Syncing...';
+
+        if (validationStatus) {
+            validationStatus.style.display = 'block';
+            validationText.textContent = 'Validating diced prompts against latest image descriptions...';
+            validationProgressBar.style.width = '35%';
+        }
+
+        try {
+            const http_response = await fetch(`${API_BASE_URL}/api/dicer/validate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ force_heuristic: true })
+            });
+            const payload = await http_response.json();
+            if (!http_response.ok || !payload.success) {
+                throw new Error(payload.error || 'Diced prompt validation failed');
+            }
+
+            // WHAT: Naming the validation summary payload semantically and displaying repair counts.
+            // WHY: Makes each summary metric clear without cryptic single-letter abbreviations.
+            const validation_summary = payload.summary;
+            const ovis_enriched_total = validation_summary.ovis_enriched_count || 0;
+            if (validationProgressBar) validationProgressBar.style.width = '100%';
+            if (validationText) {
+                validationText.innerHTML = `<strong>Diced Prompt Validation Complete!</strong><br>Valid: ${validation_summary.valid_count} | Re-diced Stale: ${validation_summary.stale_re_diced_count} | Repaired Missing: ${validation_summary.missing_repaired_count} | Structural Repairs: ${validation_summary.desynced_repaired_count} | Ovis Enriched: ${ovis_enriched_total}`;
+            }
+            showToast(
+                `✓ Validated ${validation_summary.total_images} images (Re-diced ${validation_summary.stale_re_diced_count} stale, repaired ${validation_summary.missing_repaired_count + validation_summary.desynced_repaired_count}, Ovis enriched ${ovis_enriched_total})`,
+                'success'
+            );
+            if (validation_summary.stale_re_diced_count > 0 || validation_summary.missing_repaired_count > 0 || validation_summary.desynced_repaired_count > 0 || ovis_enriched_total > 0) {
+                await initDatabase();
+            }
+        } catch (batch_dice_error) {
+            console.error('[DATABASE-DICER] Validation error:', batch_dice_error);
+            showToast(`Diced validation error: ${batch_dice_error.message}`, 'error');
+        } finally {
+            diceAllPromptsBtn.disabled = false;
+            diceAllPromptsBtn.textContent = original_button_label;
         }
     });
 }
@@ -1137,7 +948,7 @@ if (bulkRenameBtn) {
          * STEP 1: UI INTERACTION
          * We trigger our custom modal to ask for the naming prefix (e.g. "beach")
          */
-        const selectedBaseName = await showBulkRenameModal(selectedIds, imagesData);
+        const selectedBaseName = await showBulkRenameModal(selectedIds, imagesData, getRecentRenames());
         
         // If the user cancelled the modal or entered an empty string, we exit
         if (!selectedBaseName || !selectedBaseName.trim()) {
@@ -1252,6 +1063,9 @@ if (processSelectedBtn) {
                         const local_image_record = imagesData.find(single_image_record => single_image_record.id == updated.id);
                         if (local_image_record) {
                             local_image_record.analysis = updated.analysis;
+                            if (updated.diced_prompt) {
+                                local_image_record.diced_prompt = updated.diced_prompt;
+                            }
                             local_image_record.updated_at = updated.updated_at;
                             if (updated.width) local_image_record.width = updated.width;
                             if (updated.height) local_image_record.height = updated.height;
@@ -1260,7 +1074,7 @@ if (processSelectedBtn) {
                             // Update DOM
                             const existingCard = document.querySelector(`.card[data-id="${updated.id}"]`);
                             if (existingCard) {
-                                const newCardHtml = createCardHtml(localImg, measureSingleCardHeight(localImg));
+                                const newCardHtml = createCardHtml(local_image_record, measureSingleCardHeight(local_image_record));
                                 const temp = document.createElement('div');
                                 temp.innerHTML = newCardHtml;
                                 existingCard.replaceWith(temp.firstElementChild);
@@ -1376,6 +1190,10 @@ function showContextMenu(e, id, type, tag = null, card = null, dataType = null) 
     const ovis_classify_menu_item = document.getElementById('ctxOvisClassify');
     if (ovis_classify_menu_item) {
         ovis_classify_menu_item.style.display = type === 'thumbnail' ? 'block' : 'none';
+    }
+    const dice_prompt_menu_item = document.getElementById('ctxDicePrompt');
+    if (dice_prompt_menu_item) {
+        dice_prompt_menu_item.style.display = type === 'thumbnail' ? 'block' : 'none';
     }
     document.getElementById('ctxSearch').style.display = type === 'tag' ? 'block' : 'none';
     document.getElementById('ctxEdit').style.display = type === 'tag' ? 'block' : 'none';
@@ -1551,6 +1369,20 @@ if (context_menu_ovis_classify_button) {
             console.error('[OVIS-CLIENT] Classification error:', zero_shot_classification_error);
             showToast(`Ovis classification failed: ${zero_shot_classification_error.message}`, 'error');
         }
+    });
+}
+
+// WHAT: Context menu action to slice and dice prompt ingredients for the selected image entry.
+// WHY: Gives users immediate right-click access from the Database grid to decompose image prompts into ingredients
+//      and immediately update the image card in place.
+const context_menu_dice_prompt_button = document.getElementById('ctxDicePrompt');
+if (context_menu_dice_prompt_button) {
+    context_menu_dice_prompt_button.addEventListener('click', async (mouse_click_event) => {
+        mouse_click_event.stopPropagation();
+        if (!ctxTarget || !ctxTarget.id) return;
+        const target_image_identifier = ctxTarget.id;
+        hideContextMenu();
+        await diceSingleImageAndRefreshCard(target_image_identifier);
     });
 }
 
@@ -1756,177 +1588,12 @@ function showDeleteOptionsModal(filename, callback) {
 }
 
 // Custom Input Modal (Replaces prompt)
-// WHAT: Creates and displays a modal dialog prompting the user to input or edit a tag value.
-// WHY: We replace native browser prompts with a beautiful, accessible modal dialogue. To ensure security,
-// all dynamic parameter strings like the title or initial tag name are HTML-escaped using our central utility
-// before being injected into the HTML template, preventing any script injection payloads from executing.
-function showTagInputModal(modal_dialogue_title_text, initial_input_field_value_text, tag_submission_callback_function) {
-    // WHAT: Creating the modal container element and styling it to cover the entire screen viewport.
-    // WHY: A full-screen overlay backdrop blocks underlying interactions and focuses user attention on the input task.
-    const tag_input_modal_container_element = document.createElement('div');
-    tag_input_modal_container_element.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 9999;';
-
-    // WHAT: Safely escaping our inputs and rendering the modal HTML markup structure.
-    // WHY: We HTML-escape both the title text and the initial field value using `escapeHtmlCharacters`
-    // to shield the application from Cross-Site Scripting (XSS) in case they contain malicious tag strings.
-    const escaped_modal_dialogue_title_text = escapeHtmlCharacters(modal_dialogue_title_text);
-    const escaped_initial_input_field_value_text = escapeHtmlCharacters(initial_input_field_value_text);
-
-    tag_input_modal_container_element.innerHTML = `
-        <div style="background: var(--card-bg); padding: 2rem; border-radius: 12px; border: 1px solid var(--border); max-width: 400px; width: 90%;">
-            <h3 style="margin: 0 0 1rem 0; color: var(--text-primary);">${escaped_modal_dialogue_title_text}</h3>
-            <input type="text" id="modalInput" value="${escaped_initial_input_field_value_text}" style="width: 100%; padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border); background: #1f2937; color: white; margin-bottom: 1.5rem;">
-            <div style="display: flex; gap: 1rem; justify-content: flex-end;">
-                <button id="cancelModalBtn" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer;">Cancel</button>
-                <button id="saveModalBtn" style="background: var(--accent); border: none; color: white; padding: 0.5rem 1.5rem; border-radius: 6px; cursor: pointer; font-weight: 500;">Save</button>
-            </div>
-        </div>
-    `;
-
-    // WHAT: Appending our new modal dialogue structure to the document body.
-    // WHY: The element must be attached to the active document DOM tree to render visually.
-    document.body.appendChild(tag_input_modal_container_element);
-
-    // WHAT: Querying and retrieving references to the inner interactive modal DOM elements.
-    // WHY: We need precise control over the text input and action buttons to wire up click and keystroke behaviors.
-    const text_input_field_element = tag_input_modal_container_element.querySelector('#modalInput');
-    const save_changes_button_element = tag_input_modal_container_element.querySelector('#saveModalBtn');
-    const cancel_changes_button_element = tag_input_modal_container_element.querySelector('#cancelModalBtn');
-
-    // WHAT: Defining the keydown event listener to close the modal dialogue when Escape is pressed.
-    // WHY: Pressing the Escape key is a universal web accessibility pattern to close dismissible overlays easily.
-    const keyboard_event_handler_function = (keyboard_event_object) => {
-        if (keyboard_event_object.key === 'Escape') {
-            cleanup_modal_and_remove_event_listeners();
-        }
-    };
-    document.addEventListener('keydown', keyboard_event_handler_function);
-
-    // WHAT: Removing keyboard event listeners and destroying the modal container element from the DOM.
-    // WHY: Cleanup prevents memory leaks and ensures that obsolete keyboard listeners do not persist in the global document context.
-    const cleanup_modal_and_remove_event_listeners = () => {
-        document.removeEventListener('keydown', keyboard_event_handler_function);
-        tag_input_modal_container_element.remove();
-    };
-
-    // WHAT: Extracting the input text, cleaning up modal DOM structures, and returning the value back through the callback trigger.
-    // WHY: We collect the final user input, close the overlay, and invoke the caller's success logic with the entered string.
-    const save_input_value_and_trigger_callback = () => {
-        const retrieved_input_value_string = text_input_field_element.value;
-        cleanup_modal_and_remove_event_listeners();
-        tag_submission_callback_function(retrieved_input_value_string);
-    };
-
-    // WHAT: Setting a minor delay to focus and highlight the text input field automatically.
-    // WHY: Directing user focus to the primary input element immediately upon rendering enhances the overall user experience.
-    setTimeout(() => {
-        text_input_field_element.focus();
-        text_input_field_element.select();
-    }, 10);
-
-    save_changes_button_element.onclick = save_input_value_and_trigger_callback;
-    cancel_changes_button_element.onclick = cleanup_modal_and_remove_event_listeners;
-
-    // WHAT: Binding an Enter keypress listener specifically on the text input field to submit values directly.
-    // WHY: Pressing Enter inside single-line form input fields is a standard user expectation for submitting values quickly.
-    text_input_field_element.addEventListener('keydown', (keyboard_event_object) => {
-        if (keyboard_event_object.key === 'Enter') {
-            keyboard_event_object.preventDefault();
-            save_input_value_and_trigger_callback();
-        }
-    });
-
-    // WHAT: Binding a click handler on the backdrop itself to dismiss the modal dialogue.
-    // WHY: Clicking outside the dialog boundary represents an intuitive, secondary way to dismiss or cancel the modal overlay.
-    tag_input_modal_container_element.onclick = (mouse_click_event_object) => {
-        if (mouse_click_event_object.target === tag_input_modal_container_element) {
-            cleanup_modal_and_remove_event_listeners();
-        }
-    };
-}
-
-// Custom Confirmation Modal
-// WHAT: Creates, styles, and presents a customized double-confirmation modal dialogue overlay.
-// WHY: We replace standard browser alert or confirm prompts with beautiful UI elements. By escaping
-// all dynamic strings (message and confirm text) using `escapeHtmlCharacters`, we prevent potential
-// XSS vulnerabilities if filenames or user metadata contain embedded script blocks.
-function showConfirmModal(dialogue_message_text, action_on_confirmation_callback) {
-    // WHAT: Creating the modal container backdrop overlay.
-    // WHY: Viewport cover creates a clean dark backdrop focusing attention on the choice.
-    const confirmation_modal_container_element = document.createElement('div');
-    confirmation_modal_container_element.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;';
-
-    // WHAT: Safely escaping variable texts to block XSS and rendering the HTML skeleton.
-    // WHY: Escaping ensures that even if filenames contain custom script tags, they are rendered safely as textual content.
-    const escaped_dialogue_message_text = escapeHtmlCharacters(dialogue_message_text);
-
-    confirmation_modal_container_element.innerHTML = `
-        <div style="background: var(--card-bg); padding: 2rem; border-radius: 12px; border: 1px solid var(--border); max-width: 400px; width: 90%; text-align: center;">
-            <p style="margin: 0 0 1.5rem 0; color: var(--text-primary); font-size: 1.1rem;">${escaped_dialogue_message_text}</p>
-            <div style="display: flex; gap: 1rem; justify-content: center;">
-                <button id="cancelConfirmBtn" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.5rem 1.5rem; border-radius: 6px; cursor: pointer;">Cancel</button>
-                <button id="okConfirmBtn" style="background: #ef4444; border: none; color: white; padding: 0.5rem 1.5rem; border-radius: 6px; cursor: pointer; font-weight: 500;">Delete</button>
-            </div>
-        </div>
-    `;
-
-    // WHAT: Rendering our dynamic container element to the document viewport structure.
-    // WHY: Elements must be added to the live document DOM structure to register visible layout nodes.
-    document.body.appendChild(confirmation_modal_container_element);
-
-    const ok_confirmation_action_button_element = confirmation_modal_container_element.querySelector('#okConfirmBtn');
-    const cancel_confirmation_action_button_element = confirmation_modal_container_element.querySelector('#cancelConfirmBtn');
-
-    // WHAT: Forcing input focus to the active confirmation trigger button.
-    // WHY: Setting default keyboard focus on the main action item ensures quick keyboard-only accessibility.
-    setTimeout(() => {
-        ok_confirmation_action_button_element.focus();
-    }, 10);
-
-    // WHAT: Dismantling the modal overlay and cleaning up registered document keyboard event listeners.
-    // WHY: Proper cleanups avoid resource bloats and unreferenced listener remnants in global page scopes.
-    const cleanup_modal_and_remove_event_listeners = () => {
-        document.removeEventListener('keydown', keyboard_event_handler_function);
-        confirmation_modal_container_element.remove();
-    };
-
-    // WHAT: Closing the modal first, then launching the supplied success function task.
-    // WHY: Executing callbacks after teardowns ensures clean DOM sequences and prevents double-triggers.
-    const execute_confirmed_action_callback = () => {
-        cleanup_modal_and_remove_event_listeners();
-        action_on_confirmation_callback();
-    };
-
-    ok_confirmation_action_button_element.onclick = execute_confirmed_action_callback;
-    cancel_confirmation_action_button_element.onclick = cleanup_modal_and_remove_event_listeners;
-
-    // WHAT: Permitting modal dismissal via click overlays on the backdrop element.
-    // WHY: Off-dialogue clicks represent an intuitive secondary path for dismissing choices.
-    confirmation_modal_container_element.onclick = (mouse_click_event_object) => {
-        if (mouse_click_event_object.target === confirmation_modal_container_element) {
-            cleanup_modal_and_remove_event_listeners();
-        }
-    };
-
-    // WHAT: Capturing global Enter and Escape keyboard keystrokes inside the modal dialogue.
-    // WHY: Enter triggers swift submission, whereas Escape aborts the overlay safely.
-    const keyboard_event_handler_function = (keyboard_event_object) => {
-        if (keyboard_event_object.key === 'Enter') {
-            keyboard_event_object.preventDefault();
-            execute_confirmed_action_callback();
-        } else if (keyboard_event_object.key === 'Escape') {
-            keyboard_event_object.preventDefault();
-            cleanup_modal_and_remove_event_listeners();
-        }
-    };
-
-    document.addEventListener('keydown', keyboard_event_handler_function);
-}
-
 async function regenerateThumbnail(id, cardElement) {
+    const thumbnail_elements = cardElement.querySelectorAll('.thumbnail-preview');
     try {
-        const thumbImg = cardElement.querySelector('.thumbnail-preview');
-        thumbImg.style.opacity = '0.5';
+        thumbnail_elements.forEach(thumbnail_image_element => {
+            thumbnail_image_element.style.opacity = '0.5';
+        });
 
         const response = await fetch(`${API_BASE_URL}/regenerate-thumbnail`, {
             method: 'POST',
@@ -1939,15 +1606,23 @@ async function regenerateThumbnail(id, cardElement) {
         const data = await response.json();
 
         if (data.thumbPath) {
-            thumbImg.src = `${data.thumbPath}?t=${Date.now()}`;
+            const refreshed_thumbnail_url = `${data.thumbPath}?t=${Date.now()}`;
+            thumbnail_elements.forEach(thumbnail_image_element => {
+                thumbnail_image_element.src = refreshed_thumbnail_url;
+                thumbnail_image_element.style.display = 'block';
+            });
+            cardElement.querySelectorAll('.thumb-fallback').forEach(fallback_element => {
+                fallback_element.style.display = 'none';
+            });
         }
 
     } catch (error) {
         console.error('Regenerate error:', error);
         showToast('Failed to regenerate thumbnail: ' + error.message, 'error');
     } finally {
-        const thumbImg = cardElement.querySelector('.thumbnail-preview');
-        if (thumbImg) thumbImg.style.opacity = '1';
+        cardElement.querySelectorAll('.thumbnail-preview').forEach(thumbnail_image_element => {
+            thumbnail_image_element.style.opacity = '1';
+        });
     }
 }
 
@@ -1976,13 +1651,6 @@ function getRecentRenames() {
 }
 
 function saveRecentRename(name) {
-    if (!name || !name.trim()) return;
-    const trimmed = name.trim();
-    let recent = getRecentRenames();
-    // Remove if already exists to move it to the top
-    recent = recent.filter(r => r !== trimmed);
-    recent.unshift(trimmed);
-    // Keep only last 10
-    recent = recent.slice(0, 10);
-    localStorage.setItem('recentRenames', JSON.stringify(recent));
+    const updated_recent_renames_list = computeUpdatedRecentRenamesList(getRecentRenames(), name);
+    localStorage.setItem('recentRenames', JSON.stringify(updated_recent_renames_list));
 }

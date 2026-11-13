@@ -8,6 +8,10 @@
 
 import { ovis_omni_client_instance } from '../services/ovisOmniClient.js';
 
+/**
+ * WHAT: Verifies connectivity and taxonomy configuration for the Ovis-Omni multimodal microservice.
+ * WHY: Provides a quick CLI diagnostic check before running dataset-scale embedding or classification passes.
+ */
 async function execute_ovis_integration_verification() {
     console.log('======================================================================');
     console.log('Lumina - Ovis-Omni Multimodal Engine Diagnostic Verification');

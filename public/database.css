@@ -74,7 +74,7 @@
    ============================================================================ */
 .analysis-grid.database-results-grid {
     display: grid !important;
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
     gap: 16px;
     align-items: stretch;
     width: 100%;
@@ -85,12 +85,18 @@
     display: flex;
     flex-direction: column;
     margin: 0;
+    perspective: 1200px;
 }
 
-.analysis-grid.database-results-grid > .card .card-inner {
+.analysis-grid.database-results-grid > .card .card-inner,
+.analysis-grid.database-results-grid > .card.flipped .card-inner {
     height: 100%;
     display: flex;
     flex-direction: column;
+    transform-style: preserve-3d;
+    transform: translateZ(calc(-1 * var(--prism-r, 92px))) rotateY(var(--spin-deg, 0deg));
+    transition: transform 0.65s cubic-bezier(0.32, 1.15, 0.62, 1);
+    will-change: transform;
 }
 
 .analysis-grid.database-results-grid > .card .card-front {
@@ -98,6 +104,53 @@
     height: 100%;
     display: flex;
     flex-direction: column;
+    transform: rotateY(0deg) translateZ(var(--prism-r, 92px));
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
+}
+
+.analysis-grid.database-results-grid > .card .card-back-face {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    overflow-y: auto;
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.analysis-grid.database-results-grid > .card .card-back-tags {
+    transform: rotateY(120deg) translateZ(var(--prism-r, 92px));
+    border-top: 3px solid #818cf8;
+}
+
+.analysis-grid.database-results-grid > .card .card-back-dicer {
+    transform: rotateY(240deg) translateZ(var(--prism-r, 92px));
+    border-top: 3px solid #38bdf8;
+}
+
+.analysis-grid.database-results-grid > .card .card-front,
+.analysis-grid.database-results-grid > .card .card-back-face {
+    pointer-events: none;
+    z-index: 1;
+}
+
+.analysis-grid.database-results-grid > .card[data-side="1"] .card-front,
+.analysis-grid.database-results-grid > .card:not([data-side]) .card-front,
+.analysis-grid.database-results-grid > .card[data-side="2"] .card-back-tags,
+.analysis-grid.database-results-grid > .card[data-side="3"] .card-back-dicer {
+    pointer-events: auto;
+    z-index: 3;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .analysis-grid.database-results-grid > .card .card-inner,
+    .analysis-grid.database-results-grid > .card.flipped .card-inner {
+        transition: none;
+    }
 }
 
 .scroll-sentinel {
@@ -105,4 +158,58 @@
     width: 100%;
     pointer-events: none;
     visibility: hidden;
+}
+
+/* ============================================================================
+   THREE-SIDED CARD NAVIGATION (SIDE 1: SUMMARY -> SIDE 2: TAGS -> SIDE 3: DICER)
+   ============================================================================ */
+.card-side-pill {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: var(--text-secondary);
+    padding: 0.25rem 0.55rem;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.card-side-pill:hover {
+    color: var(--text-primary);
+    border-color: rgba(56, 189, 248, 0.45);
+}
+
+.card-side-pill.active {
+    background: rgba(56, 189, 248, 0.16);
+    border-color: rgba(56, 189, 248, 0.55);
+    color: #38bdf8;
+}
+
+/* Enlarged selection checkbox + accessible 44px hit target on database cards */
+.card-select-target {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-inline-size: 44px;
+    min-block-size: 44px;
+    padding: 6px;
+    margin: -6px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.card-select-cb {
+    inline-size: 32px;
+    block-size: 32px;
+    aspect-ratio: 1;
+    margin: 0;
+    accent-color: var(--accent, #38bdf8);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.card-select-cb:focus-visible {
+    outline: 2px solid var(--accent, #38bdf8);
+    outline-offset: 2px;
 }

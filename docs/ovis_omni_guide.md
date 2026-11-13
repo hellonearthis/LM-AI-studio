@@ -1,6 +1,6 @@
 # 🧠 Ovis-Omni Multimodal Engine: Implementation Plan & Operational Guide
 
-> **Lumina (LM AI Studio)** &bull; Dedicated Multimodal Vision & Embedding Pipeline  
+> **Image Analysis Studio (Lumina)** &bull; Dedicated Multimodal Vision & Embedding Pipeline  
 > **Model**: `ATH-MaaS/Ovis-Omni-Embedding-3B` &bull; **Engine Port**: `8082` (CUDA `bfloat16`)
 
 ---
@@ -17,7 +17,7 @@ This unlocks two capabilities in Lumina:
 flowchart TD
     subgraph "Hardware & Model Layer"
         GPU["NVIDIA GPU (RTX 5070 Ti)"]
-        Weights["C:\\llamaCPP\\models\\Ovis-Omni-Embedding-3B"]
+        Weights["I:\\llamaCPP\\models\\Ovis-Omni-Embedding-3B"]
         Service["Ovis-Omni FastAPI (Port 8082)"]
         GPU --> Service
         Weights --> Service
@@ -62,7 +62,7 @@ start_ovis_server.bat
 
 **Expected startup log**:
 ```text
-[OVIS-SERVICE] Preparing to load C:\llamaCPP\models\Ovis-Omni-Embedding-3B on cuda...
+[OVIS-SERVICE] Preparing to load I:\llamaCPP\models\Ovis-Omni-Embedding-3B on cuda...
 [OVIS-SERVICE] Loading multimodal processor with native chat template...
 [OVIS-SERVICE] Loading model weights into hardware memory...
 [OVIS-SERVICE] Successfully initialized Ovis-Omni-Embedding-3B on cuda!
@@ -183,7 +183,7 @@ curl.exe -s http://127.0.0.1:8082/health
 ```json
 {
   "status": "online",
-  "model_identifier": "C:\\llamaCPP\\models\\Ovis-Omni-Embedding-3B",
+  "model_identifier": "I:\\llamaCPP\\models\\Ovis-Omni-Embedding-3B",
   "device": "cuda",
   "cuda_available": true,
   "gpu_device_name": "NVIDIA GeForce RTX 5070 Ti",

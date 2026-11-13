@@ -21,30 +21,35 @@ const filesToSync = [
 
 console.log('🔄 Syncing UI libraries from node_modules to public/libs...');
 
-function copyRecursiveSync(src, dest, extensions) {
-    const exists = fs.existsSync(src);
-    const stats = exists && fs.statSync(src);
-    const isDirectory = exists && stats.isDirectory();
-    
-    if (isDirectory) {
-        if (!fs.existsSync(dest)) {
-            fs.mkdirSync(dest, { recursive: true });
+// WHAT: Recursively copies required frontend library files filtered by allowed file extensions.
+// WHY: Keeps `public/libs` lean by skipping docs, sourcemaps, and unused source files from node_modules.
+function copyRecursiveSync(source_path, destination_path, allowed_extensions) {
+    const source_exists = fs.existsSync(source_path);
+    const source_stats = source_exists && fs.statSync(source_path);
+    const is_directory = source_exists && source_stats.isDirectory();
+
+    if (is_directory) {
+        if (!fs.existsSync(destination_path)) {
+            fs.mkdirSync(destination_path, { recursive: true });
         }
-        fs.readdirSync(src).forEach((child) => {
-            copyRecursiveSync(path.join(src, child), path.join(dest, child), extensions);
+        fs.readdirSync(source_path).forEach((child_entry_name) => {
+            copyRecursiveSync(
+                path.join(source_path, child_entry_name),
+                path.join(destination_path, child_entry_name),
+                allowed_extensions
+            );
         });
-    } else if (exists) {
-        // Filter by extensions if provided (mainly to avoid copying gigabytes of unrelated repo files)
-        if (extensions) {
-            const ext = path.extname(src);
-            if (!extensions.includes(ext)) return;
+    } else if (source_exists) {
+        if (allowed_extensions) {
+            const file_extension = path.extname(source_path);
+            if (!allowed_extensions.includes(file_extension)) return;
         }
 
-        const destDir = path.dirname(dest);
-        if (!fs.existsSync(destDir)) {
-             fs.mkdirSync(destDir, { recursive: true });
+        const destination_parent_directory = path.dirname(destination_path);
+        if (!fs.existsSync(destination_parent_directory)) {
+            fs.mkdirSync(destination_parent_directory, { recursive: true });
         }
-        fs.copyFileSync(src, dest);
+        fs.copyFileSync(source_path, destination_path);
     }
 }
 
@@ -58,7 +63,7 @@ try {
     filesToSync.forEach(mapping => {
         const sourcePath = path.join(nodeModulesDir, mapping.src);
         const destPath = path.join(publicLibsDir, mapping.dest);
-        
+
         if (!fs.existsSync(sourcePath)) {
             console.warn(`[WARN] Source missing: ${sourcePath}. Did you forget to run npm install?`);
             return;
@@ -71,12 +76,12 @@ try {
         } else if (mapping.type === 'dir') {
             copyRecursiveSync(sourcePath, destPath, mapping.extensions);
         }
-        
+
         console.log(`✅ Synced: ${mapping.dest}`);
     });
 
     console.log('🎉 Library sync complete! Frontend UI files are up to date.');
-} catch (err) {
-    console.error('❌ Failed to sync libraries:', err);
+} catch (library_sync_error) {
+    console.error('❌ Failed to sync libraries:', library_sync_error);
     process.exit(1);
 }

@@ -14,31 +14,24 @@
 // D3 is loaded as UMD, attaching to window.d3
 import "d3";
 const d3 = window.d3;
-import * as duckdb from "@duckdb/duckdb-wasm";
-
-// ============================================================================
-// DuckDB WebAssembly Configuration Bundles
-// ============================================================================
-// WHAT: Explicit bundle paths pointing to local WebAssembly and Worker assets.
-// WHY: Offline desktop environments cannot load CDNs; serving pre-bundled WASM files
-//      from the local Node Express static server ensures instant, air-gapped initialization.
-const DUCKDB_WEBASSEMBLY_MANUAL_BUNDLES = {
-  mvp: {
-    mainModule: "/libs/duckdb/duckdb-mvp.wasm",
-    mainWorker: "/libs/duckdb/duckdb-browser-mvp.worker.js",
-  },
-  eh: {
-    mainModule: "/libs/duckdb/duckdb-eh.wasm",
-    mainWorker: "/libs/duckdb/duckdb-browser-eh.worker.js",
-  },
-};
+import { createScopeClusterSidebarController } from "./modules/scopeClusterSidebar.js";
+import {
+  getClusterColour,
+  normalizeCoordinatePointRecords,
+  buildClusterSummaryCatalog,
+  filterClusterSummariesBySearch,
+  filterPointsBySelectedClusters,
+  formatClusterFilterSummaryText,
+  formatPointCountDisplayText,
+  computeSquareCoverCropMetrics,
+  computeThumbnailFrameMetrics
+} from "./modules/scopeCore.js";
 
 // ============================================================================
 // Global Application State Variables
 // ============================================================================
-// WHAT: Core state containers for database connection, coordinate collection, zoom, and selection.
+// WHAT: Core state containers for coordinate collection, zoom, and selection.
 // WHY: Preserves global access across decoupled animation frames, interaction handlers, and UI panels.
-let duckdb_wasm_database_instance = null;
 let dataset_coordinate_points_collection = [];
 let d3_canvas_zoom_transform = d3.zoomIdentity;
 let active_hovered_tooltip_point = null;
@@ -48,33 +41,12 @@ const d3_visualization_canvas_selection = d3.select("#vizCanvas");
 const canvas_rendering_context_2d = d3_visualization_canvas_selection.node().getContext("2d");
 const scope_loading_overlay_element = document.getElementById("scopeOverlay");
 
-// Data source state tracking
-let current_active_data_source_name = 'parquet';
 let is_visualization_initialized = false;
 
 // D3 scale functions and interactive zoom behavior handler
 let d3_horizontal_linear_scale = null;
 let d3_vertical_linear_scale = null;
 let d3_zoom_behavior_handler = null;
-
-// ============================================================================
-// Cluster Colour Generator (Golden Angle Distribution)
-// ============================================================================
-// WHAT: Produces a distinct, aesthetically balanced colour for every cluster identifier.
-// WHY: Standard categorical colour palettes (e.g. Tableau10) repeat every 10 items.
-//      EVoC identifies upwards of 260+ distinct clusters; stepping the hue by the
-//      golden angle (approximately 137.508 degrees) distributes adjacent cluster IDs
-//      optimally across the 360-degree colour wheel to avoid visual clashes.
-//      Noise points (cluster -1) receive an unobtrusive neutral grey.
-function getClusterColour(cluster_identifier) {
-  // WHAT: Guard clause checking for unassigned, null, or noise cluster identifiers.
-  // WHY: EVoC designates unclustered outliers as -1; coloring them neutral grey prevents visual distraction.
-  if (cluster_identifier === -1 || cluster_identifier === null || cluster_identifier === undefined) {
-    return "#6b7280";
-  }
-  const golden_angle_hue_degrees = (Number(cluster_identifier) * 137.508) % 360;
-  return `hsl(${golden_angle_hue_degrees.toFixed(1)}, 75%, 60%)`;
-}
 
 // ============================================================================
 // Multi-Tier Thumbnail Caching and Spatial Configuration
@@ -95,8 +67,6 @@ const pending_thumbnail_load_queue = [];
 let thumbnail_loads_in_flight_count = 0;
 
 // Interactive cluster filter state and viewport geometry caches
-let selected_cluster_identifiers = new Set();
-let cluster_summary_collection = [];
 let visible_filtered_points = [];
 let rendered_point_hit_boxes = [];
 let is_render_frame_scheduled = false;
@@ -111,143 +81,96 @@ let spatial_spread_multiplier = 2.5;
 // WHY: Automatically begins downloading WebAssembly modules and mounting UI listeners.
 initializeScopeVisualizer();
 
+// WHAT: Initializes sidebar controls, sets up display parameters, and loads dataset coordinates from SQLite.
+// WHY: Coordinates the initialization sequence and falls back to an error recovery screen on failure.
 async function initializeScopeVisualizer() {
   try {
-    scope_loading_overlay_element.querySelector("h3").textContent = "Initializing DuckDB WASM...";
+    scope_loading_overlay_element.querySelector("h3").textContent = "Loading Coordinate Data...";
 
     // ------------------------------------------------------------------------
-    // Step 1: DuckDB WebAssembly Instantiation
+    // Step 1: Wire Up Sidebar Display and Cluster Controls
     // ------------------------------------------------------------------------
-    // WHAT: Selects the optimal WebAssembly bundle (MVP or Exception Handling) and spawns a background worker.
-    // WHY: DuckDB-WASM executes vectorized analytical queries on Parquet files directly inside the browser thread pool.
-    const duckdb_selected_bundle = await duckdb.selectBundle(DUCKDB_WEBASSEMBLY_MANUAL_BUNDLES);
-    console.log("[Scope Visualizer] Selected WebAssembly bundle configuration:", duckdb_selected_bundle);
-
-    const duckdb_web_worker = new Worker(duckdb_selected_bundle.mainWorker);
-    const duckdb_console_logger = new duckdb.ConsoleLogger();
-    duckdb_wasm_database_instance = new duckdb.AsyncDuckDB(duckdb_console_logger, duckdb_web_worker);
-    await duckdb_wasm_database_instance.instantiate(duckdb_selected_bundle.mainModule, duckdb_selected_bundle.pthreadWorker);
-
-    // ------------------------------------------------------------------------
-    // Step 2: Register Parquet Virtual File URLs
-    // ------------------------------------------------------------------------
-    // WHAT: Registers HTTP range-request file handles for the Latent Scope Parquet datasets.
-    // WHY: Allows DuckDB to stream column chunks on demand without downloading the entire file upfront.
-    scope_loading_overlay_element.querySelector("h3").textContent = "Registering Parquet Data Files...";
-    const local_server_base_url = "http://localhost:3000";
-    await duckdb_wasm_database_instance.registerFileURL("input.parquet", `${local_server_base_url}/ls-data/input/input.parquet`, duckdb.DuckDBDataProtocol.HTTP, false);
-    await duckdb_wasm_database_instance.registerFileURL("scopes.parquet", `${local_server_base_url}/ls-data/input/scopes/scopes-001.parquet`, duckdb.DuckDBDataProtocol.HTTP, false);
-
-    // ------------------------------------------------------------------------
-    // Step 3: Wire Up Controls and Initial Render
-    // ------------------------------------------------------------------------
-    // WHAT: Configures UI sliders, dropdown toggles, and loads the initial dataset.
+    // WHAT: Configures UI sliders, dropdown toggles, and cluster filter handlers.
     // WHY: Prepares interactive listeners so that user actions respond immediately once data lands.
+    const {
+        setupDisplayAndClusterFilterControls,
+        rebuildClusterFilterList
+    } = createScopeClusterSidebarController({
+        getAllPoints: () => dataset_coordinate_points_collection,
+        getFilteredPoints: () => visible_filtered_points,
+        setFilteredPoints: (next_points) => { visible_filtered_points = next_points; },
+        getShowThumbnails: () => show_thumbnails_enabled,
+        setShowThumbnails: (enabled) => { show_thumbnails_enabled = enabled; },
+        setBaseThumbnailSize: (size_px) => { base_thumbnail_size_pixels = size_px; },
+        setSpatialSpread: (spread) => { spatial_spread_multiplier = spread; },
+        scheduleRender: scheduleVisualizationRenderFrame,
+        getActiveContextMenuPoint: () => active_context_menu_point,
+        hideContextMenu,
+        hideTooltip
+    });
+    window.__scopeRebuildClusterFilterList = rebuildClusterFilterList;
     setupDisplayAndClusterFilterControls();
-    await loadDataAndRenderVisualization('parquet');
 
     // ------------------------------------------------------------------------
-    // Step 4: Setup Source Toggle Buttons (Parquet vs SQLite DB)
+    // Step 2: Fetch Coordinate Data and Render
     // ------------------------------------------------------------------------
-    // WHAT: Event listeners switching between Latent Scope Parquet files and SQLite images.db.
-    // WHY: Enables instant visual comparison between Latent Scope embeddings and EVoC/Ovis UMAP projections.
-    const toggle_parquet_source_button = document.getElementById('toggleParquetBtn');
-    const toggle_database_source_button = document.getElementById('toggleDbBtn');
+    // WHAT: Ingests UMAP coordinate points directly from SQLite images.db.
+    // WHY: Provides instant visualization of our local multimodal Python embeddings pipeline.
+    await loadDataAndRenderVisualization();
 
-    toggle_parquet_source_button.addEventListener('click', () => {
-      // WHAT: Guard clause preventing redundant reloads if Parquet is already active.
-      // WHY: Avoids redundant database queries and memory re-allocations.
-      if (current_active_data_source_name === 'parquet') return;
-      toggle_parquet_source_button.style.background = 'var(--accent)';
-      toggle_parquet_source_button.style.color = 'white';
-      toggle_database_source_button.style.background = 'transparent';
-      toggle_database_source_button.style.color = 'var(--text-primary)';
-      loadDataAndRenderVisualization('parquet');
-    });
-
-    toggle_database_source_button.addEventListener('click', () => {
-      // WHAT: Guard clause preventing redundant reloads if SQLite DB is already active.
-      // WHY: Avoids redundant network fetch operations and scale recalculations.
-      if (current_active_data_source_name === 'db') return;
-      toggle_database_source_button.style.background = 'var(--accent)';
-      toggle_database_source_button.style.color = 'white';
-      toggle_parquet_source_button.style.background = 'transparent';
-      toggle_parquet_source_button.style.color = 'var(--text-primary)';
-      loadDataAndRenderVisualization('db');
-    });
-
-  } catch (duckdb_initialization_error) {
+  } catch (scope_initialization_error) {
     // WHAT: Error recovery display explaining initialization failure.
-    // WHY: Provides clear diagnostic information and a one-click reload button if WASM fails to compile.
-    console.error("[Scope Visualizer] Initialization encountered an unhandled error:", duckdb_initialization_error);
+    // WHY: Provides clear diagnostic information and a one-click reload button if loading fails.
+    console.error("[Scope Visualizer] Initialization encountered an unhandled error:", scope_initialization_error);
     scope_loading_overlay_element.innerHTML = `
       <h3>Initialization Failed</h3>
-      <p style="color: #ff6b6b">${duckdb_initialization_error.message}</p>
+      <p id="scopeInitErrorText" style="color: #ff6b6b"></p>
       <p>Check developer console for technical stack trace.</p>
       <button onclick="location.reload()" class="primary-btn">Retry Initialization</button>
     `;
+    const scope_init_error_text = document.getElementById('scopeInitErrorText');
+    if (scope_init_error_text) {
+      scope_init_error_text.textContent = scope_initialization_error?.message || String(scope_initialization_error);
+    }
   }
 }
 
 // ============================================================================
 // Data Ingestion & Normalization Engine
 // ============================================================================
-// WHAT: Queries coordinates and cluster IDs from DuckDB Parquet or the SQLite REST API.
-// WHY: Normalizes heterogeneous records into a unified structure so rendering logic remains identical.
-async function loadDataAndRenderVisualization(target_data_source_name) {
-  current_active_data_source_name = target_data_source_name;
+// WHAT: Queries coordinates and cluster IDs from the SQLite REST API.
+// WHY: Ingests all active image points and normalizes heterogeneous records into a unified structure.
+async function loadDataAndRenderVisualization() {
   scope_loading_overlay_element.style.display = "flex";
   scope_loading_overlay_element.querySelector("h3").textContent = "Loading Coordinate Points...";
 
-  if (target_data_source_name === 'parquet') {
-    // WHAT: Executes an SQL JOIN query between scopes.parquet (UMAP 2D coords) and input.parquet (metadata).
-    // WHY: Merges physical file paths and image identifiers with spatial clustering coordinates in memory.
-    const duckdb_active_connection = await duckdb_wasm_database_instance.connect();
-    const parquet_coordinate_query_string = `
-      SELECT 
-        scopes_table.x, scopes_table.y, scopes_table.cluster, scopes_table.label,
-        input_table.path, input_table.filename, input_table.id
-      FROM 'scopes.parquet' scopes_table
-      JOIN 'input.parquet' input_table ON scopes_table.ls_index = input_table.id
-      WHERE scopes_table.deleted = false
-    `;
-    const parquet_query_arrow_result = await duckdb_active_connection.query(parquet_coordinate_query_string);
-    await duckdb_active_connection.close();
-    dataset_coordinate_points_collection = parquet_query_arrow_result.toArray().map((arrow_record_row) => arrow_record_row.toJSON());
-  } else if (target_data_source_name === 'db') {
-    // WHAT: Fetches EVoC clustering and UMAP 2D coordinates computed by evoc_pipeline.py from SQLite images.db.
-    // WHY: Provides instant visualization of our local multimodal Python embeddings pipeline.
-    const sqlite_database_api_response = await fetch('http://localhost:3000/api/scope/db-data');
-    dataset_coordinate_points_collection = await sqlite_database_api_response.json();
+  // WHAT: Fetches EVoC clustering and UMAP 2D coordinates computed by evoc_pipeline.py from SQLite images.db.
+  // WHY: Provides instant visualization of our local multimodal Python embeddings pipeline.
+  const sqlite_database_api_response = await fetch('http://localhost:3000/api/scope/db-data');
+  if (!sqlite_database_api_response.ok) {
+    throw new Error(`Scope DB data request failed with HTTP ${sqlite_database_api_response.status}`);
   }
+  const parsed_scope_payload = await sqlite_database_api_response.json();
+  const raw_coordinate_records = Array.isArray(parsed_scope_payload) ? parsed_scope_payload : [];
 
   // WHAT: Type-casts numeric coordinates, identifiers, and cluster IDs to standard JavaScript numbers.
-  // WHY: DuckDB often yields native BigInt objects for int64 schemas. BigInt cannot be serialized to JSON
-  //      or compared directly against Number primitives without explicit casting.
-  dataset_coordinate_points_collection = dataset_coordinate_points_collection.map((raw_coordinate_point_record) => ({
-    ...raw_coordinate_point_record,
-    x: Number(raw_coordinate_point_record.x),
-    y: Number(raw_coordinate_point_record.y),
-    id: Number(raw_coordinate_point_record.id),
-    cluster: (raw_coordinate_point_record.cluster === null || raw_coordinate_point_record.cluster === undefined)
-      ? -1
-      : Number(raw_coordinate_point_record.cluster),
-  }));
+  // WHY: Guarantees numeric primitives without NaN or string values for Canvas transformations.
+  dataset_coordinate_points_collection = normalizeCoordinatePointRecords(raw_coordinate_records);
 
-  console.log(`[Scope Visualizer] Successfully ingested ${dataset_coordinate_points_collection.length} coordinate records from ${target_data_source_name}`);
+  console.log(`[Scope Visualizer] Successfully ingested ${dataset_coordinate_points_collection.length} coordinate records from SQLite database`);
 
   // WHAT: Aggregates unique clusters and resets multi-select checkboxes.
-  // WHY: Switching data sources invalidates previous cluster memberships; fresh stats must be displayed.
-  rebuildClusterFilterList();
+  // WHY: Fresh cluster counts and labels are calculated based on the ingested records.
+  if (window.__scopeRebuildClusterFilterList) window.__scopeRebuildClusterFilterList();
 
   if (!is_visualization_initialized) {
     // WHAT: Attaches canvas event listeners on the first data ingestion.
-    // WHY: Prevents duplicate event listeners from stacking up across data source switches.
+    // WHY: Prevents duplicate event listeners from stacking up across data reloads.
     setupVisualizationCanvasAndInteractions();
     is_visualization_initialized = true;
   } else {
-    // WHAT: Updates the mathematical domain boundaries and redraws when switching sources.
-    // WHY: Latent Scope and SQLite UMAP embeddings occupy different coordinate bounding boxes.
+    // WHAT: Updates the mathematical domain boundaries and redraws canvas.
+    // WHY: Dynamically fits newly loaded coordinate bounds to the canvas viewport.
     updateScalesAndRenderVisualization();
   }
 
@@ -407,22 +330,6 @@ function setupVisualizationCanvasAndInteractions() {
   d3.select("#resetBtn").on("click", () =>
     d3_visualization_canvas_selection.transition().call(d3_zoom_behavior_handler.transform, d3.zoomIdentity),
   );
-
-  // Sync button pinging the backend Python pipeline
-  d3.select("#syncBtn").on("click", async () => {
-    const synchronize_dataset_button_element = document.getElementById("syncBtn");
-    synchronize_dataset_button_element.textContent = "Syncing...";
-    synchronize_dataset_button_element.disabled = true;
-
-    try {
-      await fetch("http://localhost:3000/api/sync-ls", { method: "POST" });
-      location.reload();
-    } catch (synchronization_network_error) {
-      alert("Synchronization operation failed: " + synchronization_network_error.message);
-      synchronize_dataset_button_element.textContent = "Sync Data";
-      synchronize_dataset_button_element.disabled = false;
-    }
-  });
 }
 
 // ============================================================================
@@ -485,10 +392,12 @@ function renderVisualizationFrame(horizontal_scale_function, vertical_scale_func
   // WHAT: Dynamic thumbnail sizing using square-root scaling based on current zoom magnification.
   // WHY: Scaling thumbnail size by sqrt(zoom) allows images to grow as you zoom in without expanding
   //      as fast as physical distance between points, allowing crowded clusters to visually separate cleanly.
-  const on_screen_thumbnail_size_pixels = Math.min(240, Math.max(6, base_thumbnail_size_pixels * Math.sqrt(d3_canvas_zoom_transform.k)));
-  const half_thumbnail_size_pixels = on_screen_thumbnail_size_pixels / 2;
-  const outline_width_pixels = Math.min(4, Math.max(1.5, on_screen_thumbnail_size_pixels * 0.07));
-  const wants_high_resolution_images = on_screen_thumbnail_size_pixels > HIGH_RESOLUTION_SWITCH_THRESHOLD_PIXELS;
+  const {
+    onScreenSizePixels: on_screen_thumbnail_size_pixels,
+    halfSizePixels: half_thumbnail_size_pixels,
+    outlineWidthPixels: outline_width_pixels,
+    wantsHighResolutionImages: wants_high_resolution_images
+  } = computeThumbnailFrameMetrics(base_thumbnail_size_pixels, d3_canvas_zoom_transform.k, HIGH_RESOLUTION_SWITCH_THRESHOLD_PIXELS);
 
   const next_frame_hit_boxes = [];
   const canvas_half_width_pixels = canvas_width_pixels / 2;
@@ -585,16 +494,19 @@ function renderVisualizationFrame(horizontal_scale_function, vertical_scale_func
 function drawCoverCroppedImage(image_source_element, destination_canvas_left_offset_pixels, destination_canvas_top_offset_pixels, destination_bounding_box_dimension_pixels) {
   const source_image_width_pixels = image_source_element.naturalWidth || image_source_element.width;
   const source_image_height_pixels = image_source_element.naturalHeight || image_source_element.height;
-  if (!source_image_width_pixels || !source_image_height_pixels) return;
-
-  const square_crop_side_length_pixels = Math.min(source_image_width_pixels, source_image_height_pixels);
-  const crop_offset_horizontal_pixels = (source_image_width_pixels - square_crop_side_length_pixels) / 2;
-  const crop_offset_vertical_pixels = (source_image_height_pixels - square_crop_side_length_pixels) / 2;
+  const crop_metrics = computeSquareCoverCropMetrics(source_image_width_pixels, source_image_height_pixels);
+  if (!crop_metrics) return;
 
   canvas_rendering_context_2d.drawImage(
     image_source_element,
-    crop_offset_horizontal_pixels, crop_offset_vertical_pixels, square_crop_side_length_pixels, square_crop_side_length_pixels,
-    destination_canvas_left_offset_pixels, destination_canvas_top_offset_pixels, destination_bounding_box_dimension_pixels, destination_bounding_box_dimension_pixels
+    crop_metrics.cropOffsetHorizontalPixels,
+    crop_metrics.cropOffsetVerticalPixels,
+    crop_metrics.squareCropSideLengthPixels,
+    crop_metrics.squareCropSideLengthPixels,
+    destination_canvas_left_offset_pixels,
+    destination_canvas_top_offset_pixels,
+    destination_bounding_box_dimension_pixels,
+    destination_bounding_box_dimension_pixels
   );
 }
 
@@ -615,6 +527,8 @@ function requestLowResolutionTile(image_identifier) {
   return low_resolution_cache_entry;
 }
 
+// WHAT: Enqueues a high-resolution thumbnail fetch with Least-Recently-Used (LRU) cache eviction.
+// WHY: Caps memory consumption at `MAXIMUM_HIGH_RESOLUTION_CACHE_ENTRIES` while keeping zoomed-in images crisp.
 function requestHighResolutionImage(image_identifier) {
   let high_resolution_cache_entry = high_resolution_image_cache_by_image_id.get(image_identifier);
   if (high_resolution_cache_entry) {
@@ -710,10 +624,15 @@ function showTooltip(hovered_coordinate_point_record, cursor_pixel_position_x, c
     ? `🏷️ ${hovered_coordinate_point_record.label.replace(/_/g, ' ')}`
     : `Cluster ${hovered_coordinate_point_record.cluster}`;
 
-  tooltip_text_container_element.innerHTML = `
-    <div style="font-weight: 600; color: #c084fc; margin-bottom: 2px;">${cluster_theme_display_text}</div>
-    <div style="font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px;">${hovered_coordinate_point_record.filename}</div>
-  `;
+  const theme_label_div = document.createElement("div");
+  theme_label_div.style.cssText = "font-weight: 600; color: #c084fc; margin-bottom: 2px;";
+  theme_label_div.textContent = cluster_theme_display_text;
+
+  const filename_label_div = document.createElement("div");
+  filename_label_div.style.cssText = "font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px;";
+  filename_label_div.textContent = String(hovered_coordinate_point_record.filename || "");
+
+  tooltip_text_container_element.replaceChildren(theme_label_div, filename_label_div);
 
   tooltip_image_element.src = `thumbnails/id_${hovered_coordinate_point_record.id}.avif`;
   tooltip_container_element.style.display = "flex";
@@ -743,6 +662,8 @@ function showTooltip(hovered_coordinate_point_record, cursor_pixel_position_x, c
   d3_visualization_canvas_selection.node().style.cursor = "pointer";
 }
 
+// WHAT: Hides the hover tooltip and restores the default canvas grab cursor.
+// WHY: Clears hover state immediately when the pointer leaves all rendered hit boxes.
 function hideTooltip() {
   document.getElementById("vizTooltip").style.display = "none";
   active_hovered_tooltip_point = null;
@@ -787,6 +708,8 @@ function showContextMenu(clicked_coordinate_point_record, cursor_pixel_position_
   context_menu_element.style.top = context_menu_top_pixel_position + "px";
 }
 
+// WHAT: Dismisses the custom right-click context menu and clears its active point reference.
+// WHY: Ensures stale context menu state does not linger after an action, outside click, or Escape key press.
 function hideContextMenu() {
   const context_menu_element = document.getElementById("scopeContextMenu");
   if (context_menu_element) {
@@ -797,242 +720,3 @@ function hideContextMenu() {
 
 // ============================================================================
 // Cluster Filter Dropdown & Display Controls
-// ============================================================================
-// WHAT: Configures UI slider controls, search-filtered multi-select checkboxes, and context actions.
-// WHY: Gives the user precise control over thumbnail size, spatial dispersion, and cluster isolation.
-function setupDisplayAndClusterFilterControls() {
-  const show_thumbnails_checkbox = document.getElementById("showThumbnailsCheckbox");
-  const thumbnail_size_slider = document.getElementById("thumbnailSizeSlider");
-  const cluster_filter_button = document.getElementById("clusterFilterButton");
-  const cluster_filter_panel = document.getElementById("clusterFilterPanel");
-  const cluster_filter_dropdown = document.getElementById("clusterFilterDropdown");
-  const cluster_filter_search_input = document.getElementById("clusterFilterSearchInput");
-  const spatial_spacing_slider = document.getElementById("spatialSpacingSlider");
-
-  show_thumbnails_checkbox.addEventListener("change", () => {
-    show_thumbnails_enabled = show_thumbnails_checkbox.checked;
-    thumbnail_size_slider.disabled = !show_thumbnails_enabled;
-    scheduleVisualizationRenderFrame();
-  });
-
-  thumbnail_size_slider.addEventListener("input", () => {
-    base_thumbnail_size_pixels = Number(thumbnail_size_slider.value);
-    scheduleVisualizationRenderFrame();
-  });
-
-  if (spatial_spacing_slider) {
-    spatial_spacing_slider.addEventListener("input", () => {
-      spatial_spread_multiplier = Number(spatial_spacing_slider.value);
-      scheduleVisualizationRenderFrame();
-    });
-  }
-
-  // Open / close the cluster selection panel
-  cluster_filter_button.addEventListener("click", (button_click_event) => {
-    button_click_event.stopPropagation();
-    const should_open_filter_panel = cluster_filter_panel.hidden;
-    cluster_filter_panel.hidden = !should_open_filter_panel;
-    cluster_filter_button.setAttribute("aria-expanded", String(should_open_filter_panel));
-    if (should_open_filter_panel) cluster_filter_search_input.focus();
-  });
-
-  // Close dropdown panel upon clicking outside or pressing Escape
-  document.addEventListener("click", (document_click_event) => {
-    if (!cluster_filter_dropdown.contains(document_click_event.target)) {
-      cluster_filter_panel.hidden = true;
-      cluster_filter_button.setAttribute("aria-expanded", "false");
-    }
-  });
-
-  document.addEventListener("keydown", (keyboard_event) => {
-    if (keyboard_event.key === "Escape") {
-      cluster_filter_panel.hidden = true;
-      cluster_filter_button.setAttribute("aria-expanded", "false");
-    }
-  });
-
-  // WHAT: Select All / Select None operate strictly on currently filtered rows.
-  // WHY: When searching (e.g. for "landscape"), users can batch-select or batch-deselect just the search matches.
-  document.getElementById("clusterSelectAllButton").addEventListener("click", () => {
-    for (const listed_cluster_entry of getClustersMatchingSearch()) {
-      selected_cluster_identifiers.add(listed_cluster_entry.cluster_identifier);
-    }
-    renderClusterFilterRows();
-    applyClusterFilter();
-  });
-
-  document.getElementById("clusterSelectNoneButton").addEventListener("click", () => {
-    for (const listed_cluster_entry of getClustersMatchingSearch()) {
-      selected_cluster_identifiers.delete(listed_cluster_entry.cluster_identifier);
-    }
-    renderClusterFilterRows();
-    applyClusterFilter();
-  });
-
-  cluster_filter_search_input.addEventListener("input", renderClusterFilterRows);
-
-  // ------------------------------------------------------------------------
-  // Context Menu Action Listeners
-  // ------------------------------------------------------------------------
-  const context_menu_hide_cluster_button = document.getElementById("contextMenuHideClusterBtn");
-  const context_menu_isolate_cluster_button = document.getElementById("contextMenuIsolateClusterBtn");
-  const context_menu_open_file_button = document.getElementById("contextMenuOpenFileBtn");
-
-  if (context_menu_hide_cluster_button) {
-    context_menu_hide_cluster_button.addEventListener("click", () => {
-      if (active_context_menu_point) {
-        selected_cluster_identifiers.delete(active_context_menu_point.cluster);
-        renderClusterFilterRows();
-        applyClusterFilter();
-      }
-      hideContextMenu();
-    });
-  }
-
-  if (context_menu_isolate_cluster_button) {
-    context_menu_isolate_cluster_button.addEventListener("click", () => {
-      if (active_context_menu_point) {
-        selected_cluster_identifiers.clear();
-        selected_cluster_identifiers.add(active_context_menu_point.cluster);
-        renderClusterFilterRows();
-        applyClusterFilter();
-      }
-      hideContextMenu();
-    });
-  }
-
-  if (context_menu_open_file_button) {
-    context_menu_open_file_button.addEventListener("click", () => {
-      if (active_context_menu_point && window.electronAPI) {
-        window.electronAPI.showInFolder(active_context_menu_point.path);
-      }
-      hideContextMenu();
-    });
-  }
-
-  // Dismiss context menu upon outside click or Escape
-  document.addEventListener("click", (document_click_event) => {
-    const context_menu_element = document.getElementById("scopeContextMenu");
-    if (context_menu_element && !context_menu_element.contains(document_click_event.target)) {
-      hideContextMenu();
-    }
-  });
-
-  document.addEventListener("keydown", (keyboard_event) => {
-    if (keyboard_event.key === "Escape") {
-      hideContextMenu();
-    }
-  });
-}
-
-// ============================================================================
-// Cluster Aggregation & Multi-Select Filter List
-// ============================================================================
-// WHAT: Groups points by cluster ID, computes image counts, sorts by frequency, and selects all.
-// WHY: Sorting by image count surfaces large thematic clusters first for intuitive exploration.
-function rebuildClusterFilterList() {
-  const cluster_summary_by_identifier = new Map();
-  for (const current_point_record of dataset_coordinate_points_collection) {
-    let cluster_summary_entry = cluster_summary_by_identifier.get(current_point_record.cluster);
-    if (!cluster_summary_entry) {
-      const is_noise_cluster = current_point_record.cluster === -1;
-      cluster_summary_entry = {
-        cluster_identifier: current_point_record.cluster,
-        display_label: is_noise_cluster
-          ? "Unclustered (noise)"
-          : String(current_point_record.label || `Cluster ${current_point_record.cluster}`).replace(/_/g, " "),
-        image_count: 0,
-      };
-      cluster_summary_by_identifier.set(current_point_record.cluster, cluster_summary_entry);
-    }
-    cluster_summary_entry.image_count++;
-  }
-
-  cluster_summary_collection = [...cluster_summary_by_identifier.values()].sort(
-    (first_cluster_entry, second_cluster_entry) => second_cluster_entry.image_count - first_cluster_entry.image_count
-  );
-  selected_cluster_identifiers = new Set(cluster_summary_collection.map((cluster_entry) => cluster_entry.cluster_identifier));
-
-  document.getElementById("clusterFilterSearchInput").value = "";
-  renderClusterFilterRows();
-  applyClusterFilter();
-}
-
-function getClustersMatchingSearch() {
-  const search_text_lowercase = document.getElementById("clusterFilterSearchInput").value.trim().toLowerCase();
-  if (!search_text_lowercase) return cluster_summary_collection;
-  return cluster_summary_collection.filter((cluster_entry) =>
-    cluster_entry.display_label.toLowerCase().includes(search_text_lowercase) ||
-    String(cluster_entry.cluster_identifier) === search_text_lowercase
-  );
-}
-
-function renderClusterFilterRows() {
-  const cluster_filter_list_element = document.getElementById("clusterFilterList");
-  const rows_document_fragment = document.createDocumentFragment();
-
-  for (const cluster_entry of getClustersMatchingSearch()) {
-    const row_label_element = document.createElement("label");
-    row_label_element.className = "cluster-filter-row";
-    row_label_element.title = `Cluster ${cluster_entry.cluster_identifier}`;
-
-    const row_checkbox_element = document.createElement("input");
-    row_checkbox_element.type = "checkbox";
-    row_checkbox_element.checked = selected_cluster_identifiers.has(cluster_entry.cluster_identifier);
-    row_checkbox_element.addEventListener("change", () => {
-      if (row_checkbox_element.checked) {
-        selected_cluster_identifiers.add(cluster_entry.cluster_identifier);
-      } else {
-        selected_cluster_identifiers.delete(cluster_entry.cluster_identifier);
-      }
-      applyClusterFilter();
-    });
-
-    const colour_swatch_element = document.createElement("span");
-    colour_swatch_element.className = "cluster-colour-swatch";
-    colour_swatch_element.style.background = getClusterColour(cluster_entry.cluster_identifier);
-
-    const label_text_element = document.createElement("span");
-    label_text_element.className = "cluster-row-label";
-    label_text_element.textContent = cluster_entry.display_label;
-
-    const count_text_element = document.createElement("span");
-    count_text_element.className = "cluster-row-count";
-    count_text_element.textContent = cluster_entry.image_count.toLocaleString();
-
-    row_label_element.append(row_checkbox_element, colour_swatch_element, label_text_element, count_text_element);
-    rows_document_fragment.appendChild(row_label_element);
-  }
-
-  cluster_filter_list_element.replaceChildren(rows_document_fragment);
-}
-
-// WHAT: Filters visible points against the selected cluster Set, updates item counts, and triggers redraw.
-// WHY: Mathematical scale domains remain constant so visible images stay spatially pinned during filtering.
-function applyClusterFilter() {
-  visible_filtered_points = dataset_coordinate_points_collection.filter((current_point_record) =>
-    selected_cluster_identifiers.has(current_point_record.cluster)
-  );
-
-  const total_cluster_count = cluster_summary_collection.length;
-  const selected_cluster_count = cluster_summary_collection.filter((cluster_entry) =>
-    selected_cluster_identifiers.has(cluster_entry.cluster_identifier)
-  ).length;
-
-  document.getElementById("clusterFilterSummary").textContent =
-    selected_cluster_count === total_cluster_count
-      ? `All (${total_cluster_count})`
-      : selected_cluster_count === 0
-      ? "None"
-      : `${selected_cluster_count} of ${total_cluster_count}`;
-
-  const point_count_display_element = document.getElementById("pointCountDisplay");
-  if (point_count_display_element) {
-    point_count_display_element.textContent = visible_filtered_points.length === dataset_coordinate_points_collection.length
-      ? `(${dataset_coordinate_points_collection.length.toLocaleString()} items)`
-      : `(${visible_filtered_points.length.toLocaleString()} of ${dataset_coordinate_points_collection.length.toLocaleString()} items)`;
-  }
-
-  hideTooltip();
-  scheduleVisualizationRenderFrame();
-}

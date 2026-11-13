@@ -33,6 +33,8 @@ function rebuildIndex() {
             images.size, 
             images.created_at, 
             images.updated_at,
+            diced_prompts.prompt_id AS diced_prompt_id,
+            diced_prompts.physicality_ratio AS diced_physicality_ratio,
             image_clusters.cluster_label,
             cluster_themes.theme_name,
             image_facets.medium AS facet_medium,
@@ -40,6 +42,7 @@ function rebuildIndex() {
             image_facets.composition AS facet_composition,
             image_facets.detail_score AS facet_detail_score
         FROM images
+        LEFT JOIN diced_prompts ON images.id = diced_prompts.image_id
         LEFT JOIN image_clusters ON images.id = image_clusters.image_id
         LEFT JOIN cluster_themes ON image_clusters.cluster_label = cluster_themes.cluster_label
         LEFT JOIN image_facets ON images.id = image_facets.image_id
@@ -56,9 +59,10 @@ function rebuildIndex() {
                 : (current_image_record.analysis || {});
         } catch (json_parsing_error) { /* ignore */ }
 
+        const { diced_prompt: _omitted_diced_prompt, ...lightweight_analysis_object } = parsed_analysis_object || {};
         return {
             ...current_image_record,
-            analysis: parsed_analysis_object
+            analysis: lightweight_analysis_object
         };
     });
 

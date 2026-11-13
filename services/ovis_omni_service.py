@@ -77,11 +77,13 @@ class OvisOmniRuntimeState:
     """
     def __init__(self):
         # WHAT: Resolve model weight location from local directory or Hugging Face cache.
-        # WHY: Allows users to keep model files in their unified C:\llamaCPP\models folder
+        # WHY: Allows users to keep model files in their unified I:\llamaCPP\models folder
         #      while supporting completely offline startup without checking remote endpoints.
         custom_environment_path = os.environ.get("OVIS_MODEL_PATH")
         candidate_local_directories = [
             custom_environment_path,
+            r"I:\llamaCPP\models\Ovis-Omni-Embedding-3B",
+            r"I:\llamaCPP\models\ATH-MaaS\Ovis-Omni-Embedding-3B",
             r"C:\llamaCPP\models\Ovis-Omni-Embedding-3B",
             r"C:\llamaCPP\models\ATH-MaaS\Ovis-Omni-Embedding-3B"
         ]

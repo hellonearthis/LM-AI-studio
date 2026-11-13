@@ -1,4 +1,4 @@
-# LM AI Studio Database (`images.db`)
+# Image Analysis Studio Database (`images.db`)
 
 This document provides a complete overview of the local SQLite database schema (`images.db`) that manages the image assets, analytical metadata, and mapped clustering coordinates for Lumina.
 

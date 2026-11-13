@@ -21,8 +21,10 @@ import fs from 'fs';
 import vm from 'vm';
 import path from 'path';
 
-// WHAT: Loading search-worker.js into an isolated VM execution context.
+// WHAT: Loading vectorMath.js and search-worker.js into an isolated VM execution context.
 // WHY:  Allows testing the pure functional algorithms in Node.js without requiring classic Web Worker DOM globals.
+const vector_math_file_path = path.resolve('public', 'modules', 'vectorMath.js');
+const vector_math_code_string = fs.readFileSync(vector_math_file_path, 'utf8');
 const search_worker_file_path = path.resolve('public', 'search-worker.js');
 const search_worker_code_string = fs.readFileSync(search_worker_file_path, 'utf8');
 
@@ -40,6 +42,7 @@ const worker_execution_context = {
     exports: {}
 };
 vm.createContext(worker_execution_context);
+vm.runInContext(vector_math_code_string, worker_execution_context);
 vm.runInContext(search_worker_code_string, worker_execution_context);
 
 const {

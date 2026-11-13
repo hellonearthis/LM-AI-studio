@@ -1,5 +1,5 @@
 /**
- * Test & Verification Script for Laya Integration in LM AI Studio
+ * Test & Verification Script for Laya Integration in Image Analysis Studio
  * 
  * TUTORIAL PROTOCOL & "CAN_BE_LONG" NAMING RULES:
  * All variables follow semantic, long naming conventions without shorthand abbreviations.
@@ -13,7 +13,7 @@ import { laya_client_instance } from '../services/layaClient.js';
 // WHY: Ensures all newly added schema tables, indices, and client methods execute without error.
 async function runVerificationSuite() {
     console.log('======================================================');
-    console.log('Running LM AI Studio + Laya Decision Engine Test Suite');
+    console.log('Running Image Analysis Studio + Laya Decision Engine Test Suite');
     console.log('======================================================\n');
 
     // Step 1: Verify SQLite Database tables

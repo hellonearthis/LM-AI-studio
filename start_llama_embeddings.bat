@@ -4,7 +4,7 @@ title "llama-server (Text Embeddings on Port 8083)"
 :: WHAT: Launch script for llama-server.exe dedicated to Nomic text embeddings on port 8083.
 :: WHY: Provides fast vector embedding generation for semantic search using llama.cpp with GPU offload.
 
-set "LLAMA_DIR=C:\llamaCPP"
+set "LLAMA_DIR=I:\llamaCPP"
 
 if not exist "%LLAMA_DIR%\llama-server.exe" (
     echo [ERROR] llama-server.exe not found in %LLAMA_DIR%.

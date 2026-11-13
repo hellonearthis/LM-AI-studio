@@ -7,5 +7,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     readFile: (filePath) => ipcRenderer.invoke('read-file', filePath),
     getFileStats: (filePath) => ipcRenderer.invoke('get-file-stats', filePath),
     showInFolder: (filePath) => ipcRenderer.invoke('show-in-folder', filePath),
-    trashFile: (filePath) => ipcRenderer.invoke('trash-file', filePath)
+    trashFile: (filePath) => ipcRenderer.invoke('trash-file', filePath),
+    openExternal: (externalUrl) => ipcRenderer.invoke('open-external', externalUrl)
 });

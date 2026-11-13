@@ -24,6 +24,7 @@
             <a href="tags.html" class="nav-item"><span class="nav-icon">🏷️</span> Tags</a>
             <a href="scope.html" class="nav-item"><span class="nav-icon">🗺️</span> Map <span
                     class="beta-tag">(β)</span></a>
+            <a href="dicer.html" class="nav-item"><span class="nav-icon">🧩</span> Prompt Dicer</a>
             <a href="settings.html" class="nav-item"><span class="nav-icon">⚙️</span> Settings</a>
         </div>
 
@@ -44,10 +45,11 @@
                 Batch Actions</div>
 
             <select id="dbPromptType" class="sidebar-select">
+                <option value="Prompt Dicer">🧩 Prompt Dicer (Pass A–D)</option>
                 <option value="Detailed Analysis">Detailed Analysis</option>
                 <option value="Simple Description">Simple Description</option>
-                <option value="Detailed Description" selected>Detailed Description</option>
-                <option value="Ultra Detailed Description">Ultra Detailed Description</option>
+                <option value="Detailed Description">Detailed Description</option>
+                <option value="Ultra Detailed Description" selected>Ultra Detailed Description</option>
                 <option value="Cinematic Description">Cinematic Description</option>
                 <option value="Video Summary">Video Summary</option>
                 <option value="Short Story">Short Story</option>
@@ -55,6 +57,7 @@
             </select>
 
             <button id="selectMissingBtn" class="sidebar-btn-secondary">Select Missing</button>
+            <button id="diceAllPromptsBtn" class="sidebar-btn-secondary" style="margin-top: 0.35rem;" title="Validate all existing diced prompts against updated descriptions and dice any missing entries">🧩 Validate & Sync Diced</button>
             <button id="unselectAllBtn" class="sidebar-btn-neutral">Unselect All</button>
             <button id="processSelectedBtn" class="sidebar-btn-primary" disabled>Process (0)</button>
             <button id="bulkRenameBtn" class="sidebar-btn-primary" disabled style="background: var(--bg-color); border: 1px solid var(--border); color: var(--text-primary); margin-top: 0.5rem; width: 100%; box-shadow: none;" title="Rename all selected images using a shared base name (e.g. 'coffee_001.jpg'). Automatically fills gaps in existing sequences.">Bulk Rename</button>
@@ -85,6 +88,7 @@
         <div class="context-menu-item" id="ctxRegenThumb"><span>🔄</span> Regenerate Thumbnail</div>
         <div class="context-menu-item" id="ctxFindSimilar"><span>🔎</span> Find Similar</div>
         <div class="context-menu-item" id="ctxOvisClassify"><span>🧠</span> Ovis Zero-Shot Classify</div>
+        <div class="context-menu-item" id="ctxDicePrompt"><span>🧩</span> Dice Prompt Ingredients</div>
         <div class="context-menu-item" id="ctxSearch"><span>🔍</span> Search for this</div>
         <div class="context-menu-divider"></div>
         <div class="context-menu-item" id="ctxEdit"><span>✏️</span> Edit Tag/Object</div>
@@ -106,7 +110,7 @@
     </div>
 
     <script type="module" src="pretext-layout.js"></script>
-    <script src="database.js"></script>
+    <script type="module" src="database.js?v=3"></script>
 </body>
 
 </html>

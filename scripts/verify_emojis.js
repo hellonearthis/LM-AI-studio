@@ -6,22 +6,23 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Mock the server.js logic
-const PROMPTS_FILE = path.join(__dirname, '..', 'qwen_vl3_porompts.json');
+const PROMPTS_FILE = path.join(__dirname, '..', 'qwen_vl3_prompts.json');
 console.log('Reading file:', PROMPTS_FILE);
 
+// WHAT: Checking whether prompt keys strip emoji prefixes cleanly without losing ampersands.
+// WHY: Ensures UI dropdown labels like "Prompt Refine & Expand" align with sanitized dictionary keys.
 try {
     if (fs.existsSync(PROMPTS_FILE)) {
         const rawData = fs.readFileSync(PROMPTS_FILE, 'utf8');
         const json = JSON.parse(rawData);
 
-        let qwenPrompts = {};
-        if (json.qwenvl) {
-            Object.entries(json.qwenvl).forEach(([key, value]) => {
-                const cleanKey = key.replace(/[^\w\s]/g, '').trim();
-                qwenPrompts[cleanKey] = value;
-                console.log(`Original: "${key}" -> Clean: "${cleanKey}"`);
-            });
-        }
+        const qwenPrompts = json.qwenvl
+            ? Object.entries(json.qwenvl).reduce((accumulated_prompts, [raw_key, prompt_value]) => {
+                const cleaned_key = raw_key.replace(/[^\w\s&]/g, '').replace(/\s+/g, ' ').trim();
+                console.log(`Original: "${raw_key}" -> Clean: "${cleaned_key}"`);
+                return { ...accumulated_prompts, [cleaned_key]: prompt_value };
+            }, {})
+            : {};
 
         console.log('\n--- Final Keys ---');
         console.log(Object.keys(qwenPrompts));
@@ -30,27 +31,20 @@ try {
         const expectedKeys = [
             "Tags", "Simple Description", "Detailed Description",
             "Ultra Detailed Description", "Cinematic Description",
-            "Detailed Analysis", "Video Summary", "Short Story", "Prompt Refine  Expand"
+            "Detailed Analysis", "Video Summary", "Short Story", "Prompt Refine & Expand"
         ];
 
-        // Note: "Prompt Refine & Expand" -> "Prompt Refine  Expand" because & is not \w or \s.
-        // I might need to adjust the regex if I want to keep '&'.
-        // The user keys are:
-        // "??? Tags"
-        // "??? Simple Description"
-        // "?? Cinematic Description"
-        // "?? Prompt Refine & Expand" 
-
-        // My regex `/[^\w\s]/g` removes `&`.
-        // Let's see if that matters. The dropdown has "Prompt Refine & Expand".
-        // The regex will make the key "Prompt Refine  Expand" (double space).
-        // This effectively BREAKS the match with the dropdown value "Prompt Refine & Expand".
-
-        // I NEED TO FIX THE REGEX to allow '&' or just strip '?' and emojis.
+        const missingKeys = expectedKeys.filter(expected_key => !(expected_key in qwenPrompts));
+        if (missingKeys.length > 0) {
+            console.error('Missing expected prompt keys:', missingKeys);
+            process.exitCode = 1;
+        } else {
+            console.log('All expected prompt keys verified.');
+        }
 
     } else {
         console.error('File not found');
     }
-} catch (err) {
-    console.error('Error:', err);
+} catch (verification_error) {
+    console.error('Error:', verification_error);
 }

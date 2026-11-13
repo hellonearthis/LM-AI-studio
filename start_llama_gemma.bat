@@ -1,13 +1,13 @@
 @echo off
-title "llama-server (LM AI Studio Google Gemma / PaliGemma on Port 8081)"
+title "llama-server (Image Analysis Studio Google Gemma on Port 8081)"
 
 :: ============================================================================
 :: WHAT: Launch script for llama-server.exe configured for Google Gemma / PaliGemma.
 :: WHY: Enables 1-click startup of Google Gemma vision models with GPU offloading,
-::      Flash Attention, and automatic discovery by LM AI Studio on port 8081.
+::      Flash Attention, and automatic discovery by Image Analysis Studio on port 8081.
 :: ============================================================================
 
-set "LLAMA_DIR=C:\llamaCPP"
+set "LLAMA_DIR=I:\llamaCPP"
 
 if not exist "%LLAMA_DIR%\llama-server.exe" (
     echo [ERROR] llama-server.exe not found in %LLAMA_DIR%.
@@ -19,14 +19,14 @@ if not exist "%LLAMA_DIR%\llama-server.exe" (
 cd /d "%LLAMA_DIR%"
 
 echo ======================================================================
-echo Starting llama-server for LM AI Studio on port 8081...
-echo Model Family: Google Gemma / PaliGemma Vision
+echo Starting llama-server for Image Analysis Studio on port 8081...
+echo Model Family: Google Gemma 4 Vision
 echo ======================================================================
 
-:: Default model check (adjust GGUF filename to match your downloaded Gemma model)
+:: Default model check (adjust GGUF filename if switching Gemma 4 variants)
 llama-server.exe ^
-  -m "models\google\paligemma-3b-pt-448.Q4_K_M.gguf" ^
-  --mmproj "models\google\paligemma-3b-pt-448-mmproj-f16.gguf" ^
+  -m "models\gemma-4-12B-it-GGUF\gemma-4-12B-it-Q4_K_M.gguf" ^
+  --mmproj "models\gemma-4-12B-it-GGUF\mmproj-gemma-4-12B-it-BF16.gguf" ^
   -ngl 99 ^
   -c 4096 ^
   --flash-attn on ^

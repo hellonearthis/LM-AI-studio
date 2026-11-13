@@ -24,6 +24,10 @@ const project_root_directory = path.resolve(current_module_directory, '..');
 // MAIN EXECUTION ENGINE
 // ============================================================================
 
+/**
+ * WHAT: Executes the end-to-end Ovis-Omni zero-shot facet classification and 2048-d embedding pipeline.
+ * WHY: Synchronizes unclassified images in `images.db` and `public/ovis-embeddings.json` with fault-tolerant logging.
+ */
 async function run_ovis_dataset_pipeline() {
     console.log('======================================================================');
     console.log('Lumina - Ovis-Omni Dataset & Database Pipeline Runner');
@@ -262,7 +266,7 @@ async function run_ovis_dataset_pipeline() {
         console.log(`    To retry failed items: simply restart the Ovis server and re-run npm run ovis:pipeline (it automatically picks up unclassified/missing items)`);
     } else {
         if (fs.existsSync(failed_log_file_path)) {
-            try { fs.unlinkSync(failed_log_file_path); } catch (e) {}
+            try { fs.unlinkSync(failed_log_file_path); } catch (unlink_error) {}
         }
         console.log(`\n✨ Perfect Run: 0 failed items. All processed records saved successfully.`);
     }

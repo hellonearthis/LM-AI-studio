@@ -433,7 +433,7 @@ masonry-grid-lanes[data-mgl-measuring="true"] .card {
    The JS component will override this with absolute positioning once successful.
 */
 masonry-grid-lanes:not(.masonry-grid-lanes--fallback):not(.masonry-grid-lanes--supports) {
-    column-width: 300px;
+    column-width: 420px;
     column-gap: 16px;
     display: block;
 }

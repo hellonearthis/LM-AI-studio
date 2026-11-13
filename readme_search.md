@@ -1,7 +1,7 @@
 # Search Functionality Documentation
 
 > [!NOTE]
-> This document provides a comprehensive breakdown of the search system in **Lumina (LM AI Studio)**, detailed architecture diagrams, technology stack, and future development concepts.
+> This document provides a comprehensive breakdown of the search system in **Image Analysis Studio (Lumina)**, detailed architecture diagrams, technology stack, and future development concepts.
 
 ## 1. System Overview
 
@@ -189,8 +189,8 @@ Generate Data → search-embeddings.json → Search (Hybrid/Semantic)
 |--------|-----------|-----------|
 | **Generate Data** | Image analysis in SQLite | `search-embeddings.json` |
 | **Search (Hybrid/Semantic)** | `search-embeddings.json` | Search results |
-| **EVoC Pipeline** (Settings) | `search-embeddings.json` | `image_clusters` + `image_coordinates` tables |
-| **Latent Scope** (Data Map) | External Parquet files | Independent — does not use `search-embeddings.json` |
+| **EVoC Pipeline** (Settings) | `search-embeddings.json` / `ovis-embeddings.json` | `image_clusters` + `image_coordinates` tables |
+| **Data Map** (`scope.html`) | `image_clusters` + `image_coordinates` in SQLite | Interactive 2D D3 Canvas cluster visualization |
 
 > If you regenerate embeddings with a different model, you should also re-run the EVoC pipeline (Settings → Run Map Analysis) to update the cluster assignments and UMAP coordinates.
 

@@ -39,7 +39,7 @@ Lumina is powered directly by local inference through [`llama.cpp`](https://gith
 
 ```mermaid
 graph LR
-    subgraph "LM AI Studio (Port 3000)"
+    subgraph "Image Analysis Studio (Port 3000)"
         App["Electron / Express Backend"]
     end
 
@@ -66,7 +66,7 @@ graph LR
 - **Launcher**: `start_llama_embeddings.bat`
 - **Model**: **Nomic Embed Text v1.5** (`nomic-embed-text-v1.5.f16.gguf`) with `--embedding` mode enabled.
 - **Role**: Computes dense 768-dimensional vector representations of image descriptions, summaries, and search queries.
-- **Integration**: Powers **Semantic Search**, **Hybrid RRF (Reciprocal Rank Fusion)** search, and **EVoC / Latent Scope** dimensionality reduction.
+- **Integration**: Powers **Semantic Search**, **Hybrid RRF (Reciprocal Rank Fusion)** search, and **EVoC / UMAP Data Map** dimensionality reduction.
 
 ---
 
@@ -180,7 +180,7 @@ graph LR
    * **llama-server.exe** (Default port `8081`, PR #26508 standard `9931`) with `--mmproj` projector for multimodal vision.
    - **Vision Model**: (e.g., Qwen 3.5 VL) for analyzing images.
    - **Embedding Model**: (e.g., Nomic Embed Text) for Semantic Search.
-3. **Python 3.12+** (Optional, for Latent Scope integration)
+3. **Python 3.12+** (Optional, for EVoC/UMAP clustering & Ovis-Omni microservice)
 
 > **Dynamic Server Discovery:**  
 > Lumina automatically probes `llama-server` on ports `8081` and `9931`, checking model capabilities for vision (`multimodal`) and embeddings without requiring hardcoded configuration.
@@ -194,9 +194,6 @@ cd LM-AI-studio
 
 # Install Node dependencies
 npm install
-
-# Setup Latent Scope (Python venv)   <<<<<<<   Optional  for latent Scope  >>>>>>>
-npm run ls:setup
 ```
 
 ### Running the App
@@ -210,9 +207,6 @@ npm start
 
 # OR for development mode
 npm run dev
-
-# Start Latent Scope Server (Optional - for Map Page)
-npm run ls:serve
 ```
 
 > **Note**: Ensure `llama-server.exe` (port 8081) is running before analyzing or embedding images.
@@ -288,12 +282,11 @@ Navigate to the **Settings ⚙️** page to select your AI models.
 3. Use the **Discovery** tab to find related concepts.
 4. Sort by frequency or **alphabetical order** with A-Z navigation.
 
-### Data Map (Latent Scope)
+### Data Map (EVoC & UMAP)
 
-1. Ensure the visualization server is running: `npm run ls:serve`
-2. Go to the **Map (β)** page.
-3. Click **Sync Data** to export your latest database.
-4. Explore semantic clusters of your image library.
+1. Go to the **Map (β)** page (`scope.html`) in the navigation bar.
+2. Coordinates and cluster labels are loaded directly from SQLite (`images.db`) via `/api/scope/db-data`.
+3. Explore semantic clusters, adjust thumbnail size or spatial spread, and filter by cluster or search query.
 
 ---
 
@@ -321,7 +314,7 @@ LM-AI-studio/
 │   └── thumbnails/         # Generated AVIF thumbnails
 ├── scripts/
 │   ├── sync_libs.js        # Automated script to sync NPM libs to public/libs
-│   └── serve_ls.bat        # Helper to launch Latent Scope
+│   └── evoc_pipeline.py    # Computes EVoC semantic clusters & UMAP 2D coordinates
 ├── images.db               # SQLite database (auto-created)
 └── package.json
 ```
@@ -371,4 +364,4 @@ ISC
 - [exifr](https://github.com/MikeKovarik/exifr) for camera metadata extraction
 - [ComfyUI-QwenVL](https://github.com/1038lab/ComfyUI-QwenVL.git) for prompt strategies
 - [Fuse.js](https://fusejs.io/) for client-side fuzzy search
-- [Latent Scope](https://github.com/enjalot/latent-scope) for semantic cluster map visualization
+- [D3.js](https://d3js.org/) & [UMAP](https://umap-learn.readthedocs.io/) for semantic cluster map visualization
