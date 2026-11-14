@@ -411,20 +411,26 @@ export function build_heuristic_influences_for_master_record(master_record) {
     const setting_ingredient = ingredients_list.find(ing => ing.slot === 'setting');
 
     if (weather_ingredient && appearance_ingredient) {
-        const is_wet = /rain|water|spray|mist|fog|snow/i.test(weather_ingredient.text);
-        influences.push(Object.freeze({
-            source_ingredient_id: weather_ingredient.ingredient_id,
-            target_ingredient_id: appearance_ingredient.ingredient_id,
-            interaction_type: 'surface_physical',
-            portable_target_slot: 'subject_appearance',
-            target_subject_scope: 'same_subject_only',
-            consequence_description: is_wet
-                ? 'darkened wet surface with specular moisture highlights'
-                : 'fine particulate dust settling across surface folds',
-            state_key: 'surface_moisture',
-            applied_state_value: is_wet ? 'wet_specular' : 'dry_matte_dust',
-            clashes_with_value: is_wet ? 'dry_matte_dust' : 'wet_specular'
-        }));
+        // WHAT: Classify weather/matter into explicit moisture states rather than a binary wet/dry fallback.
+        // WHY: Neutral atmosphere (wind, smoke, haze, clouds) should not falsely claim 'dry_matte_dust' and clash with moisture.
+        const is_wet_weather = /rain|water|spray|mist|fog|snow|steam|dew|wet|damp|puddle/i.test(weather_ingredient.text);
+        const is_dry_particulate_weather = /dust|sand|arid|desert|ash|chalk|powder|parched|dry/i.test(weather_ingredient.text);
+
+        if (is_wet_weather || is_dry_particulate_weather) {
+            influences.push(Object.freeze({
+                source_ingredient_id: weather_ingredient.ingredient_id,
+                target_ingredient_id: appearance_ingredient.ingredient_id,
+                interaction_type: 'surface_physical',
+                portable_target_slot: 'subject_appearance',
+                target_subject_scope: 'same_subject_only',
+                consequence_description: is_wet_weather
+                    ? 'darkened wet surface with specular moisture highlights'
+                    : 'fine particulate dust settling across surface folds',
+                state_key: 'surface_moisture',
+                applied_state_value: is_wet_weather ? 'wet_specular' : 'dry_matte_dust',
+                clashes_with_value: is_wet_weather ? 'dry_matte_dust' : 'wet_specular'
+            }));
+        }
     }
 
     if (weather_ingredient && lighting_ingredient) {

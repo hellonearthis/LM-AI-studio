@@ -7,6 +7,61 @@
  */
 
 import { execute_heuristic_offline_dicing, assemble_pass_c_master_record, build_heuristic_influences_for_master_record } from "../promptDicerService.js";
+import {
+    MONDOCRAFT_REMIX_MEMORY_LIMIT,
+    MONDOCRAFT_OPENING_WORD_COUNT,
+    ALLOWED_REMIX_STYLE_MODES,
+    tidy_prompt_whitespace,
+    extract_normalized_prompt_words,
+    build_prompt_similarity_features,
+    compute_sequence_matcher_ratio,
+    are_near_copy_features,
+    are_near_copy_prompts,
+    cluster_near_copy_prompt_families,
+    deduplicate_candidate_pool_by_family,
+    extract_remix_opening_signature,
+    is_candidate_rejected_by_memory,
+    compute_candidate_staleness_score,
+    select_freshest_beam_candidates,
+    compute_source_success_weight_multiplier,
+    compute_keeper_weighted_bonus,
+    select_indefinite_article,
+    pluralize_english_noun,
+    recase_first_letter,
+    strip_leading_determiners_and_numbers,
+    build_span_replacement_edit,
+    apply_non_overlapping_span_edits,
+    apply_in_place_prompt_edits,
+    apply_dream_mode_transformation
+} from "./mondocraftRemix.js";
+
+export {
+    MONDOCRAFT_REMIX_MEMORY_LIMIT,
+    MONDOCRAFT_OPENING_WORD_COUNT,
+    ALLOWED_REMIX_STYLE_MODES,
+    tidy_prompt_whitespace,
+    extract_normalized_prompt_words,
+    build_prompt_similarity_features,
+    compute_sequence_matcher_ratio,
+    are_near_copy_features,
+    are_near_copy_prompts,
+    cluster_near_copy_prompt_families,
+    deduplicate_candidate_pool_by_family,
+    extract_remix_opening_signature,
+    is_candidate_rejected_by_memory,
+    compute_candidate_staleness_score,
+    select_freshest_beam_candidates,
+    compute_source_success_weight_multiplier,
+    compute_keeper_weighted_bonus,
+    select_indefinite_article,
+    pluralize_english_noun,
+    recase_first_letter,
+    strip_leading_determiners_and_numbers,
+    build_span_replacement_edit,
+    apply_non_overlapping_span_edits,
+    apply_in_place_prompt_edits,
+    apply_dream_mode_transformation
+};
 
 /**
  * WHAT: Detects 1-hop AND multi-hop transitive continuity clashes across remixed ingredients and influence chains.
@@ -106,6 +161,24 @@ export function detect_ingredient_clashes(
     }
 
     // 3. Pairwise state contradiction checks across direct + propagated claims
+    // WHAT: Build a lookup map from ingredient ID to its bound subject ID for scope isolation checks.
+    // WHY: Two subject-scoped modifiers (e.g. wet coat on Subject 1, dusty boots on Subject 2) should coexist without clashing.
+    const subject_id_by_ingredient_id = new Map(
+        safe_selected
+            .filter(ingredient_record => ingredient_record.ingredient_id && ingredient_record.bound_to_subject_id)
+            .map(ingredient_record => [ingredient_record.ingredient_id, ingredient_record.bound_to_subject_id])
+    );
+
+    const resolve_claim_scope_target = (claim_record) => {
+        const bound_subject = claim_record.target_subject_id
+            || subject_id_by_ingredient_id.get(claim_record.target_ingredient_id)
+            || subject_id_by_ingredient_id.get(claim_record.source_ingredient_id);
+        if (bound_subject) return `subject:${bound_subject}`;
+        if (claim_record.target_ingredient_id) return `ingredient:${claim_record.target_ingredient_id}`;
+        if (claim_record.target_text) return `text:${claim_record.target_text.toLowerCase().trim()}`;
+        return null;
+    };
+
     const detected_clashes_collection = [];
     const seen_clash_pairs = new Set();
 
@@ -121,6 +194,20 @@ export function detect_ingredient_clashes(
                 secondary_claim.applied_state_value === primary_claim.clashes_with_value
             );
             if (!is_direct_contradiction) continue;
+
+            // WHAT: Skip contradictions when both edges are strictly subject-scoped and point to different targets.
+            // WHY: Continuity ledger and attribute-disentanglement rules allow opposing surface states on separate subjects.
+            const both_claims_subject_scoped = (
+                primary_claim.target_subject_scope === 'same_subject_only' &&
+                secondary_claim.target_subject_scope === 'same_subject_only'
+            );
+            if (both_claims_subject_scoped) {
+                const primary_scope_target = resolve_claim_scope_target(primary_claim);
+                const secondary_scope_target = resolve_claim_scope_target(secondary_claim);
+                if (primary_scope_target && secondary_scope_target && primary_scope_target !== secondary_scope_target) {
+                    continue;
+                }
+            }
 
             const pair_values = [primary_claim.applied_state_value, secondary_claim.applied_state_value].sort();
             const pair_dedupe_key = `${primary_claim.state_key}::${pair_values[0]}::${pair_values[1]}`;
@@ -138,8 +225,10 @@ export function detect_ingredient_clashes(
                 clash_type: is_transitive ? 'transitive_state_contradiction' : 'state_contradiction',
                 state_key: primary_claim.state_key,
                 source_ingredient_alpha: primary_claim.source_ingredient_id,
+                source_text_alpha: primary_claim.source_text || null,
                 applied_value_alpha: primary_claim.applied_state_value,
                 source_ingredient_beta: secondary_claim.source_ingredient_id,
+                source_text_beta: secondary_claim.source_text || null,
                 applied_value_beta: secondary_claim.applied_state_value,
                 hop_depth: max_claim_hop,
                 is_transitive,
@@ -169,6 +258,28 @@ export function assemble_remixed_prompt_text(
     remix_options = {}
 ) {
     const use_observable_replacements = remix_options.include_observable_replacements ?? true;
+    const requested_style_mode = String(remix_options.style_mode || 'clauses').toLowerCase().trim();
+
+    // WHAT: Route to Mondocraft in-place sentence editing and Dream modes when requested.
+    // WHY: Lets curators generate flowing natural prose or surreal hybrids alongside classic slot tags.
+    if (requested_style_mode !== 'clauses') {
+        const edited_sentence_text = apply_in_place_prompt_edits(
+            remix_options.base_prompt_text || '',
+            remix_options.swapped_slots || [],
+            selected_ingredients_collection,
+            active_consequences_collection,
+            remix_options
+        );
+        if (requested_style_mode === 'sentence') {
+            return edited_sentence_text;
+        }
+        return apply_dream_mode_transformation(
+            edited_sentence_text,
+            selected_ingredients_collection,
+            requested_style_mode,
+            Number(remix_options.variation_seed) || 0
+        );
+    }
 
     const slot_presentation_priority = [
         'setting',
@@ -465,9 +576,15 @@ export function resolve_ingredient_influence_closure(
 
 /**
  * WHAT: Scores an individual transplant candidate against current active ingredients using pure soft criteria.
- * WHY: Prefers visually cluster-compatible, physically concrete, graph-connected replacements without hidden state.
+ * WHY: Prefers visually cluster-compatible, physically concrete, keeper-weighted, family-diverse, fresh replacements.
  */
-function score_transplant_candidate(candidate_ingredient, current_ingredients, influences_collection, variation_seed = 0) {
+function score_transplant_candidate(
+    candidate_ingredient,
+    current_ingredients,
+    influences_collection,
+    variation_seed = 0,
+    scoring_context = {}
+) {
     const cluster_bonus = candidate_ingredient.cluster_match ? 3.0 : 0;
     const neighbor_bonus = candidate_ingredient.vector_neighbor_match ? 2.0 : 0;
     const concreteness_bonus = candidate_ingredient.kind === 'physical_anchor' ? 1.5 : 0;
@@ -485,8 +602,18 @@ function score_transplant_candidate(candidate_ingredient, current_ingredients, i
     });
     const synergy_bonus = has_synergy_edge ? 1.5 : 0;
 
+    // WHAT: Applying Mondocraft 3x keeper/success weighting, family diversity penalty, and 48-draft staleness rotation.
+    // WHY: Biases transplants toward proven keepers while preventing repetitive near-copies from flooding top slots.
+    const keeper_bonus = compute_keeper_weighted_bonus(candidate_ingredient, variation_seed);
+    const family_diversity_penalty = -0.75 * Number(candidate_ingredient.source_family_rank || 0);
+    const staleness_metrics = compute_candidate_staleness_score(
+        candidate_ingredient,
+        scoring_context.recent_remixes || []
+    );
+    const staleness_adjustment = staleness_metrics.recency_penalty + staleness_metrics.freshness_bonus;
+
     // WHAT: Computing a deterministic FNV-1a micro-perturbation controlled by `variation_seed`.
-    // WHY: Lets "Another Variation" explore fresh compatible candidates while staying reproducible for a given seed.
+    // WHY: Lets repeated Transplant rolls explore fresh compatible candidates while staying reproducible for a given seed.
     const seed_tiebreaker = Number(variation_seed) > 0
         ? (() => {
             const key_string = `${variation_seed}::${candidate_ingredient.text || ''}`;
@@ -499,17 +626,27 @@ function score_transplant_candidate(candidate_ingredient, current_ingredients, i
         })()
         : 0;
 
-    return Number((cluster_bonus + neighbor_bonus + concreteness_bonus + usage_bonus + synergy_bonus + seed_tiebreaker).toFixed(4));
+    return Number((
+        cluster_bonus
+        + neighbor_bonus
+        + concreteness_bonus
+        + usage_bonus
+        + synergy_bonus
+        + keeper_bonus
+        + family_diversity_penalty
+        + staleness_adjustment
+        + seed_tiebreaker
+    ).toFixed(4));
 }
 
 /**
- * WHAT: Solves K-slot transplantation into a base prompt using hard clash pruning, soft beam search, and Influence Closure.
- * WHY: Automates safe ingredient swapping across unlocked slots while honoring locked subject/lens slots and catching physical contradictions.
+ * WHAT: Solves K-slot transplantation into a base prompt using family clustering, keeper weights, staleness rotation, hard clash pruning, and Influence Closure.
+ * WHY: Automates safe, diverse ingredient swapping across unlocked slots while honoring locked subject/lens slots and permanent rejection memory.
  *
  * @param {ReadonlyArray<Object>} base_ingredients_collection - Starting base prompt ingredients.
  * @param {Object} candidate_pools_by_slot - Mapping `{ [slot_name]: Array<Ingredient> }` of catalog candidates.
  * @param {ReadonlyArray<Object>} influences_collection - Known Pass D influence edges across active & candidate items.
- * @param {Object} transplant_options - `{ locked_slots, swap_count, allow_empty_fills, beam_width, variation_seed }`.
+ * @param {Object} transplant_options - `{ locked_slots, swap_count, allow_empty_fills, beam_width, variation_seed, rejected_drafts, recent_remixes, style_mode, base_prompt_text, include_observable_replacements }`.
  * @returns {Object} Frozen winning plan and top beam alternatives.
  */
 export function solve_constraint_transplant_beam(
@@ -529,6 +666,11 @@ export function solve_constraint_transplant_beam(
     const allow_empty_fills = transplant_options.allow_empty_fills !== false;
     const beam_width = Math.max(1, Math.min(12, Number(transplant_options.beam_width) || 5));
     const variation_seed = Number(transplant_options.variation_seed) || 0;
+    const rejected_drafts = Array.isArray(transplant_options.rejected_drafts) ? transplant_options.rejected_drafts : [];
+    const recent_remixes = Array.isArray(transplant_options.recent_remixes) ? transplant_options.recent_remixes : [];
+    const style_mode = transplant_options.style_mode || 'clauses';
+    const base_prompt_text = transplant_options.base_prompt_text || '';
+    const include_observable_replacements = transplant_options.include_observable_replacements ?? true;
 
     // WHAT: Identify populated unlocked slots first, then eligible empty unlocked environment/camera slots.
     // WHY: Prioritizes swapping existing unlocked slots up to K, filling empty atmosphere slots only when remaining K budget exists.
@@ -587,12 +729,30 @@ export function solve_constraint_transplant_beam(
             const slot_existing_items = beam_state.ingredients.filter(item => (item.slot || 'other') === target_slot);
             const remaining_other_items = beam_state.ingredients.filter(item => (item.slot || 'other') !== target_slot);
 
+            // WHAT: Collapse near-copy candidates per phrase/source family and exclude rejected ingredients before scoring.
+            // WHY: Improves candidate diversity and ensures permanently rejected pieces stay excluded.
+            const family_filtered_candidates = deduplicate_candidate_pool_by_family(
+                slot_candidates_raw,
+                beam_state.ingredients
+            );
+
             // Rank candidates dynamically against this partial beam state
-            const scored_candidates = slot_candidates_raw
-                .filter(candidate => candidate && candidate.text && !active_texts_lower.has(String(candidate.text).toLowerCase().trim()))
+            const scored_candidates = family_filtered_candidates
+                .filter(candidate =>
+                    candidate
+                    && candidate.text
+                    && !active_texts_lower.has(String(candidate.text).toLowerCase().trim())
+                    && !is_candidate_rejected_by_memory(candidate, rejected_drafts)
+                )
                 .map(candidate => ({
                     candidate,
-                    step_score: score_transplant_candidate(candidate, remaining_other_items, safe_influences, variation_seed)
+                    step_score: score_transplant_candidate(
+                        candidate,
+                        remaining_other_items,
+                        safe_influences,
+                        variation_seed,
+                        { recent_remixes }
+                    )
                 }))
                 .toSorted((first_entry, second_entry) => second_entry.step_score - first_entry.step_score)
                 .slice(0, Math.max(beam_width * 3, 12));
@@ -620,6 +780,7 @@ export function solve_constraint_transplant_beam(
                             replaced_texts: Object.freeze(slot_existing_items.map(item => item.text)),
                             chosen_text: stamped_candidate.text,
                             chosen_source_prompt: stamped_candidate.prompt_id || null,
+                            source_family_id: stamped_candidate.source_family_id || null,
                             step_score
                         })
                     ],
@@ -652,7 +813,7 @@ export function solve_constraint_transplant_beam(
         }
     }
 
-    // Apply #3 Influence Closure to each surviving beam hypothesis and pick highest clash-free score
+    // Apply #3 Influence Closure to each surviving beam hypothesis, filter rejections, and rank by freshness
     const finalized_plans = current_beam.map(beam_state => {
         const closure_result = resolve_ingredient_influence_closure(
             beam_state.ingredients,
@@ -665,6 +826,17 @@ export function solve_constraint_transplant_beam(
         );
         const final_clashes = detect_ingredient_clashes(closure_result.ingredients, safe_influences);
         const net_score = Number((beam_state.score - final_clashes.length * 100).toFixed(4));
+        const assembled_text = assemble_remixed_prompt_text(
+            closure_result.ingredients,
+            closure_result.consequences,
+            {
+                style_mode,
+                base_prompt_text,
+                swapped_slots: beam_state.swapped_slots,
+                include_observable_replacements,
+                variation_seed
+            }
+        );
 
         return Object.freeze({
             selected_ingredients: closure_result.ingredients,
@@ -673,14 +845,21 @@ export function solve_constraint_transplant_beam(
             pulled_effects: closure_result.pulled_effects,
             pruned_orphans: closure_result.pruned_orphans,
             score: net_score,
-            clashes: final_clashes
+            clashes: final_clashes,
+            assembled_text
         });
     }).toSorted((alpha, beta) => beta.score - alpha.score);
 
-    const winning_plan = finalized_plans[0];
+    const non_rejected_plans = finalized_plans.filter(
+        plan_item => !is_candidate_rejected_by_memory(plan_item, rejected_drafts)
+    );
+    const eligible_plans = non_rejected_plans.length > 0 ? non_rejected_plans : finalized_plans;
+    const rotated_plans = select_freshest_beam_candidates(eligible_plans, recent_remixes);
+
+    const winning_plan = rotated_plans[0];
     return Object.freeze({
         ...winning_plan,
-        beam_candidates: Object.freeze(finalized_plans)
+        beam_candidates: rotated_plans
     });
 }
 

@@ -31,7 +31,15 @@ import {
     ALLOWED_INGREDIENT_SLOTS,
     REVIEW_SITTING_TARGETS,
     build_stratified_review_queue_order,
-    compute_calibration_and_grounding_analytics
+    compute_calibration_and_grounding_analytics,
+    cluster_near_copy_prompt_families,
+    deduplicate_candidate_pool_by_family,
+    compute_source_success_weight_multiplier,
+    compute_keeper_weighted_bonus,
+    is_candidate_rejected_by_memory,
+    compute_candidate_staleness_score,
+    apply_in_place_prompt_edits,
+    apply_dream_mode_transformation
 } from '../services/promptDicerService.js';
 
 test('compute_physicality_ratio calculates exact weighted ratios with pretext penalty', () => {
@@ -168,6 +176,54 @@ test('detect_ingredient_clashes detects state_key conflicts and clashes_with_val
     assert.equal(detected_clashes[0].state_key, 'surface_moisture');
     assert.equal(detected_clashes[0].applied_value_alpha, 'wet_specular');
     assert.equal(detected_clashes[0].applied_value_beta, 'dry_matte_dust');
+});
+
+test('detect_ingredient_clashes allows subject-scoped opposing states on separate subjects', () => {
+    const selected_ingredients_sample = [
+        { ingredient_id: 'ing_1', text: 'heavy rain', slot: 'weather_or_matter' },
+        { ingredient_id: 'ing_2', text: 'wet trenchcoat', slot: 'subject_appearance', bound_to_subject_id: 'subject_1' },
+        { ingredient_id: 'ing_3', text: 'desert dust', slot: 'weather_or_matter' },
+        { ingredient_id: 'ing_4', text: 'dry boots', slot: 'subject_appearance', bound_to_subject_id: 'subject_2' }
+    ];
+
+    const active_influences_sample = [
+        {
+            source_ingredient_id: 'ing_1',
+            target_ingredient_id: 'ing_2',
+            target_subject_scope: 'same_subject_only',
+            state_key: 'surface_moisture',
+            applied_state_value: 'wet_specular',
+            clashes_with_value: 'dry_matte_dust'
+        },
+        {
+            source_ingredient_id: 'ing_3',
+            target_ingredient_id: 'ing_4',
+            target_subject_scope: 'same_subject_only',
+            state_key: 'surface_moisture',
+            applied_state_value: 'dry_matte_dust',
+            clashes_with_value: 'wet_specular'
+        }
+    ];
+
+    const detected_clashes = detect_ingredient_clashes(
+        selected_ingredients_sample,
+        active_influences_sample
+    );
+
+    assert.equal(detected_clashes.length, 0);
+});
+
+test('build_heuristic_influences_for_master_record does not tag neutral weather as dry_matte_dust', async () => {
+    const dicing_result = await execute_prompt_dicing_pipeline({
+        prompt_text: 'A detective in a wool coat stands in drifting smoke.',
+        media_type: 'image',
+        force_heuristic: true
+    });
+
+    const moisture_influences = dicing_result.influences.filter(
+        influence_item => influence_item.state_key === 'surface_moisture'
+    );
+    assert.equal(moisture_influences.length, 0);
 });
 
 test('assemble_remixed_prompt_text orders clauses by slot and appends active consequences', () => {
@@ -581,4 +637,213 @@ test('compute_calibration_and_grounding_analytics aggregates histograms, Laya ba
     assert.ok(high_conf_band);
     assert.equal(high_conf_band.sample_count, 3);
     assert.equal(high_conf_band.empirical_accuracy, 0.667);
+});
+
+test('cluster_near_copy_prompt_families and deduplicate_candidate_pool_by_family collapse near-copies and rank source families', () => {
+    // WHAT: Verify near-duplicate prompts collapse into one root while unrelated scenes keep distinct family roots.
+    // WHY: Ensures minor edits to a prompt do not flood the Transplant beam pool with near-identical candidates.
+    const prompt_texts_collection = [
+        'weathered detective standing in a rainy alley under cold neon light',
+        'weathered detective standing in a rainy alley under cool neon light',
+        'sunlit sandstone canyon with drifting crimson dust at midday'
+    ];
+    const clustered_family_roots = cluster_near_copy_prompt_families(prompt_texts_collection);
+    assert.equal(clustered_family_roots.length, 3);
+    assert.equal(clustered_family_roots[0], clustered_family_roots[1]);
+    assert.notEqual(clustered_family_roots[2], clustered_family_roots[0]);
+
+    const active_canvas_ingredients = [
+        { ingredient_id: 'act_1', slot: 'lighting', text: 'soft tungsten key light' }
+    ];
+    const raw_candidate_pool = [
+        // Near-copy of already active lighting should be stripped
+        { ingredient_id: 'cand_active_dup', slot: 'lighting', kind: 'physical_anchor', text: 'soft tungsten key lighting', prompt_id: 'prm_01', source_raw_prompt: 'Scene A with soft tungsten', usage_count: 5 },
+        // Two near-copy lighting candidates in pool: keeper copy must win within phrase family
+        { ingredient_id: 'cand_cool_plain', slot: 'lighting', kind: 'physical_anchor', text: 'cool cyan neon reflection', prompt_id: 'prm_02', source_raw_prompt: 'Harbor night rain neon', usage_count: 4, keeper_count: 0 },
+        { ingredient_id: 'cand_cool_keeper', slot: 'lighting', kind: 'physical_anchor', text: 'cool cyan neon reflections', prompt_id: 'prm_03', source_raw_prompt: 'Rainy pier cyan light', usage_count: 4, keeper_count: 2 },
+        // Second distinct phrase from the exact same source prompt family as cand_cool_keeper
+        { ingredient_id: 'cand_rain_same_family', slot: 'lighting', kind: 'physical_anchor', text: 'sodium vapor backlight', prompt_id: 'prm_03', source_raw_prompt: 'Rainy pier cyan light', usage_count: 3, keeper_count: 2 }
+    ];
+
+    const deduplicated_candidates = deduplicate_candidate_pool_by_family(
+        raw_candidate_pool,
+        active_canvas_ingredients
+    );
+
+    assert.ok(!deduplicated_candidates.some(candidate_entry => candidate_entry.ingredient_id === 'cand_active_dup'));
+    const cyan_family_winners = deduplicated_candidates.filter(candidate_entry =>
+        String(candidate_entry.text).includes('cyan neon')
+    );
+    assert.equal(cyan_family_winners.length, 1);
+    assert.equal(cyan_family_winners[0].ingredient_id, 'cand_cool_keeper');
+
+    const ranked_same_source_picks = deduplicated_candidates.filter(
+        candidate_entry => candidate_entry.prompt_id === 'prm_03'
+    );
+    assert.equal(ranked_same_source_picks.length, 2);
+    assert.deepEqual(
+        ranked_same_source_picks.map(candidate_entry => candidate_entry.source_family_rank),
+        [0, 1]
+    );
+});
+
+test('is_candidate_rejected_by_memory and solve_constraint_transplant_beam enforce rejection exclusion and 48-draft staleness rotation', () => {
+    // WHAT: Test permanent rejection filtering and recent-memory freshness rotation during beam search.
+    // WHY: Repeated clicks on Transplant or Reject & Re-roll must advance through unseen candidates instead of looping.
+    const rejected_records_collection = [
+        {
+            draft_text: 'weary detective in wool coat, harsh magenta strobe',
+            rejected_ingredient_texts: ['harsh magenta strobe']
+        }
+    ];
+
+    assert.equal(
+        is_candidate_rejected_by_memory({ text: 'harsh magenta strobe' }, rejected_records_collection),
+        true
+    );
+    assert.equal(
+        is_candidate_rejected_by_memory('weary detective in wool coat, harsh magenta strobe', rejected_records_collection),
+        true
+    );
+
+    const recent_memory_collection = [
+        {
+            draft_text: 'weary detective in wool coat, pale sodium rim light',
+            opening_signature: 'weary detective in wool coat pale',
+            source_prompt_ids: ['prm_stale'],
+            swapped_texts: ['pale sodium rim light']
+        }
+    ];
+
+    const stale_score_metrics = compute_candidate_staleness_score(
+        { text: 'pale sodium rim light', prompt_id: 'prm_stale' },
+        recent_memory_collection
+    );
+    const fresh_score_metrics = compute_candidate_staleness_score(
+        { text: 'amber oil lantern glow', prompt_id: 'prm_fresh' },
+        recent_memory_collection
+    );
+    assert.equal(stale_score_metrics.minimum_age, 0);
+    assert.ok(stale_score_metrics.recency_penalty < 0);
+    assert.equal(fresh_score_metrics.freshness_bonus, 0.75);
+
+    const base_ingredients = [
+        { ingredient_id: 'ing_subj', slot: 'subject_appearance', kind: 'physical_anchor', text: 'weary detective in wool coat' },
+        { ingredient_id: 'ing_light', slot: 'lighting', kind: 'physical_anchor', text: 'flat overcast skylight' }
+    ];
+    const candidate_pools_by_slot = {
+        lighting: [
+            { ingredient_id: 'cand_rejected', slot: 'lighting', kind: 'physical_anchor', text: 'harsh magenta strobe', prompt_id: 'prm_rej', cluster_match: true, usage_count: 10 },
+            { ingredient_id: 'cand_stale', slot: 'lighting', kind: 'physical_anchor', text: 'pale sodium rim light', prompt_id: 'prm_stale', cluster_match: true, usage_count: 10 },
+            { ingredient_id: 'cand_fresh', slot: 'lighting', kind: 'physical_anchor', text: 'amber oil lantern glow', prompt_id: 'prm_fresh', cluster_match: true, usage_count: 2 }
+        ]
+    };
+
+    const solved_transplant_plan = solve_constraint_transplant_beam(
+        base_ingredients,
+        candidate_pools_by_slot,
+        [],
+        {
+            locked_slots: ['subject_appearance'],
+            swap_count: 1,
+            allow_empty_fills: false,
+            variation_seed: 1,
+            recent_remixes: recent_memory_collection,
+            rejected_drafts: rejected_records_collection,
+            style_mode: 'clauses'
+        }
+    );
+
+    assert.ok(!solved_transplant_plan.selected_ingredients.some(item => item.text === 'harsh magenta strobe'));
+    assert.ok(solved_transplant_plan.selected_ingredients.some(item => item.text === 'amber oil lantern glow'));
+});
+
+test('apply_in_place_prompt_edits and assemble_remixed_prompt_text support natural sentence span edits with a/an repair and Dream modes', () => {
+    // WHAT: Validate backward-compatible default clauses mode, in-place sentence span editing with article repair, and Dream operators.
+    // WHY: Ensures Mondocraft syntax repair and surreal Dream transforms coexist with strict clause assembly.
+    const sample_ingredients = [
+        { ingredient_id: 's1', slot: 'weather_or_matter', kind: 'physical_anchor', text: 'heavy rain' },
+        { ingredient_id: 's2', slot: 'subject_appearance', kind: 'physical_anchor', text: 'sleek barn owl' },
+        { ingredient_id: 's3', slot: 'setting', kind: 'physical_anchor', text: 'amber lantern' }
+    ];
+
+    const default_clauses_output = assemble_remixed_prompt_text(sample_ingredients, [], {
+        include_observable_replacements: false
+    });
+    assert.equal(default_clauses_output, 'amber lantern, sleek barn owl, heavy rain');
+
+    const original_sentence_prompt = 'A sleek barn owl perches above a wooden pier beneath a moody sky.';
+    const edited_natural_sentence = apply_in_place_prompt_edits(
+        original_sentence_prompt,
+        [
+            {
+                slot: 'setting',
+                replaced_texts: ['wooden pier'],
+                chosen_text: 'amber lantern'
+            },
+            {
+                slot: 'weather_or_matter',
+                replaced_texts: ['moody sky'],
+                chosen_text: 'overcast mist'
+            }
+        ],
+        sample_ingredients,
+        []
+    );
+    assert.equal(edited_natural_sentence, 'A sleek barn owl perches above an amber lantern beneath an overcast mist.');
+
+    const dream_ingredients = [
+        { ingredient_id: 'd1', slot: 'subject_appearance', kind: 'physical_anchor', text: 'a weathered detective' },
+        { ingredient_id: 'd2', slot: 'setting', kind: 'physical_anchor', text: 'clockwork greenhouse' }
+    ];
+    const dream_base_sentence = 'A weathered detective walks through a clockwork greenhouse.';
+
+    const metamorph_output = apply_dream_mode_transformation(dream_base_sentence, dream_ingredients, 'metamorph', 1);
+    const chimera_output = apply_dream_mode_transformation(dream_base_sentence, dream_ingredients, 'chimera', 1);
+    const fractal_output = apply_dream_mode_transformation(dream_base_sentence, dream_ingredients, 'fractal', 1);
+    const portal_output = apply_dream_mode_transformation(dream_base_sentence, dream_ingredients, 'portal', 1);
+
+    assert.ok(metamorph_output.includes('clockwork greenhouse'));
+    assert.notEqual(metamorph_output, dream_base_sentence);
+    assert.ok(chimera_output.includes('detective-greenhouse hybrid'));
+    assert.ok(fractal_output.includes('clockwork greenhouses'));
+    assert.ok(portal_output.includes('clockwork greenhouse'));
+    assert.notEqual(portal_output, dream_base_sentence);
+});
+
+test('compute_keeper_weighted_bonus and solve_constraint_transplant_beam apply 3x keeper selection bias', () => {
+    // WHAT: Confirm reviewed and keeper-flagged sources receive 3x weighting and win ties in beam search.
+    // WHY: Biases Transplant toward visually proven prompt ingredients from keeper records.
+    assert.equal(compute_source_success_weight_multiplier({ keeper_count: 0, is_reviewed: 0 }), 1.0);
+    assert.equal(compute_source_success_weight_multiplier({ keeper_count: 1, is_reviewed: 0 }), 3.0);
+    assert.equal(compute_source_success_weight_multiplier({ keeper_count: 0, is_reviewed: 1 }), 3.0);
+
+    const standard_bonus = compute_keeper_weighted_bonus({ text: 'plain amber lamp', keeper_count: 0 }, 0);
+    const keeper_bonus = compute_keeper_weighted_bonus({ text: 'keeper cobalt mist', keeper_count: 2 }, 0);
+    assert.ok(keeper_bonus > standard_bonus + 1.5);
+
+    const base_ingredients = [
+        { ingredient_id: 'base_subj', slot: 'subject_appearance', kind: 'physical_anchor', text: 'brass observatory telescope' },
+        { ingredient_id: 'base_light', slot: 'lighting', kind: 'physical_anchor', text: 'neutral room light' }
+    ];
+    const candidate_pools_by_slot = {
+        lighting: [
+            { ingredient_id: 'cand_unreviewed', slot: 'lighting', kind: 'physical_anchor', text: 'plain white fluorescent', prompt_id: 'prm_u', keeper_count: 0, is_reviewed: 0, usage_count: 3, cluster_match: false },
+            { ingredient_id: 'cand_keeper', slot: 'lighting', kind: 'physical_anchor', text: 'warm golden hour rim light', prompt_id: 'prm_k', keeper_count: 2, is_reviewed: 1, usage_count: 3, cluster_match: false }
+        ]
+    };
+
+    const keeper_weighted_plan = solve_constraint_transplant_beam(
+        base_ingredients,
+        candidate_pools_by_slot,
+        [],
+        {
+            locked_slots: ['subject_appearance'],
+            swap_count: 1,
+            allow_empty_fills: false,
+            variation_seed: 2
+        }
+    );
+
+    assert.ok(keeper_weighted_plan.selected_ingredients.some(item => item.text === 'warm golden hour rim light'));
 });

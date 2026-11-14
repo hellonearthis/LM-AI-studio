@@ -407,6 +407,25 @@
     transform: translateY(-1px);
 }
 
+.ingredient-chip.is-clashing {
+    background: rgba(239, 68, 68, 0.16);
+    border: 1.5px solid #ef4444;
+    box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.18);
+    color: #fecaca;
+}
+
+.ingredient-chip.is-clashing:hover {
+    background: rgba(239, 68, 68, 0.24);
+    border-color: #f87171;
+}
+
+.chip-clash-badge {
+    font-size: 0.78rem;
+    line-height: 1;
+    margin-right: 0.15rem;
+    filter: drop-shadow(0 0 4px rgba(239, 68, 68, 0.55));
+}
+
 .chip-remove-btn {
     background: none;
     border: none;

@@ -11,12 +11,14 @@
 import {
     ALLOWED_INGREDIENT_SLOTS,
     DEFAULT_TRANSPLANT_LOCKED_SLOTS,
+    MONDOCRAFT_REMIX_MEMORY_LIMIT,
     build_stratified_review_queue_order,
     classify_caption_visual_grounding,
     compute_calibration_and_grounding_analytics,
     compute_normalized_vector_cosine_similarity,
     execute_prompt_dicing_pipeline,
     extract_prompts_from_image_records,
+    extract_remix_opening_signature,
     format_deterministic_prompt_identifier,
     score_per_ingredient_visual_grounding
 } from './promptDicerService.js';
@@ -874,6 +876,8 @@ export function get_ingredients_catalog_by_slot(
             MAX(diced_ingredients.replacement_slot) AS replacement_slot,
             MIN(diced_prompts.raw_prompt) AS source_raw_prompt,
             MIN(diced_prompts.image_id) AS image_id,
+            MAX(diced_prompts.is_reviewed) AS is_reviewed,
+            MAX(COALESCE(diced_prompts.keeper_count, 0)) AS keeper_count,
             COUNT(*) AS usage_count
         FROM diced_ingredients
         JOIN diced_prompts ON diced_ingredients.prompt_id = diced_prompts.prompt_id
@@ -1011,6 +1015,8 @@ export function get_visually_compatible_ingredients(database_connection, query_o
             MAX(diced_ingredients.replacement_slot) AS replacement_slot,
             MIN(diced_prompts.raw_prompt) AS source_raw_prompt,
             MIN(diced_prompts.image_id) AS image_id,
+            MAX(diced_prompts.is_reviewed) AS is_reviewed,
+            MAX(COALESCE(diced_prompts.keeper_count, 0)) AS keeper_count,
             COUNT(DISTINCT diced_prompts.prompt_id) AS usage_count,
             COUNT(DISTINCT image_clusters.cluster_label) AS cluster_match_count,
             ${neighbor_case_sql} AS neighbor_match_count
@@ -1379,6 +1385,199 @@ export function fetch_transplant_candidate_pools(
         influences: graph_context.influences,
         reference_prompt_ids: Object.freeze(reference_prompt_ids)
     });
+}
+
+/**
+ * WHAT: Retrieves the most recent 48 live remix memory rows and permanent rejection rows for a media type.
+ * WHY: Feeds Mondocraft staleness rotation and rejection filtering purely at the SQLite boundary.
+ *
+ * @param {Object} database_connection - Active better-sqlite3 database instance.
+ * @param {string} media_type - `'image'` or `'video'`.
+ * @returns {Object} Frozen `{ recent_remixes, rejected_drafts }`.
+ */
+export function get_recent_remix_memory_and_rejections(database_connection, media_type = 'image') {
+    const safe_media_type = media_type === 'video' ? 'video' : 'image';
+    let recent_remixes = [];
+    let rejected_drafts = [];
+
+    const parse_json_array_safely = (raw_json) => {
+        if (!raw_json || typeof raw_json !== 'string') return Object.freeze([]);
+        try {
+            const parsed = JSON.parse(raw_json);
+            return Array.isArray(parsed) ? Object.freeze(parsed) : Object.freeze([]);
+        } catch (_parse_err) {
+            return Object.freeze([]);
+        }
+    };
+
+    try {
+        const memory_rows = database_connection.prepare(`
+            SELECT id, media_type, draft_text, opening_signature, source_prompt_ids_json, source_family_ids_json, swapped_texts_json, created_at
+            FROM dicer_remix_memory
+            WHERE media_type = ?
+            ORDER BY id DESC
+            LIMIT ?
+        `).all(safe_media_type, MONDOCRAFT_REMIX_MEMORY_LIMIT);
+
+        recent_remixes = memory_rows.map(memory_row => Object.freeze({
+            id: memory_row.id,
+            media_type: memory_row.media_type,
+            draft_text: memory_row.draft_text,
+            opening_signature: memory_row.opening_signature,
+            source_prompt_ids: parse_json_array_safely(memory_row.source_prompt_ids_json),
+            source_family_ids: parse_json_array_safely(memory_row.source_family_ids_json),
+            swapped_texts: parse_json_array_safely(memory_row.swapped_texts_json),
+            created_at: memory_row.created_at
+        }));
+    } catch (_memory_query_error) {
+        recent_remixes = [];
+    }
+
+    try {
+        const rejection_rows = database_connection.prepare(`
+            SELECT id, media_type, draft_text, rejected_ingredient_texts_json, created_at
+            FROM dicer_remix_rejections
+            WHERE media_type = ?
+            ORDER BY id DESC
+        `).all(safe_media_type);
+
+        rejected_drafts = rejection_rows.map(rejection_row => Object.freeze({
+            id: rejection_row.id,
+            media_type: rejection_row.media_type,
+            draft_text: rejection_row.draft_text,
+            rejected_ingredient_texts: parse_json_array_safely(rejection_row.rejected_ingredient_texts_json),
+            created_at: rejection_row.created_at
+        }));
+    } catch (_rejection_query_error) {
+        rejected_drafts = [];
+    }
+
+    return Object.freeze({
+        recent_remixes: Object.freeze(recent_remixes),
+        rejected_drafts: Object.freeze(rejected_drafts)
+    });
+}
+
+/**
+ * WHAT: Appends a newly rolled Transplant draft to `dicer_remix_memory` and trims older rows beyond 48 entries.
+ * WHY: Preserves Mondocraft's bounded 48-draft sliding staleness window across sessions.
+ *
+ * @param {Object} database_connection - Active better-sqlite3 database instance.
+ * @param {Object} memory_entry - `{ media_type, draft_text, source_prompt_ids, source_family_ids, swapped_texts }`.
+ */
+export function record_recent_remix_memory_entry(database_connection, memory_entry = {}) {
+    const safe_media_type = memory_entry.media_type === 'video' ? 'video' : 'image';
+    const draft_text = String(memory_entry.draft_text || '').trim();
+    if (!draft_text) return false;
+
+    const opening_signature = memory_entry.opening_signature || extract_remix_opening_signature(draft_text);
+    const source_prompt_ids = Array.isArray(memory_entry.source_prompt_ids) ? memory_entry.source_prompt_ids : [];
+    const source_family_ids = Array.isArray(memory_entry.source_family_ids) ? memory_entry.source_family_ids : [];
+    const swapped_texts = Array.isArray(memory_entry.swapped_texts) ? memory_entry.swapped_texts : [];
+
+    try {
+        database_connection.prepare(`
+            INSERT INTO dicer_remix_memory (
+                media_type, draft_text, opening_signature, source_prompt_ids_json, source_family_ids_json, swapped_texts_json
+            ) VALUES (?, ?, ?, ?, ?, ?)
+        `).run(
+            safe_media_type,
+            draft_text,
+            opening_signature,
+            JSON.stringify(source_prompt_ids),
+            JSON.stringify(source_family_ids),
+            JSON.stringify(swapped_texts)
+        );
+
+        database_connection.prepare(`
+            DELETE FROM dicer_remix_memory
+            WHERE media_type = ?
+              AND id NOT IN (
+                  SELECT id FROM dicer_remix_memory
+                  WHERE media_type = ?
+                  ORDER BY id DESC
+                  LIMIT ?
+              )
+        `).run(safe_media_type, safe_media_type, MONDOCRAFT_REMIX_MEMORY_LIMIT);
+
+        return true;
+    } catch (_insert_memory_error) {
+        return false;
+    }
+}
+
+/**
+ * WHAT: Permanently persists a rejected draft and its swapped ingredients into `dicer_remix_rejections`.
+ * WHY: Prevents Transplant from re-suggesting combinations the user explicitly dismissed with "Reject & Re-roll".
+ *
+ * @param {Object} database_connection - Active better-sqlite3 database instance.
+ * @param {Object} rejection_entry - `{ media_type, draft_text, rejected_ingredient_texts }`.
+ * @returns {number} Updated total count of stored rejections for this media type.
+ */
+export function record_rejected_remix_draft(database_connection, rejection_entry = {}) {
+    const safe_media_type = rejection_entry.media_type === 'video' ? 'video' : 'image';
+    const draft_text = String(rejection_entry.draft_text || '').trim();
+    const rejected_ingredient_texts = Array.isArray(rejection_entry.rejected_ingredient_texts)
+        ? rejection_entry.rejected_ingredient_texts.map(item => String(item || '').trim()).filter(Boolean)
+        : [];
+
+    if (!draft_text && rejected_ingredient_texts.length === 0) {
+        return 0;
+    }
+
+    try {
+        const existing_row = draft_text
+            ? database_connection.prepare(`
+                SELECT id FROM dicer_remix_rejections
+                WHERE media_type = ? AND draft_text = ?
+                LIMIT 1
+            `).get(safe_media_type, draft_text)
+            : null;
+
+        if (!existing_row) {
+            database_connection.prepare(`
+                INSERT INTO dicer_remix_rejections (media_type, draft_text, rejected_ingredient_texts_json)
+                VALUES (?, ?, ?)
+            `).run(safe_media_type, draft_text || rejected_ingredient_texts.join(', '), JSON.stringify(rejected_ingredient_texts));
+        }
+
+        const total_row = database_connection.prepare(`
+            SELECT COUNT(*) AS total FROM dicer_remix_rejections WHERE media_type = ?
+        `).get(safe_media_type);
+        return Number(total_row?.total || 0);
+    } catch (_reject_insert_error) {
+        return 0;
+    }
+}
+
+/**
+ * WHAT: Increments `keeper_count` on `diced_prompts` records when a curator marks a remix as Keeper or saves it.
+ * WHY: Supplies the persistent success count that triggers Mondocraft's 3x Keeper selection weight in future rolls.
+ *
+ * @param {Object} database_connection - Active better-sqlite3 database instance.
+ * @param {ReadonlyArray<string>} prompt_identifiers_collection - List of source `prompt_id` values to boost.
+ * @returns {number} Number of database rows incremented.
+ */
+export function increment_prompt_keeper_count(database_connection, prompt_identifiers_collection = []) {
+    const clean_prompt_ids = Array.from(new Set(
+        (Array.isArray(prompt_identifiers_collection) ? prompt_identifiers_collection : [])
+            .map(item => String(item || '').trim())
+            .filter(Boolean)
+    ));
+    if (clean_prompt_ids.length === 0) return 0;
+
+    try {
+        const placeholders = clean_prompt_ids.map(() => '?').join(', ');
+        const update_result = database_connection.prepare(`
+            UPDATE diced_prompts
+            SET keeper_count = COALESCE(keeper_count, 0) + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE prompt_id IN (${placeholders})
+        `).run(...clean_prompt_ids);
+        return Number(update_result.changes || 0);
+    } catch (_keeper_update_error) {
+        return 0;
+    }
 }
 
 export {

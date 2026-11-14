@@ -103,6 +103,29 @@ export function initialize_prompt_dicer_tables(database_connection) {
         CREATE INDEX IF NOT EXISTS idx_review_events_card_type ON review_events(card_type);
         CREATE INDEX IF NOT EXISTS idx_review_events_item ON review_events(item_type, item_id);
         CREATE INDEX IF NOT EXISTS idx_review_events_split ON review_events(dataset_split);
+
+        CREATE TABLE IF NOT EXISTS dicer_remix_memory (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            media_type TEXT NOT NULL DEFAULT 'image',
+            draft_text TEXT NOT NULL,
+            opening_signature TEXT NOT NULL,
+            source_prompt_ids_json TEXT,
+            source_family_ids_json TEXT,
+            swapped_texts_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_dicer_remix_memory_media_id ON dicer_remix_memory(media_type, id DESC);
+
+        CREATE TABLE IF NOT EXISTS dicer_remix_rejections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            media_type TEXT NOT NULL DEFAULT 'image',
+            draft_text TEXT NOT NULL,
+            rejected_ingredient_texts_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_dicer_remix_rejections_media ON dicer_remix_rejections(media_type);
     `);
 
     // WHAT: Ensuring migrated columns exist on legacy `images`, `diced_prompts`, `diced_ingredients`, and `diced_influences` tables.
@@ -126,6 +149,9 @@ export function initialize_prompt_dicer_tables(database_connection) {
         if (Array.isArray(existing_prompt_columns) && existing_prompt_columns.length > 0) {
             if (!existing_prompt_columns.some(column_info => column_info.name === 'is_reviewed')) {
                 database_connection.exec('ALTER TABLE diced_prompts ADD COLUMN is_reviewed INTEGER NOT NULL DEFAULT 0');
+            }
+            if (!existing_prompt_columns.some(column_info => column_info.name === 'keeper_count')) {
+                database_connection.exec('ALTER TABLE diced_prompts ADD COLUMN keeper_count INTEGER NOT NULL DEFAULT 0');
             }
             database_connection.exec('CREATE INDEX IF NOT EXISTS idx_diced_prompts_is_reviewed ON diced_prompts(is_reviewed)');
         }

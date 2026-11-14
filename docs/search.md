@@ -14,6 +14,8 @@ The Search page offers advanced capabilities to find specific images within your
   - **Toggle**: Enable "Semantic Search" to find images based on meaning and concepts (e.g., "sad robot") rather than just keywords.
   - **Generate Data**: Create embeddings for your library using LM Studio to enable semantic search capabilities.
   - **Hybrid Engine**: Combines **Fuse.js** for fuzzy keyword matching with **Vector Embeddings** for conceptual search.
+  - **Ovis-Omni Similar Image Search**: Find visually similar images using 2048-dim Ovis embeddings (see [ovis_omni_guide.md](./ovis_omni_guide.md)).
+  - **Tri-Face Prism Cards**: Search result cards expose AI summaries, tags/objects, and Prompt Dicer ingredients on separate card faces.
 
 - **Filters**:
   - **Scene Type**: Filter by categories such as Indoor, Outdoor, Portrait, Landscape, Urban, or Nature.

@@ -17,6 +17,10 @@ import {
     export_active_learning_dataset_jsonl,
     fetch_relevant_influences_for_ingredients,
     fetch_transplant_candidate_pools,
+    get_recent_remix_memory_and_rejections,
+    record_recent_remix_memory_entry,
+    record_rejected_remix_draft,
+    increment_prompt_keeper_count,
     build_review_queue_cards,
     append_review_event_and_sync_item,
     get_calibration_dashboard_summary
@@ -48,7 +52,8 @@ export function createDicerRouter({ db, loadOvisEmbeddingsCached, generateSearch
                 image_id = null,
                 run_pass_d = true,
                 force_heuristic = false,
-                check_visual_grounding = true
+                check_visual_grounding = true,
+                source_prompt_ids = []
             } = http_incoming_request.body;
 
             const safe_media_type = media_type === 'video' ? 'video' : 'image';
@@ -99,12 +104,19 @@ export function createDicerRouter({ db, loadOvisEmbeddingsCached, generateSearch
                 safe_image_id
             );
 
+            // WHAT: Boost keeper success weights on source prompts when a user saves a newly remixed composition.
+            // WHY: Mirrors Mondocraft's keeper weight escalation so proven source prompts participate 3x more often.
+            const keeper_updated_count = (Array.isArray(source_prompt_ids) && source_prompt_ids.length > 0)
+                ? increment_prompt_keeper_count(db, source_prompt_ids)
+                : 0;
+
             http_server_response.json({
                 success: true,
                 master_record: dicing_pipeline_result.master_record,
                 influences: dicing_pipeline_result.influences,
                 execution_mode: dicing_pipeline_result.execution_mode,
-                database_summary: database_save_result
+                database_summary: database_save_result,
+                keeper_updated_count
             });
         } catch (prompt_dicing_error) {
             console.error('[PROMPT-DICER] Pipeline execution failed:', prompt_dicing_error);
@@ -542,7 +554,11 @@ export function createDicerRouter({ db, loadOvisEmbeddingsCached, generateSearch
                 resolve_closure = false,
                 run_round_trip = true,
                 media_type = 'image',
-                include_observable_replacements = true
+                include_observable_replacements = true,
+                style_mode = 'clauses',
+                base_prompt_text = '',
+                swapped_slots = [],
+                variation_seed = 0
             } = http_incoming_request.body || {};
 
             if (!Array.isArray(ingredients)) {
@@ -584,11 +600,17 @@ export function createDicerRouter({ db, loadOvisEmbeddingsCached, generateSearch
             // 1. Detect direct and multi-hop transitive physical continuity clashes
             const detected_clashes = detect_ingredient_clashes(active_ingredients, merged_influences);
 
-            // 2. Assemble generation prompt string
+            // 2. Assemble generation prompt string (classic clauses, in-place natural sentences, or Dream modes)
             const remixed_prompt_string = assemble_remixed_prompt_text(
                 active_ingredients,
                 active_consequences,
-                { include_observable_replacements: Boolean(include_observable_replacements) }
+                {
+                    include_observable_replacements: Boolean(include_observable_replacements),
+                    style_mode,
+                    base_prompt_text,
+                    swapped_slots: Array.isArray(swapped_slots) ? swapped_slots : [],
+                    variation_seed: Number(variation_seed) || 0
+                }
             );
 
             // 3. Fast heuristic round-trip verification (#8)
@@ -615,8 +637,8 @@ export function createDicerRouter({ db, loadOvisEmbeddingsCached, generateSearch
         }
     });
 
-    // WHAT: Solves constrained K-slot transplantation over a base prompt using EVoC/graph beam search, Influence Closure, and optional Laya tie-breaking.
-    // WHY: Implements Phase 1 (#1 Transplant, #2 Constraint Solver, #3 Influence Closure, #8 Round-Trip Check) cleanly behind one endpoint.
+    // WHAT: Solves constrained K-slot transplantation over a base prompt using EVoC/graph beam search, family clustering, staleness rotation, Influence Closure, and optional Laya tie-breaking.
+    // WHY: Implements Phase 1 Constraint Transplant plus Mondocraft diversity, 48-draft rotation, rejection avoidance, and natural/Dream assembly.
     router.post('/api/dicer/transplant', async (http_incoming_request, http_server_response) => {
         try {
             const {
@@ -627,7 +649,9 @@ export function createDicerRouter({ db, loadOvisEmbeddingsCached, generateSearch
                 variation_seed = 0,
                 use_laya_tiebreaker = false,
                 include_observable_replacements = true,
-                media_type = 'image'
+                media_type = 'image',
+                style_mode = 'clauses',
+                base_prompt_text = ''
             } = http_incoming_request.body || {};
 
             if (!Array.isArray(base_ingredients) || base_ingredients.length === 0) {
@@ -639,6 +663,7 @@ export function createDicerRouter({ db, loadOvisEmbeddingsCached, generateSearch
                 locked_slots: safe_locked_slots,
                 per_slot_limit: 25
             });
+            const { recent_remixes, rejected_drafts } = get_recent_remix_memory_and_rejections(db, media_type);
 
             const solver_result = solve_constraint_transplant_beam(
                 base_ingredients,
@@ -648,7 +673,12 @@ export function createDicerRouter({ db, loadOvisEmbeddingsCached, generateSearch
                     locked_slots: safe_locked_slots,
                     swap_count,
                     allow_empty_fills: Boolean(allow_empty_fills),
-                    variation_seed: Number(variation_seed) || 0
+                    variation_seed: Number(variation_seed) || 0,
+                    recent_remixes,
+                    rejected_drafts,
+                    style_mode,
+                    base_prompt_text,
+                    include_observable_replacements: Boolean(include_observable_replacements)
                 }
             );
 
@@ -663,7 +693,13 @@ export function createDicerRouter({ db, loadOvisEmbeddingsCached, generateSearch
                     const assembled_candidate_text = assemble_remixed_prompt_text(
                         top_plans[plan_index].selected_ingredients,
                         top_plans[plan_index].consequences,
-                        { include_observable_replacements: Boolean(include_observable_replacements) }
+                        {
+                            include_observable_replacements: Boolean(include_observable_replacements),
+                            style_mode,
+                            base_prompt_text,
+                            swapped_slots: top_plans[plan_index].swapped_slots || [],
+                            variation_seed: Number(variation_seed) || 0
+                        }
                     );
                     plan_questions[`plan__${plan_index}`] = {
                         type: 'choice',
@@ -696,8 +732,25 @@ export function createDicerRouter({ db, loadOvisEmbeddingsCached, generateSearch
             const remixed_prompt = assemble_remixed_prompt_text(
                 chosen_plan.selected_ingredients,
                 chosen_plan.consequences,
-                { include_observable_replacements: Boolean(include_observable_replacements) }
+                {
+                    include_observable_replacements: Boolean(include_observable_replacements),
+                    style_mode,
+                    base_prompt_text,
+                    swapped_slots: chosen_plan.swapped_slots || [],
+                    variation_seed: Number(variation_seed) || 0
+                }
             );
+
+            // WHAT: Persist this live roll into the 48-entry staleness window in SQLite.
+            // WHY: Ensures the next Transplant roll steers away from these openings and source families.
+            const swapped_slots_list = Array.isArray(chosen_plan.swapped_slots) ? chosen_plan.swapped_slots : [];
+            record_recent_remix_memory_entry(db, {
+                media_type,
+                draft_text: remixed_prompt,
+                source_prompt_ids: swapped_slots_list.map(swap_item => swap_item.chosen_source_prompt).filter(Boolean),
+                source_family_ids: swapped_slots_list.map(swap_item => swap_item.source_family_id).filter(Boolean),
+                swapped_texts: swapped_slots_list.map(swap_item => swap_item.chosen_text).filter(Boolean)
+            });
 
             const round_trip_verdict = verify_prompt_round_trip(
                 chosen_plan.selected_ingredients,
@@ -724,6 +777,56 @@ export function createDicerRouter({ db, loadOvisEmbeddingsCached, generateSearch
         } catch (transplant_error) {
             console.error('[PROMPT-DICER] Constraint transplant failed:', transplant_error);
             http_server_response.status(500).json({ error: transplant_error.message });
+        }
+    });
+
+    // WHAT: Permanently records a rejected remix draft and swapped ingredients so Transplant skips them in future rolls.
+    // WHY: Implements Mondocraft `remix_rejections` behavior behind "Reject & Re-roll".
+    router.post('/api/dicer/reject-remix', (http_incoming_request, http_server_response) => {
+        try {
+            const {
+                draft_text = '',
+                rejected_ingredient_texts = [],
+                media_type = 'image'
+            } = http_incoming_request.body || {};
+
+            if (!String(draft_text || '').trim() && (!Array.isArray(rejected_ingredient_texts) || rejected_ingredient_texts.length === 0)) {
+                return http_server_response.status(400).json({ error: 'Provide draft_text or rejected_ingredient_texts to record a rejection.' });
+            }
+
+            const rejected_count = record_rejected_remix_draft(db, {
+                media_type,
+                draft_text,
+                rejected_ingredient_texts
+            });
+
+            http_server_response.json({
+                success: true,
+                rejected_count
+            });
+        } catch (reject_error) {
+            console.error('[PROMPT-DICER] Failed to record remix rejection:', reject_error);
+            http_server_response.status(500).json({ error: reject_error.message });
+        }
+    });
+
+    // WHAT: Increments keeper success weights on source prompts used in an approved remix.
+    // WHY: Implements Mondocraft's 3x weight bias for proven winning prompts.
+    router.post('/api/dicer/mark-keeper', (http_incoming_request, http_server_response) => {
+        try {
+            const { prompt_ids = [] } = http_incoming_request.body || {};
+            if (!Array.isArray(prompt_ids) || prompt_ids.length === 0) {
+                return http_server_response.status(400).json({ error: 'A non-empty prompt_ids array is required.' });
+            }
+
+            const updated_count = increment_prompt_keeper_count(db, prompt_ids);
+            http_server_response.json({
+                success: true,
+                updated_count
+            });
+        } catch (keeper_error) {
+            console.error('[PROMPT-DICER] Failed to mark keeper prompts:', keeper_error);
+            http_server_response.status(500).json({ error: keeper_error.message });
         }
     });
 

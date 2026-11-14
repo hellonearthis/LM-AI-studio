@@ -512,7 +512,32 @@ export {
     assemble_remixed_prompt_text,
     resolve_ingredient_influence_closure,
     solve_constraint_transplant_beam,
-    verify_prompt_round_trip
+    verify_prompt_round_trip,
+    MONDOCRAFT_REMIX_MEMORY_LIMIT,
+    MONDOCRAFT_OPENING_WORD_COUNT,
+    ALLOWED_REMIX_STYLE_MODES,
+    tidy_prompt_whitespace,
+    extract_normalized_prompt_words,
+    build_prompt_similarity_features,
+    compute_sequence_matcher_ratio,
+    are_near_copy_features,
+    are_near_copy_prompts,
+    cluster_near_copy_prompt_families,
+    deduplicate_candidate_pool_by_family,
+    extract_remix_opening_signature,
+    is_candidate_rejected_by_memory,
+    compute_candidate_staleness_score,
+    select_freshest_beam_candidates,
+    compute_source_success_weight_multiplier,
+    compute_keeper_weighted_bonus,
+    select_indefinite_article,
+    pluralize_english_noun,
+    recase_first_letter,
+    strip_leading_determiners_and_numbers,
+    build_span_replacement_edit,
+    apply_non_overlapping_span_edits,
+    apply_in_place_prompt_edits,
+    apply_dream_mode_transformation
 } from "./promptDicer/clashAndRemix.js";
 
 

@@ -365,3 +365,4 @@ ISC
 - [ComfyUI-QwenVL](https://github.com/1038lab/ComfyUI-QwenVL.git) for prompt strategies
 - [Fuse.js](https://fusejs.io/) for client-side fuzzy search
 - [D3.js](https://d3js.org/) & [UMAP](https://umap-learn.readthedocs.io/) for semantic cluster map visualization
+- **Hodge** for the **Mondocraft** remix & NLP inspiration (near-copy family clustering, 48-draft staleness/rejection memory, in-place span editing with Dream modes, and 3× keeper weighting)

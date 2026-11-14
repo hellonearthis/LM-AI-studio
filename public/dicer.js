@@ -44,6 +44,38 @@ let global_all_influences_cache = [];
 let global_locked_slots_set = new Set(DEFAULT_TRANSPLANT_LOCKED_SLOTS);
 let global_remix_undo_stack = [];
 let global_transplant_variation_counter = 0;
+let global_active_clashes_collection = [];
+let global_catalog_offset = 0;
+let global_catalog_limit = 50;
+let global_catalog_search_query = '';
+let global_base_raw_prompt_text = '';
+let global_last_swapped_slots = [];
+
+/**
+ * WHAT: Reads the active prompt assembly or Dream operator style selected by the user.
+ * WHY: Keeps preview evaluation and constraint transplantation synchronized on the chosen output formatting mode.
+ */
+function readSelectedRemixStyleMode() {
+    const style_mode_dropdown = document.getElementById('remixStyleModeSelect');
+    return style_mode_dropdown && style_mode_dropdown.value ? style_mode_dropdown.value : 'clauses';
+}
+
+/**
+ * WHAT: Extracts deduplicated catalog source prompt identifiers from active canvas ingredients.
+ * WHY: Supplies `/api/dicer/dice` and `/api/dicer/mark-keeper` with exact provenance for 3x keeper boosting.
+ */
+function collectDistinctSourcePromptIdentifiers(ingredients_collection) {
+    if (!Array.isArray(ingredients_collection)) {
+        return [];
+    }
+    return Array.from(
+        new Set(
+            ingredients_collection
+                .map(ingredient_item => ingredient_item && ingredient_item.prompt_id)
+                .filter(Boolean)
+        )
+    );
+}
 
 // ============================================================================
 // 2. TAB NAVIGATION
@@ -495,6 +527,9 @@ function clearRemixCanvas() {
     }
     global_active_ingredients_collection = [];
     global_active_consequences_collection = [];
+    global_active_clashes_collection = [];
+    global_base_raw_prompt_text = '';
+    global_last_swapped_slots = [];
     renderClosureTraceBanner(null, []);
     renderActiveIngredientsCanvas();
     executeRemixPreviewEvaluation({ resolve_closure: false });
@@ -524,6 +559,40 @@ function updateRemixSourceAttributionSummary() {
     } else {
         summary_element.textContent = `${total_pieces} active pieces`;
     }
+}
+
+/**
+ * WHAT: Purely builds lookup maps of conflicting ingredient IDs, normalized texts, and human-readable clash reasons.
+ * WHY: Allows `renderActiveIngredientsCanvas()` to highlight exact clashing chips without mutating active state.
+ *
+ * @param {ReadonlyArray<Record<string, any>>} clashes_collection - Active continuity clashes from remix-preview.
+ * @returns {{ conflicting_ids_map: Map<string, string>, conflicting_texts_map: Map<string, string> }} Lookup maps.
+ */
+function buildConflictingIngredientLookup(clashes_collection) {
+    const conflicting_ids_map = new Map();
+    const conflicting_texts_map = new Map();
+
+    if (!Array.isArray(clashes_collection)) {
+        return { conflicting_ids_map, conflicting_texts_map };
+    }
+
+    for (const single_clash of clashes_collection) {
+        const reason_summary = `Conflict on '${single_clash.state_key}': '${single_clash.applied_value_alpha}' vs '${single_clash.applied_value_beta}'`;
+
+        if (single_clash.source_text_alpha) {
+            conflicting_texts_map.set(String(single_clash.source_text_alpha).toLowerCase().trim(), reason_summary);
+        } else if (single_clash.source_ingredient_alpha) {
+            conflicting_ids_map.set(String(single_clash.source_ingredient_alpha), reason_summary);
+        }
+
+        if (single_clash.source_text_beta) {
+            conflicting_texts_map.set(String(single_clash.source_text_beta).toLowerCase().trim(), reason_summary);
+        } else if (single_clash.source_ingredient_beta) {
+            conflicting_ids_map.set(String(single_clash.source_ingredient_beta), reason_summary);
+        }
+    }
+
+    return { conflicting_ids_map, conflicting_texts_map };
 }
 
 /**
@@ -559,6 +628,7 @@ function renderActiveIngredientsCanvas() {
         };
     }, {});
 
+    const { conflicting_ids_map, conflicting_texts_map } = buildConflictingIngredientLookup(global_active_clashes_collection);
     const slot_keys_list = Object.keys(grouped_by_slot);
     const html_rows_collection = slot_keys_list.map(slot_identifier => {
         const is_slot_locked = global_locked_slots_set.has(slot_identifier);
@@ -570,6 +640,14 @@ function renderActiveIngredientsCanvas() {
 
         const chips_html = grouped_by_slot[slot_identifier].map(ingredient_item => {
             const safe_text = escapeHtmlEntities(ingredient_item.text);
+            const normalized_chip_text = String(ingredient_item.text || '').toLowerCase().trim();
+            const clash_reason = conflicting_texts_map.get(normalized_chip_text)
+                || (ingredient_item.ingredient_id ? conflicting_ids_map.get(String(ingredient_item.ingredient_id)) : null)
+                || null;
+            const is_clashing_chip = Boolean(clash_reason);
+            const clash_badge_html = is_clashing_chip
+                ? `<span class="chip-clash-badge" title="${escapeHtmlEntities(clash_reason)}">⚠️</span>`
+                : '';
             const measurement_badge = ingredient_item.measured_number
                 ? `<span style="opacity: 0.7; font-size: 0.75rem; margin-left: 0.25rem;">(${ingredient_item.measured_number}${ingredient_item.measured_unit || ''})</span>`
                 : '';
@@ -583,10 +661,13 @@ function renderActiveIngredientsCanvas() {
                     : '');
 
             const encoded_ingredient_text = encodeURIComponent(ingredient_item.text || '');
+            const chip_tooltip = is_clashing_chip
+                ? `${clash_reason} — Click × to remove`
+                : 'Click × to remove';
 
             return `
-                <div class="ingredient-chip" title="Click &times; to remove">
-                    <span>${safe_text}${measurement_badge}${ovis_chip_badge}${provenance_badge}</span>
+                <div class="ingredient-chip ${is_clashing_chip ? 'is-clashing' : ''}" title="${escapeHtmlEntities(chip_tooltip)}">
+                    ${clash_badge_html}<span>${safe_text}${measurement_badge}${ovis_chip_badge}${provenance_badge}</span>
                     <button class="chip-remove-btn" onclick="removeIngredientFromRemixCanvas(decodeURIComponent('${encoded_ingredient_text.replace(/'/g, '%27')}'))">&times;</button>
                 </div>
             `;
@@ -633,6 +714,7 @@ async function executeRemixPreviewEvaluation(preview_options = {}) {
 
     const toggle_replacements_checkbox = document.getElementById('toggleObservableReplacements');
     const include_replacements_flag = toggle_replacements_checkbox ? toggle_replacements_checkbox.checked : true;
+    const selected_style_mode = readSelectedRemixStyleMode();
 
     try {
         const http_preview_response = await fetch('/api/dicer/remix-preview', {
@@ -646,7 +728,11 @@ async function executeRemixPreviewEvaluation(preview_options = {}) {
                 locked_slots: Array.from(global_locked_slots_set),
                 resolve_closure: Boolean(preview_options.resolve_closure),
                 run_round_trip: true,
-                include_observable_replacements: include_replacements_flag
+                include_observable_replacements: include_replacements_flag,
+                style_mode: selected_style_mode,
+                base_prompt_text: global_base_raw_prompt_text,
+                swapped_slots: global_last_swapped_slots,
+                variation_seed: global_transplant_variation_counter
             })
         });
 
@@ -678,7 +764,10 @@ async function executeRemixPreviewEvaluation(preview_options = {}) {
             renderRoundTripBadge(preview_payload.round_trip);
 
             // Display or hide continuity clash warnings (including multi-hop transitive chains)
+            // and highlight the exact conflicting chips on the Remix Canvas.
+            const previous_clash_count = global_active_clashes_collection.length;
             if (preview_payload.has_clashes && preview_payload.clashes.length > 0) {
+                global_active_clashes_collection = preview_payload.clashes;
                 const first_clash = preview_payload.clashes[0];
                 const transitive_prefix = first_clash.is_transitive && Array.isArray(first_clash.chain_path)
                     ? `[${first_clash.hop_depth}-hop chain: ${first_clash.chain_path.join(' -> ')}] `
@@ -688,8 +777,13 @@ async function executeRemixPreviewEvaluation(preview_options = {}) {
                         `${transitive_prefix}Conflict on '${first_clash.state_key}': '${first_clash.applied_value_alpha}' conflicts with '${first_clash.applied_value_beta}'.`;
                 }
                 if (clash_alert_panel) clash_alert_panel.style.display = 'flex';
+                renderActiveIngredientsCanvas();
             } else {
+                global_active_clashes_collection = [];
                 if (clash_alert_panel) clash_alert_panel.style.display = 'none';
+                if (previous_clash_count > 0) {
+                    renderActiveIngredientsCanvas();
+                }
             }
         }
     } catch (preview_evaluation_error) {
@@ -712,6 +806,7 @@ async function executeConstraintTransplant() {
     const toggle_replacements_checkbox = document.getElementById('toggleObservableReplacements');
     const swap_count = swap_select ? Number(swap_select.value) || 2 : 2;
     const include_replacements_flag = toggle_replacements_checkbox ? toggle_replacements_checkbox.checked : true;
+    const selected_style_mode = readSelectedRemixStyleMode();
 
     const original_label = transplant_button ? transplant_button.innerHTML : '';
     if (transplant_button) {
@@ -733,7 +828,9 @@ async function executeConstraintTransplant() {
                 allow_empty_fills: true,
                 variation_seed: global_transplant_variation_counter,
                 use_laya_tiebreaker: false,
-                include_observable_replacements: include_replacements_flag
+                include_observable_replacements: include_replacements_flag,
+                style_mode: selected_style_mode,
+                base_prompt_text: global_base_raw_prompt_text
             })
         });
 
@@ -744,6 +841,7 @@ async function executeConstraintTransplant() {
 
         global_active_ingredients_collection = Array.isArray(payload.ingredients) ? payload.ingredients : [];
         global_active_consequences_collection = Array.isArray(payload.consequences) ? payload.consequences : [];
+        global_last_swapped_slots = Array.isArray(payload.swapped_slots) ? payload.swapped_slots : [];
 
         renderClosureTraceBanner(
             { pulled_effects: payload.pulled_effects, pruned_orphans: payload.pruned_orphans },
@@ -775,6 +873,120 @@ async function executeConstraintTransplant() {
 }
 
 window.executeConstraintTransplant = executeConstraintTransplant;
+
+/**
+ * WHAT: Records the active remix draft and its last swapped texts as permanently rejected, then re-rolls Transplant.
+ * WHY: Implements Mondocraft's reject-and-reroll loop so disliked combinations do not resurface in future solves.
+ */
+async function rejectCurrentRemixAndReroll() {
+    if (global_active_ingredients_collection.length === 0) {
+        alert('Load a base prompt or add ingredients before rejecting and re-rolling.');
+        return;
+    }
+
+    const reject_reroll_button = document.getElementById('btnRejectReroll');
+    const prompt_output_textarea = document.getElementById('remixedPromptOutput');
+    const current_remixed_prompt_text = prompt_output_textarea ? prompt_output_textarea.value.trim() : '';
+    const rejected_ingredient_texts = Array.isArray(global_last_swapped_slots)
+        ? global_last_swapped_slots
+            .map(swapped_slot_record => (swapped_slot_record && swapped_slot_record.chosen_text ? String(swapped_slot_record.chosen_text).trim() : ''))
+            .filter(Boolean)
+        : [];
+
+    if (!current_remixed_prompt_text && rejected_ingredient_texts.length === 0) {
+        alert('Run Transplant or build a remix prompt before rejecting.');
+        return;
+    }
+
+    const original_reject_button_label = reject_reroll_button ? reject_reroll_button.innerHTML : '';
+    if (reject_reroll_button) {
+        reject_reroll_button.disabled = true;
+        reject_reroll_button.innerHTML = '⏳ Rejecting...';
+    }
+
+    try {
+        const rejection_http_response = await fetch('/api/dicer/reject-remix', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                draft_text: current_remixed_prompt_text,
+                rejected_ingredient_texts,
+                media_type: 'image'
+            })
+        });
+
+        const rejection_payload = await rejection_http_response.json();
+        if (!rejection_http_response.ok || !rejection_payload.success) {
+            throw new Error(rejection_payload.error || 'Failed to record remix rejection');
+        }
+    } catch (rejection_error) {
+        alert(`Reject & Re-roll error: ${rejection_error.message}`);
+        if (reject_reroll_button) {
+            reject_reroll_button.disabled = false;
+            reject_reroll_button.innerHTML = original_reject_button_label;
+        }
+        return;
+    }
+
+    if (reject_reroll_button) {
+        reject_reroll_button.disabled = false;
+        reject_reroll_button.innerHTML = original_reject_button_label;
+    }
+
+    await executeConstraintTransplant();
+}
+
+window.rejectCurrentRemixAndReroll = rejectCurrentRemixAndReroll;
+
+/**
+ * WHAT: Marks the active remix's source prompts as proven Keepers for 3x Transplant selection weight.
+ * WHY: Implements Mondocraft's positive reinforcement signal so winning visual sources surface more reliably.
+ */
+async function markCurrentRemixAsKeeper() {
+    const source_prompt_identifiers = collectDistinctSourcePromptIdentifiers(global_active_ingredients_collection);
+    if (source_prompt_identifiers.length === 0) {
+        alert('Load or transplant ingredients from cataloged prompts before marking as a Keeper.');
+        return;
+    }
+
+    const keeper_button = document.getElementById('btnMarkKeeper');
+    const original_keeper_button_label = keeper_button ? keeper_button.innerHTML : '';
+    if (keeper_button) {
+        keeper_button.disabled = true;
+        keeper_button.innerHTML = '⏳ Boosting...';
+    }
+
+    try {
+        const keeper_http_response = await fetch('/api/dicer/mark-keeper', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                prompt_ids: source_prompt_identifiers
+            })
+        });
+
+        const keeper_payload = await keeper_http_response.json();
+        if (!keeper_http_response.ok || !keeper_payload.success) {
+            throw new Error(keeper_payload.error || 'Failed to mark keeper prompts');
+        }
+
+        if (keeper_button) {
+            keeper_button.innerHTML = `⭐ Keeper Boosted (${keeper_payload.updated_count || source_prompt_identifiers.length})`;
+            setTimeout(() => {
+                keeper_button.disabled = false;
+                keeper_button.innerHTML = original_keeper_button_label;
+            }, 1800);
+        }
+    } catch (keeper_error) {
+        alert(`Keeper boost error: ${keeper_error.message}`);
+        if (keeper_button) {
+            keeper_button.disabled = false;
+            keeper_button.innerHTML = original_keeper_button_label;
+        }
+    }
+}
+
+window.markCurrentRemixAsKeeper = markCurrentRemixAsKeeper;
 
 /**
  * WHAT: Sends the current prompt output through full llama-server re-dicing (#8 Deep Round-Trip Check).
@@ -860,6 +1072,8 @@ async function saveAsNewPrompt() {
         return;
     }
 
+    const source_prompt_identifiers = collectDistinctSourcePromptIdentifiers(global_active_ingredients_collection);
+
     try {
         const http_save_response = await fetch('/api/dicer/dice', {
             method: 'POST',
@@ -867,7 +1081,8 @@ async function saveAsNewPrompt() {
             body: JSON.stringify({
                 prompt_text: raw_prompt_text,
                 media_type: 'image',
-                run_pass_d: true
+                run_pass_d: true,
+                source_prompt_ids: source_prompt_identifiers
             })
         });
 
@@ -1300,23 +1515,104 @@ window.batchDiceAllCandidates = batchDiceAllCandidates;
 // ============================================================================
 
 /**
- * WHAT: Fetches and displays all analyzed prompts in the Catalog tab.
- * WHY: Displays the concreteness leaderboard and opens detailed master records.
+ * WHAT: Resets pagination to offset 0 and fetches Catalog prompts matching the search input.
+ * WHY: Lets users search across all 11,430+ diced prompts by keyword, filename, or prm_ID.
+ */
+function searchCatalogPrompts() {
+    const search_input = document.getElementById('catalogSearchInput');
+    global_catalog_search_query = search_input ? search_input.value.trim() : '';
+    global_catalog_offset = 0;
+    fetchAndRenderCatalogPrompts();
+}
+
+/**
+ * WHAT: Clears the active Catalog search filter and reloads page 1.
+ * WHY: Restores the default most-recently-updated catalog view with a single click.
+ */
+function clearCatalogSearch() {
+    const search_input = document.getElementById('catalogSearchInput');
+    if (search_input) search_input.value = '';
+    global_catalog_search_query = '';
+    global_catalog_offset = 0;
+    fetchAndRenderCatalogPrompts();
+}
+
+/**
+ * WHAT: Updates the Catalog page size from the dropdown and resets to offset 0.
+ * WHY: Allows viewing 50, 100, or 200 diced prompts per page.
+ */
+function changeCatalogPageSize() {
+    const size_select = document.getElementById('catalogPageSizeSelect');
+    global_catalog_limit = Math.max(1, Math.min(200, Number(size_select?.value) || 50));
+    global_catalog_offset = 0;
+    fetchAndRenderCatalogPrompts();
+}
+
+/**
+ * WHAT: Advances or rewinds the Catalog pagination offset by one page.
+ * WHY: Enables browsing beyond the first 50 prompts across the full catalog.
+ *
+ * @param {number} page_direction_delta - `-1` for previous page, `+1` for next page.
+ */
+function goToCatalogPage(page_direction_delta) {
+    global_catalog_offset = Math.max(0, global_catalog_offset + page_direction_delta * global_catalog_limit);
+    fetchAndRenderCatalogPrompts();
+}
+
+/**
+ * WHAT: Fetches and displays analyzed prompts in the Catalog tab with search and pagination.
+ * WHY: Displays the concreteness leaderboard, supports browsing all cataloged items, and opens master records.
  */
 async function fetchAndRenderCatalogPrompts() {
     const table_container = document.getElementById('dicedPromptsTableContainer');
+    const range_status_element = document.getElementById('catalogRangeStatus');
+    const prev_page_button = document.getElementById('btnCatalogPrevPage');
+    const next_page_button = document.getElementById('btnCatalogNextPage');
     if (!table_container) return;
 
     try {
-        const http_response = await fetch('/api/dicer/prompts?limit=50');
+        const query_params = new URLSearchParams({
+            limit: String(global_catalog_limit),
+            offset: String(global_catalog_offset)
+        });
+        if (global_catalog_search_query) {
+            query_params.set('q', global_catalog_search_query);
+        }
+
+        const http_response = await fetch(`/api/dicer/prompts?${query_params.toString()}`);
         if (!http_response.ok) throw new Error(`HTTP ${http_response.status}`);
         const payload = await http_response.json();
         const prompts_list = payload.prompts || [];
+        const total_catalog_count = Number(payload.stats?.total_prompts) || 0;
+
+        if (prev_page_button) {
+            prev_page_button.disabled = global_catalog_offset <= 0;
+        }
+        if (next_page_button) {
+            next_page_button.disabled = prompts_list.length < global_catalog_limit;
+        }
+        if (range_status_element) {
+            if (prompts_list.length === 0) {
+                range_status_element.textContent = global_catalog_search_query
+                    ? `No matches for "${global_catalog_search_query}"`
+                    : '0 prompts';
+            } else {
+                const start_index = global_catalog_offset + 1;
+                const end_index = global_catalog_offset + prompts_list.length;
+                const scope_suffix = global_catalog_search_query
+                    ? ` matching "${global_catalog_search_query}"`
+                    : (total_catalog_count > 0 ? ` of ${total_catalog_count.toLocaleString()}` : '');
+                range_status_element.textContent = `Showing ${start_index.toLocaleString()}–${end_index.toLocaleString()}${scope_suffix}`;
+            }
+        }
 
         if (prompts_list.length === 0) {
+            const empty_message = global_catalog_search_query
+                ? `No diced prompts matched "${escapeHtmlEntities(global_catalog_search_query)}". Try another keyword or click Clear.`
+                : 'No diced prompts found yet. Use the "Process & Batch Dice" tab to dice your library prompts!';
             table_container.innerHTML = `
                 <div style="text-align: center; padding: 3rem; color: var(--text-secondary);">
-                    No diced prompts found yet. Use the "Process & Batch Dice" tab to dice your library prompts!
+                    ${empty_message}
                 </div>
             `;
             return;
@@ -1328,15 +1624,11 @@ async function fetchAndRenderCatalogPrompts() {
             const snippet = safe_prompt_text.length > 80
                 ? safe_prompt_text.slice(0, 80) + '...'
                 : safe_prompt_text;
+            const thumbnail_html = buildRemixPromptThumbnailHtml(prompt_item);
 
             return `
                 <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.05); transition: background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.02)'" onmouseout="this.style.background='transparent'">
-                    <td style="padding: 0.75rem 1rem; font-weight: 600; color: #38bdf8;">${prompt_item.prompt_id}</td>
-                    <td style="padding: 0.75rem 1rem;">
-                        <span class="badge-weather_or_matter" style="font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 4px;">
-                            ${prompt_item.media_type.toUpperCase()}
-                        </span>
-                    </td>
+                    <td style="padding: 0.5rem 0.75rem; width: 56px;">${thumbnail_html}</td>
                     <td style="padding: 0.75rem 1rem; color: var(--text-primary); font-size: 0.85rem;" title="${safe_prompt_text}">
                         ${snippet}
                     </td>
@@ -1364,8 +1656,7 @@ async function fetchAndRenderCatalogPrompts() {
             <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
                 <thead>
                     <tr style="border-bottom: 1px solid var(--border); color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">
-                        <th style="padding: 0.75rem 1rem;">ID</th>
-                        <th style="padding: 0.75rem 1rem;">Type</th>
+                        <th style="padding: 0.75rem 0.75rem;">Image</th>
                         <th style="padding: 0.75rem 1rem;">Raw Prompt Text</th>
                         <th style="padding: 0.75rem 1rem; text-align: center;">Concreteness</th>
                         <th style="padding: 0.75rem 1rem; text-align: center;">Ingredients</th>
@@ -1450,11 +1741,19 @@ async function inspectPromptMasterRecord(prompt_identifier) {
             </div>
         `).join('');
 
+        const numeric_inspector_image_id = Number(master_record.image_id);
+        const inspector_thumbnail_html = (Number.isInteger(numeric_inspector_image_id) && numeric_inspector_image_id > 0)
+            ? `<img src="thumbnails/id_${numeric_inspector_image_id}.avif" alt="Prompt Thumbnail" style="width: 96px; height: 96px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); flex-shrink: 0;" onerror="this.style.display='none';">`
+            : '';
+
         modal_body.innerHTML = `
-            <div style="margin-bottom: 1rem;">
-                <h5 style="color: var(--text-secondary); margin-bottom: 0.25rem;">Raw Source Prompt</h5>
-                <div style="background: rgba(11, 11, 26, 0.8); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; font-size: 0.85rem;">
-                    ${escapeHtmlEntities(master_record.raw_prompt)}
+            <div style="margin-bottom: 1rem; display: flex; gap: 1rem; align-items: flex-start;">
+                ${inspector_thumbnail_html}
+                <div style="flex: 1; min-width: 0;">
+                    <h5 style="color: var(--text-secondary); margin-bottom: 0.25rem;">Raw Source Prompt</h5>
+                    <div style="background: rgba(11, 11, 26, 0.8); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; font-size: 0.85rem;">
+                        ${escapeHtmlEntities(master_record.raw_prompt)}
+                    </div>
                 </div>
             </div>
 
@@ -1550,6 +1849,8 @@ async function loadPromptIntoRemixWorkbench(prompt_identifier, append_mode = fal
                 global_active_consequences_collection = [];
                 global_locked_slots_set = new Set(DEFAULT_TRANSPLANT_LOCKED_SLOTS);
                 global_transplant_variation_counter = 0;
+                global_base_raw_prompt_text = master_record.raw_prompt || '';
+                global_last_swapped_slots = [];
                 global_all_influences_cache = Array.isArray(master_record.influences)
                     ? [...master_record.influences]
                     : [];
@@ -1598,6 +1899,16 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    const catalog_search_input = document.getElementById('catalogSearchInput');
+    if (catalog_search_input) {
+        catalog_search_input.addEventListener('keydown', (key_event) => {
+            if (key_event.key === 'Enter') {
+                key_event.preventDefault();
+                searchCatalogPrompts();
+            }
+        });
+    }
+
     const url_search_params = new URLSearchParams(window.location.search);
     const requested_prompt_identifier = url_search_params.get('prompt_id');
     const requested_mode = url_search_params.get('mode');
@@ -1617,6 +1928,8 @@ Object.assign(window, {
     validateAndSyncAllDicedPrompts,
     searchSourcePromptsForRemix,
     executeConstraintTransplant,
+    rejectCurrentRemixAndReroll,
+    markCurrentRemixAsKeeper,
     undoLastRemixMutation,
     clearRemixCanvas,
     executeRemixPreviewEvaluation,
@@ -1637,6 +1950,10 @@ Object.assign(window, {
     inspectPromptMasterRecord,
     submitReviewEvent,
     submitSlotCorrectionEvent,
-    submitMissingEdgeEvent
+    submitMissingEdgeEvent,
+    searchCatalogPrompts,
+    clearCatalogSearch,
+    changeCatalogPageSize,
+    goToCatalogPage
 });
 

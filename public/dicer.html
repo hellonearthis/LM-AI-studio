@@ -39,28 +39,28 @@
 
                 <!-- Stats Bar -->
                 <div class="dicer-stats-bar">
-                    <div class="stat-pill">
+                    <div class="stat-pill" title="Total prompts deconstructed into Pass A–D Master Records in the catalog">
                         <span class="stat-pill-icon">📜</span>
                         <div>
                             <div class="stat-pill-label">Diced Prompts</div>
                             <div class="stat-pill-value" id="statsPromptsCount">0</div>
                         </div>
                     </div>
-                    <div class="stat-pill">
+                    <div class="stat-pill" title="Total atomic physical anchors and slot modifiers extracted across all prompts">
                         <span class="stat-pill-icon">🧪</span>
                         <div>
                             <div class="stat-pill-label">Cataloged Ingredients</div>
                             <div class="stat-pill-value" id="statsIngredientsCount">0</div>
                         </div>
                     </div>
-                    <div class="stat-pill">
+                    <div class="stat-pill" title="Average ratio of observable physical details vs. abstract vibe/hype words (higher = more concrete)">
                         <span class="stat-pill-icon">⚡</span>
                         <div>
                             <div class="stat-pill-label">Avg Concreteness</div>
                             <div class="stat-pill-value" id="statsPhysicalityRatio">0.00</div>
                         </div>
                     </div>
-                    <div class="stat-pill">
+                    <div class="stat-pill" title="Directed Pass D physical cause-and-effect links (e.g. rain -> wet surface, tungsten -> warm cast)">
                         <span class="stat-pill-icon">🔗</span>
                         <div>
                             <div class="stat-pill-label">Influence Edges</div>
@@ -72,16 +72,16 @@
                 <!-- Tabs Container -->
                 <div class="dicer-tabs-container" style="justify-content: space-between; align-items: center; flex-wrap: wrap;">
                     <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                        <button class="dicer-tab-btn active" id="tabBtnRemix" onclick="switchDicerTab('remix')">
+                        <button class="dicer-tab-btn active" id="tabBtnRemix" onclick="switchDicerTab('remix')" title="Mix and swap sliced physical ingredients across prompts, detect continuity clashes, and assemble new prompts">
                             <span>🎨</span> Recombine & Remix
                         </button>
-                        <button class="dicer-tab-btn" id="tabBtnProcess" onclick="switchDicerTab('process')">
+                        <button class="dicer-tab-btn" id="tabBtnProcess" onclick="switchDicerTab('process')" title="Run the Pass A–D deconstruction pipeline on custom prompts or batch-dice unprocessed library images">
                             <span>⚡</span> Process & Batch Dice
                         </button>
-                        <button class="dicer-tab-btn" id="tabBtnCatalog" onclick="switchDicerTab('catalog')">
+                        <button class="dicer-tab-btn" id="tabBtnCatalog" onclick="switchDicerTab('catalog')" title="Browse all diced prompts, inspect Pass A–D Master Records, and export training datasets">
                             <span>🗃️</span> Catalog & Inspector
                         </button>
-                        <button class="dicer-tab-btn" id="tabBtnReview" onclick="switchDicerTab('review')">
+                        <button class="dicer-tab-btn" id="tabBtnReview" onclick="switchDicerTab('review')" title="Verify borderline captions, ingredients, and Pass D influence edges to calibrate Ovis and Laya models">
                             <span>🎯</span> Review & Calibrate
                         </button>
                     </div>
@@ -111,7 +111,7 @@
                     </p>
                     <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
                         <input type="text" id="remixPromptSearchInput" placeholder="Search prompts by keyword, filename, or prm_ID..." style="flex: 1; min-width: 240px; background: rgba(11, 11, 26, 0.8); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); padding: 0.55rem 0.75rem;">
-                        <button class="dicer-secondary-btn" style="padding: 0.55rem 0.9rem; font-size: 0.82rem;" onclick="searchSourcePromptsForRemix()">🔍 Search</button>
+                        <button class="dicer-secondary-btn" style="padding: 0.55rem 0.9rem; font-size: 0.82rem;" onclick="searchSourcePromptsForRemix()" title="Search cataloged prompts by keyword, filename, or prm_ID to pull their ingredients">🔍 Search</button>
                     </div>
                     <div id="remixPromptSearchResults" class="remix-prompt-search-results"></div>
                 </div>
@@ -124,8 +124,8 @@
                         <div id="clashAlertPanel" class="clash-alert-panel" style="display: none;">
                             <span class="clash-alert-icon">⚠️</span>
                             <div class="clash-alert-content">
-                                <h4>Physical Continuity Clash Detected</h4>
-                                <p id="clashAlertMessage">Opposing physical states detected between selected ingredients.</p>
+                                <h4>Continuity Note</h4>
+                                <p id="clashAlertMessage">Potentially contrasting physical states detected between selected ingredients.</p>
                             </div>
                         </div>
 
@@ -143,9 +143,24 @@
                                             <option value="4">4 slots</option>
                                         </select>
                                     </label>
+                                    <label style="font-size: 0.78rem; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 0.3rem;" title="Assemble output as comma-separated clauses, in-place edited natural sentence, or a Mondocraft Dream operator">
+                                        Style:
+                                        <select id="remixStyleModeSelect" class="transplant-count-select" onchange="executeRemixPreviewEvaluation()">
+                                            <option value="clauses" selected>Clauses (Default)</option>
+                                            <option value="sentence">Natural Sentence</option>
+                                            <option value="metamorph">Dream: Metamorph</option>
+                                            <option value="chimera">Dream: Chimera</option>
+                                            <option value="fractal">Dream: Fractal</option>
+                                            <option value="portal">Dream: Portal</option>
+                                            <option value="crossover">Dream: Crossover</option>
+                                            <option value="kaleidoscope">Dream: Kaleidoscope</option>
+                                        </select>
+                                    </label>
                                     <button id="btnTransplantSlots" class="dicer-primary-btn" style="padding: 0.35rem 0.75rem; font-size: 0.8rem;" onclick="executeConstraintTransplant()" title="Run beam-search constraint transplant across unlocked slots + Influence Closure">🎲 Transplant</button>
+                                    <button id="btnRejectReroll" class="dicer-secondary-btn" style="padding: 0.35rem 0.65rem; font-size: 0.8rem;" onclick="rejectCurrentRemixAndReroll()" title="Permanently exclude this draft and swapped pieces, then re-roll">👎 Reject &amp; Re-roll</button>
+                                    <button id="btnMarkKeeper" class="dicer-secondary-btn" style="padding: 0.35rem 0.65rem; font-size: 0.8rem;" onclick="markCurrentRemixAsKeeper()" title="Boost source prompts of this remix by 3x selection weight for future rolls">⭐ Keeper (3×)</button>
                                     <button id="btnUndoTransplant" class="dicer-secondary-btn" style="padding: 0.35rem 0.65rem; font-size: 0.8rem;" onclick="undoLastRemixMutation()" disabled title="Revert last swap or edit">↩️ Undo</button>
-                                    <button class="dicer-secondary-btn" style="padding: 0.35rem 0.75rem; font-size: 0.8rem;" onclick="clearRemixCanvas()">Clear All</button>
+                                    <button class="dicer-secondary-btn" style="padding: 0.35rem 0.75rem; font-size: 0.8rem;" onclick="clearRemixCanvas()" title="Remove all active ingredients and consequences from the Remix Canvas">Clear All</button>
                                 </div>
                             </div>
                             <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
@@ -166,16 +181,16 @@
                                     <span style="font-size: 0.8rem; color: var(--text-secondary);" id="remixWordCount">0 words</span>
                                 </div>
                             </div>
-                            <label style="display: inline-flex; align-items: center; gap: 0.45rem; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem; cursor: pointer;">
+                            <label style="display: inline-flex; align-items: center; gap: 0.45rem; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem; cursor: pointer;" title="Swap non-visual hype terms (e.g. 'cinematic') for concrete camera and lighting specifications">
                                 <input type="checkbox" id="toggleObservableReplacements" checked onchange="executeRemixPreviewEvaluation()">
                                 Replace abstract vibe words (e.g. "cinematic") with observable camera/lighting details
                             </label>
                             <textarea id="remixedPromptOutput" class="prompt-output-textarea" placeholder="Pull sliced ingredients from a diced prompt above or the Ingredient Library on the right to recombine them into a new prompt..."></textarea>
                             <div class="prompt-output-actions">
-                                <button class="dicer-secondary-btn" onclick="executeRemixPreviewEvaluation()">🔄 Re-assemble</button>
+                                <button class="dicer-secondary-btn" onclick="executeRemixPreviewEvaluation()" title="Re-run clash detection, Influence Closure, and rebuild the recombined prompt text">🔄 Re-assemble</button>
                                 <button id="btnDeepRoundTrip" class="dicer-secondary-btn" onclick="executeDeepLlmRoundTripCheck()" title="Re-dice output through llama-server (with heuristic fallback) to check full semantic drift">🔎 Deep Round-Trip</button>
-                                <button class="dicer-secondary-btn" onclick="copyRemixedPrompt()">📋 Copy Prompt</button>
-                                <button class="dicer-primary-btn" onclick="saveAsNewPrompt()">💾 Save as Diced Prompt</button>
+                                <button class="dicer-secondary-btn" onclick="copyRemixedPrompt()" title="Copy the assembled prompt text to your clipboard">📋 Copy Prompt</button>
+                                <button class="dicer-primary-btn" onclick="saveAsNewPrompt()" title="Save this remixed prompt and its ingredient structure as a new catalog entry">💾 Save as Diced Prompt</button>
                             </div>
                         </div>
                     </div>
@@ -187,7 +202,7 @@
                                 <span>Ingredient Library</span>
                             </div>
                             <label style="font-size: 0.8rem; color: var(--text-secondary); display: block; margin-bottom: 0.4rem;">Select Slot to Browse:</label>
-                            <select id="slotSelectorDropdown" class="slot-filter-select" onchange="filterSlotLibrary()">
+                            <select id="slotSelectorDropdown" class="slot-filter-select" onchange="filterSlotLibrary()" title="Filter the Ingredient Library by controlled semantic slot">
                                 <option value="all">All Controlled Slots (14)</option>
                                 <option value="lighting">💡 Lighting (Angles, Kelvin, Ratios)</option>
                                 <option value="lens">🔍 Lens (Focal Length, Aperture)</option>
@@ -249,7 +264,7 @@
                                     <input type="radio" name="customMediaType" value="video"> Video Prompt (Tracks Speech State)
                                 </label>
                             </div>
-                            <button id="btnDiceCustomPrompt" class="dicer-primary-btn" onclick="executeCustomPromptDicing()">
+                            <button id="btnDiceCustomPrompt" class="dicer-primary-btn" onclick="executeCustomPromptDicing()" title="Deconstruct the pasted text through Pass A (subjects), B (physical vs vibe), C (slots), and D (influences)">
                                 <span>🧩</span> Dice This Prompt
                             </button>
                         </div>
@@ -264,7 +279,7 @@
                     <div class="workbench-card">
                         <div class="workbench-card-title">
                             <span>Library Candidate Prompts (From images.db)</span>
-                            <button id="btnBatchDiceAll" class="dicer-primary-btn" onclick="batchDiceAllCandidates()">
+                            <button id="btnBatchDiceAll" class="dicer-primary-btn" onclick="batchDiceAllCandidates()" title="Run the Pass A–D dicing pipeline on all unprocessed candidate prompts found in images.db">
                                 <span>🚀</span> Batch Dice All Candidates (<span id="candidateCountBadge">0</span>)
                             </button>
                         </div>
@@ -298,14 +313,33 @@
                     <div class="workbench-card-title">
                         <span>Analyzed Prompts & Concreteness Leaderboard</span>
                         <div style="display: flex; gap: 0.75rem;">
-                            <a href="/api/dicer/export-training-data" class="dicer-secondary-btn" style="text-decoration: none; padding: 0.5rem 1rem; font-size: 0.85rem;">
+                            <a href="/api/dicer/export-training-data" class="dicer-secondary-btn" style="text-decoration: none; padding: 0.5rem 1rem; font-size: 0.85rem;" title="Download all cataloged Master Records in JSONL format for fine-tuning">
                                 <span>📥</span> Export Training Dataset (JSONL)
                             </a>
                         </div>
                     </div>
-                    <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1.5rem;">
+                    <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
                         Inspect master records, review subject bindings, and verify physical influence consequences. High concreteness scores indicate observable instructions that diffusion models render faithfully.
                     </p>
+
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem;">
+                        <input type="text" id="catalogSearchInput" placeholder="Search catalog by keyword, filename, or prm_ID..." style="flex: 1; min-width: 240px; background: rgba(11, 11, 26, 0.8); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); padding: 0.55rem 0.75rem;" title="Filter all 11,430+ diced prompts by prompt text, image filename, or prm_ID">
+                        <button class="dicer-secondary-btn" style="padding: 0.55rem 0.9rem; font-size: 0.82rem;" onclick="searchCatalogPrompts()" title="Run search across all cataloged prompts">🔍 Search</button>
+                        <button class="dicer-secondary-btn" style="padding: 0.55rem 0.75rem; font-size: 0.82rem;" onclick="clearCatalogSearch()" title="Clear search filter and return to page 1">Clear</button>
+                        <select id="catalogPageSizeSelect" class="transplant-count-select" onchange="changeCatalogPageSize()" title="Number of prompts shown per page">
+                            <option value="50" selected>50 / page</option>
+                            <option value="100">100 / page</option>
+                            <option value="200">200 / page</option>
+                        </select>
+                    </div>
+
+                    <div id="catalogPaginationBar" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.85rem; font-size: 0.82rem; color: var(--text-secondary);">
+                        <span id="catalogRangeStatus">Loading catalog...</span>
+                        <div style="display: flex; gap: 0.45rem;">
+                            <button id="btnCatalogPrevPage" class="dicer-secondary-btn" style="padding: 0.35rem 0.75rem; font-size: 0.8rem;" onclick="goToCatalogPage(-1)" disabled title="Previous page">← Prev</button>
+                            <button id="btnCatalogNextPage" class="dicer-secondary-btn" style="padding: 0.35rem 0.75rem; font-size: 0.8rem;" onclick="goToCatalogPage(1)" disabled title="Next page">Next →</button>
+                        </div>
+                    </div>
 
                     <div id="dicedPromptsTableContainer">
                         <div style="text-align: center; padding: 3rem; color: var(--text-secondary);">Loading diced catalog entries...</div>
@@ -322,7 +356,7 @@
                     <div class="workbench-card-title" style="flex-wrap: wrap; gap: 0.75rem;">
                         <span>🎯 Single-Question Review Queue</span>
                         <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
-                            <select id="reviewCardTypeFilter" class="transplant-count-select" onchange="loadReviewQueue(true)">
+                            <select id="reviewCardTypeFilter" class="transplant-count-select" onchange="loadReviewQueue(true)" title="Filter the review queue by verification task type">
                                 <option value="all">Mixed Stratified Queue (All 5 Types)</option>
                                 <option value="grounding_caption">Grounding (Caption)</option>
                                 <option value="grounding_ingredient">Grounding (Ingredient)</option>
@@ -330,7 +364,7 @@
                                 <option value="slot_check">Slot Check</option>
                                 <option value="missing_edge">Missing Edge Recall Probe</option>
                             </select>
-                            <select id="reviewOrderingSelect" class="transplant-count-select" onchange="loadReviewQueue(true)">
+                            <select id="reviewOrderingSelect" class="transplant-count-select" onchange="loadReviewQueue(true)" title="Choose between balanced stratified sampling or prioritizing ~50% uncertain items">
                                 <option value="stratified">Stratified Random (First Pass)</option>
                                 <option value="uncertainty">Uncertainty First (Post-Tune ~50%)</option>
                             </select>
@@ -338,7 +372,7 @@
                                 <input type="checkbox" id="toggleEnrichOvisQueue" onchange="loadReviewQueue(true)">
                                 Enrich Ovis Scores
                             </label>
-                            <button class="dicer-secondary-btn" style="padding: 0.35rem 0.75rem; font-size: 0.8rem;" onclick="loadReviewQueue(true)">🔄 Reload Queue</button>
+                            <button class="dicer-secondary-btn" style="padding: 0.35rem 0.75rem; font-size: 0.8rem;" onclick="loadReviewQueue(true)" title="Fetch a fresh batch of review cards from the database">🔄 Reload Queue</button>
                             <a href="/api/dicer/export-training-data?reviewed_only=true&split=train" class="dicer-secondary-btn" style="text-decoration: none; padding: 0.35rem 0.75rem; font-size: 0.8rem;" title="Export only reviewed training items">📥 Reviewed Train</a>
                             <a href="/api/dicer/export-training-data?reviewed_only=true&split=holdout" class="dicer-secondary-btn" style="text-decoration: none; padding: 0.35rem 0.75rem; font-size: 0.8rem;" title="Export only reviewed holdout evaluation items">📥 Reviewed Holdout</a>
                         </div>
@@ -356,7 +390,7 @@
                 <div class="workbench-card" id="calibrationDashboardContainer">
                     <div class="workbench-card-title">
                         <span>📊 Grounding Cutoffs, Laya Calibration & Pass D Edge Recall</span>
-                        <button class="dicer-secondary-btn" style="padding: 0.35rem 0.75rem; font-size: 0.8rem;" onclick="fetchAndRenderCalibrationDashboard()">↻ Refresh Charts</button>
+                        <button class="dicer-secondary-btn" style="padding: 0.35rem 0.75rem; font-size: 0.8rem;" onclick="fetchAndRenderCalibrationDashboard()" title="Recompute grounding histograms, Laya calibration bands, and Pass D edge recall metrics">↻ Refresh Charts</button>
                     </div>
                     <div id="calibrationChartsContent" style="color: var(--text-secondary); font-size: 0.85rem;">Loading analytics...</div>
                 </div>
@@ -377,7 +411,7 @@
         </div>
     </div>
 
-    <script type="module" src="dicer.js?v=3"></script>
+    <script type="module" src="dicer.js?v=8"></script>
 </body>
 
 </html>

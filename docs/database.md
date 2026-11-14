@@ -4,14 +4,14 @@ The Database page serves as the central hub for managing your collection of anal
 
 ## Key Features
 
-- **Image Grid**: Displays all analyzed images with thumbnails.
+- **Image Grid (Tri-Face Prism Cards)**: Displays all analyzed images with thumbnails and interactive multi-face cards (including AI summary, tags/objects, and **Side 3** diced prompt ingredients & Ovis visual grounding status when synced with Prompt Dicer).
 - **Batch Actions**:
   - **Select Missing**: Dynamically identifies and selects images that lack AI analysis data.
   - **Analyze Selected**: Batch processes all selected items using the current sidebar Configuration.
   - **Prompt Override**: Choose a specific analysis strategy (e.g., "Detailed") to apply to the selection.
 
 - **Management Tools**:
-  - **Integrity Check**: Scans the database for consistency and valid file paths.
+  - **Integrity Check (Database Validation)**: Scans the database for valid file paths, removes stale DB records/thumbnails when source files are missing on disk (when *Remove Missing* is enabled), and regenerates missing or corrupted AVIF thumbnails.
   - **Context Menu**: Right-click on any image to:
     - *Regenerate Thumbnail*: Re-create the thumbnail image.
     - *Edit Tag/Object*: Modify associated metadata.

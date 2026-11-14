@@ -10,6 +10,7 @@ The Data Map (Scope) page provides a visual representation of your image library
   - **Reset View**: Return to the default perspective.
 - **Data Sync**:
   - **Sync Data**: Updates the visualization with the latest data from your database.
+- **EVoC Visual Clusters**: Groups visually/semantically related images into clusters; these cluster assignments also power **🎯 Visual Cluster Match** in the [Prompt Dicer](./dicer.md) Ingredient Library.
 - **Hover Previews**: Hovering over points on the map reveals a thumbnail and details of the corresponding image.
 
 ## Usage
